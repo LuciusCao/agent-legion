@@ -4,10 +4,12 @@
 The Worker image tags use ``check_versions.normalize()`` so PEP 440 and tag-style
 prereleases compare equally; an ``-rN`` image rebuild suffix is also accepted.
 Velites tags instead match its Cargo manifest exactly because the release workflow
-uses that literal version in the tag name. Discovery and validation are separate:
-every actual assignment or field is counted, including empty or differently quoted
-forms, then the complete value must match its contract (standalone interpolation
-versus fixed Compose scalar). Installer text is normalized only by POSIX
+uses that literal version in the tag name. Discovery and validation are separate.
+Installer discovery counts every same-named assignment-like occurrence, even in
+comments or prose; this deliberate false-positive boundary avoids an incomplete
+shell lexer. Exactly one canonical logical-line declaration must independently
+match. Compose fields are counted and their complete values must match the
+standalone interpolation or fixed-scalar contract. Installer text is normalized only by POSIX
 backslash-newline removal first; a unique continued assignment is accepted when
 its normalized shape is valid. Compose tags must fullmatch the Docker-compatible
 character set before version normalization, so PEP 440 local suffixes are not
@@ -36,7 +38,6 @@ WORKER_IMAGE = "ghcr.io/luciuscao/agent-legion-worker"
 _TAG = r"[0-9A-Za-z._-]+"
 _IMAGE_REFIX = re.compile(rf"^(?P<core>{_TAG})-r\d+$")
 _VALUE_TAIL = r"(?:[ \t]*|[ \t]+#.*)"
-_INSTALLER_VALUE = re.compile(rf'"(?P<version>{_TAG})"[ \t]*')
 _STANDALONE_VALUE = re.compile(
     rf"[ \t]*\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:"
     rf"(?P<version>{_TAG})\}}{_VALUE_TAIL}"
@@ -63,12 +64,8 @@ def _installer_pins() -> tuple[Pin, ...]:
             label=f"install-worker {variable}",
             path=installer,
             component="agent-legion" if variable == "WORKER_VERSION" else "velites",
-            discovery=re.compile(
-                rf"^[ \t]*(?P<prefix>(?:(?:export|readonly)[ \t]+)?){variable}_DEFAULT="
-                r"(?P<value>.*)$",
-                re.M,
-            ),
-            shape=_INSTALLER_VALUE,
+            discovery=re.compile(rf"(?<![0-9A-Za-z_]){variable}_DEFAULT="),
+            shape=re.compile(rf'^[ \t]*{variable}_DEFAULT="(?P<version>{_TAG})"[ \t]*$', re.M),
             where=f"{variable}_DEFAULT 默认值",
             compare="exact" if variable == "VELITES_VERSION" else "image_tag",
             logical_shell=True,
@@ -152,7 +149,10 @@ def pin_errors(root: Path) -> tuple[list[str], list[str]]:
             continue
         match = matches[0]
         shaped = None
-        if not match.group("prefix") and not match.groupdict().get("suffix"):
+        if pin.logical_shell:
+            canonical = list(pin.shape.finditer(text))
+            shaped = canonical[0] if len(canonical) == 1 else None
+        elif not match.group("prefix") and not match.groupdict().get("suffix"):
             shaped = pin.shape.fullmatch(match.group("value"))
         if shaped is None:
             errors.append(

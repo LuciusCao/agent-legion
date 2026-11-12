@@ -1,4 +1,4 @@
-"""Contract tests for pin discovery, POSIX logical lines, scalar/tag validation, and CLI."""
+"""Contract tests for conservative pin discovery, logical lines, scalar/tag checks, and CLI."""
 
 from __future__ import annotations
 
@@ -499,6 +499,82 @@ def test_compose_rejects_docker_incompatible_local_suffix(
     _write_compose_repo(tmp_path, name, document)
     errors, _ = pin_errors(tmp_path)
     assert any(name in error and field in error for error in errors)
+
+
+COMMAND_ASSIGNMENT_FORMS = [
+    ":; {assignment}",
+    "true && {assignment}",
+    "if true; then {assignment}; fi",
+]
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("form", COMMAND_ASSIGNMENT_FORMS)
+@pytest.mark.parametrize("value", ["0.6.0", ""], ids=["stale", "empty"])
+def test_installer_discovers_command_position_duplicates(
+    tmp_path: Path, variable: str, expected: str, form: str, value: str
+) -> None:
+    original = f'{variable}="{expected}"'
+    assignment = f'{variable}="{value}"'
+    injected = form.format(assignment=assignment)
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, f"{original}\n{injected}", 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "找到 2 处" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("form", COMMAND_ASSIGNMENT_FORMS)
+def test_installer_rejects_unique_noncanonical_assignment(
+    tmp_path: Path, variable: str, expected: str, form: str
+) -> None:
+    original = f'{variable}="{expected}"'
+    injected = form.format(assignment=original)
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, injected, 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("variable", "expected"),
+    [("WORKER_VERSION_DEFAULT", "0.8.6"), ("VELITES_VERSION_DEFAULT", "0.5.11")],
+)
+@pytest.mark.parametrize("shell", ["sh", "dash"])
+@pytest.mark.parametrize("form", COMMAND_ASSIGNMENT_FORMS)
+def test_installer_command_position_matches_real_shell_and_gate(
+    tmp_path: Path, variable: str, expected: str, shell: str, form: str
+) -> None:
+    if shutil.which(shell) is None:
+        pytest.skip(f"{shell} is not installed")
+    original = f'{variable}="{expected}"'
+    injected = form.format(assignment=f'{variable}="0.6.0"')
+    source = (ROOT / "scripts/install-worker.sh").read_text(encoding="utf-8")
+    source = source.replace(original, f"{original}\n{injected}", 1)
+    _write_repo(tmp_path)
+    installer = tmp_path / "scripts/install-worker.sh"
+    installer.write_text(source, encoding="utf-8")
+
+    result = subprocess.run([shell, str(installer), "--help"], capture_output=True, text=True)
+    label = "worker 镜像 tag" if variable == "WORKER_VERSION_DEFAULT" else "velites 二进制版本"
+    assert result.returncode == 0, result.stderr
+    assert f"{label}（默认 0.6.0" in result.stdout
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "找到 2 处" in error for error in errors)
+
+
+@pytest.mark.parametrize("variable", ["WORKER_VERSION_DEFAULT", "VELITES_VERSION_DEFAULT"])
+def test_installer_comment_assignment_like_is_fail_closed(tmp_path: Path, variable: str) -> None:
+    expected = "0.8.6" if variable == "WORKER_VERSION_DEFAULT" else "0.5.11"
+    original = f'{variable}="{expected}"'
+    commented = f'{original}\n# {variable}="0.6.0"'
+    _write_repo(tmp_path, installer=INSTALLER.replace(original, commented, 1))
+    errors, _ = pin_errors(tmp_path)
+    assert any(variable in error and "找到 2 处" in error for error in errors)
 
 
 def test_release_pin_gate_is_in_governance_phase() -> None:
