@@ -40,6 +40,33 @@ def test_finish_classifies_failed_run_and_mirrors_job_node(
     assert node["failure_detail"] == "provider_stream"
 
 
+def test_finish_classifies_http_200_provider_auth_error(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _finish_failed_run(
+        repo_a,
+        queries,
+        "fc-provider-auth",
+        ExecutionResult(
+            status="failed",
+            exit_code=1,
+            error_message=(
+                "provider call failed: HTTP 200 error body: code=401: "
+                "Authorization apikey is disabled"
+            ),
+        ),
+    )
+
+    run = queries.list_node_runs(job_id)[-1]
+    assert run["failure_category"] == "technical"
+    assert run["failure_detail"] == "provider_request"
+    node = queries.get_job_node(job_id, "review_keywords")
+    assert node is not None
+    assert node["failure_category"] == "technical"
+    failed = queries.list_failed_node_runs(workspace_id, category="technical")
+    assert [item["job_id"] for item in failed] == [job_id]
+
+
 def test_finish_prefers_declared_classification(
     repo_a: ExecutorLeaseRepository, queries: JobQueries
 ) -> None:

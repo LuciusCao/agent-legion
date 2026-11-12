@@ -3,6 +3,7 @@ from typing import Any
 import pytest
 
 from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_rerun import JobRerunService
 from tests.helpers import publish_builtin_revision
@@ -102,6 +103,41 @@ def test_rerun_self_marks_node_pending_and_downstream_stale(rerun_service, job_d
     assert nodes["write_script"] == "pending"
     assert nodes["review_script"] == "stale"
     assert nodes["publish_content"] == "stale"
+
+
+def test_provider_auth_failure_is_selected_for_manual_technical_rerun(
+    rerun_service, job_db, workspace
+):
+    job = _create_job(job_db, workspace, "Q-provider-auth")
+    node_key = "intake_knowledge_points"
+    claim = rerun_service.lease_repo.try_claim(
+        LeaseClaimRequest(
+            executor_id="code",
+            global_capacity=16,
+            workspace_id=workspace["id"],
+            job_id=job["id"],
+            workflow_key="education_video_problems_generation",
+            node_key=node_key,
+            capability=node_key,
+            local_node_limit=None,
+            lease_ttl_seconds=60,
+            log_path="logs/provider-auth.log",
+        )
+    )
+    assert claim is not None
+    message = (
+        "provider call failed: HTTP 200 error body: code=401: Authorization apikey is disabled"
+    )
+    assert rerun_service.lease_repo.finish(
+        claim.lease_id, ExecutionResult(status="failed", exit_code=1, error_message=message)
+    )
+
+    results = rerun_service.rerun_by_failure_category(workspace["id"], "technical")
+
+    assert [r["job_id"] for r in results] == [job["id"]]
+    assert results[0]["status"] == "succeeded"
+    assert results[0]["rerun_nodes"] == [node_key]
+    assert _node_statuses(job_db, job["id"])[node_key] == "pending"
 
 
 def test_business_auto_reruns_direct_upstream(rerun_service, job_db, workspace):

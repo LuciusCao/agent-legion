@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
+from shared.pi_model_error import is_provider_auth_error
 from worker.state_evidence import dump_prep_evidence, prep_failure_message
 from worker.upload.degraded_archive import (
     failed_metadata,
@@ -133,8 +134,8 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # not ride the compressed events.jsonl to the Host renderer) — through
     # ONE immutable registry snapshot (#844: the retired separate
     # secret_spans / max_secret_chars reads raced register_secrets).
-    # 崩溃/超时（非 0 退出）下 model_error 归因让位给退出码归因——扫描
-    # 结论只在 exit 0 时采纳。
+    # 崩溃/超时（非 0 退出）下 model_error 归因让位给退出码归因；唯一例外是
+    # exit 1 且带明确 Provider 鉴权签名（#1502），保留原文供 Host 分类。
     # #952: the same pass counts per-call output truncations (stopReason=length).
     snapshot = secret_snapshot()
     scanned_model_error, scanned_original, _, scanned_tail = scan_and_compress_pi_events(
@@ -157,9 +158,10 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # a truncated run whose outputs all landed still completes, and model
     # errors / budget exhaustion / contract violations / crashes / timeouts
     # keep their attribution (exclusion rules: OutputTruncation.failure).
-    failure = truncation.failure(task.expected_outputs, outputs, task.exit_code) or (
-        scanned_model_error if task.exit_code == 0 else None
-    )
+    model_error = scanned_model_error if task.exit_code == 0 else None
+    if task.exit_code == 1 and is_provider_auth_error(scanned_model_error):
+        model_error = scanned_model_error
+    failure = truncation.failure(task.expected_outputs, outputs, task.exit_code) or model_error
     result_status, error = exit_verdict(task.exit_code, failure, stderr_tail)
     metadata = {
         "status": result_status,

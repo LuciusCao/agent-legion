@@ -2,7 +2,8 @@
 
 触顶（assistant ``stopReason=length``）只在**最后一次**模型调用触顶且声明产物
 缺失时改写失败原因，不改变任何 run 的成败判定。``_DECISION_TABLE`` 与
-docs/architecture/llm-output-budget-design.md「触顶归因决策表」逐行对应。
+docs/architecture/llm-output-budget-design.md「触顶归因决策表」1–40 行对应；
+第 41 行的 Provider 鉴权例外见 test_worker_upload_provider_auth.py。
 共享桩见 tests/workers/upload_queue_testlib.py。
 """
 

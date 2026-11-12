@@ -64,8 +64,9 @@
    正常结束仍缺产物时，失败是补救轮没写齐产物，调高输出预算也无济于事，不归因
    为触顶。
 
-   **触顶归因决策表**（`tests/workers/test_worker_upload_truncation.py`
-   `_DECISION_TABLE` 逐行参数化）。velites 事件形态：每次模型调用一个 assistant
+   **触顶归因决策表**（1–40 行由 `tests/workers/test_worker_upload_truncation.py`
+   `_DECISION_TABLE` 逐行参数化；第 41 行的 Provider 鉴权例外由
+   `tests/workers/test_worker_upload_provider_auth.py` 覆盖）。velites 事件形态：每次模型调用一个 assistant
    `message_end`；瞬态失败的重试先发 `message_end{stopReason=error, errorMessage}` +
    `auto_retry_start`，成功的重试再发一个 `message_end`；未恢复的模型错误发
    `message_end{error}` 后直接结束，**不发** `outputs_validation`（缺产物时 exit 1）；
@@ -115,7 +116,7 @@
    | 18 | velites / 1 | length → 补救 length | — | 缺文件之外的内容违例 | 缺失 | 原 exit 错误 |
    | 19 | velites / 1 | toolUse → 预算收尾 length | — | `agent_end.reason=budget_exceeded` | 缺失 | 原 exit 错误 |
    | 20 | velites / 1 | stop → 补救 length | — | 内容违例 | 齐全 | 原 exit 错误 |
-   | 21 | velites / 1 | length → 补救 error（未恢复，无 `outputs_validation`） | 有 | — | 缺失 | 原 exit 错误（model_error 只在 exit 0 采纳） |
+   | 21 | velites / 1 | length → 补救 error（未恢复，无 `outputs_validation`） | 有 | — | 缺失 | 原 exit 错误（非鉴权 model_error 只在 exit 0 采纳；鉴权例外见 41） |
    | 22 | pi / 1 | length | — | 无 `outputs_validation` | 缺失 | 原 exit 错误 |
    | 23 | 任一 / 2 | length | — | — | 缺失 | 原 exit 错误（`Agent process exited 2`） |
    | 24 | 任一 / 124 | length | — | — | 缺失 | `Agent process timed out` |
@@ -135,6 +136,7 @@
    | 38 (G12 ✗) | velites / 1 | length → 补救 length | — | `cancelled`，无 `outputs_validation` | 缺失 | 原 exit 错误 |
    | 39 (G13) | pi / 0 | length → toolUse → length | — | — | 缺失 | output_truncated（本次运行累计 2x） |
    | 40 (G14) | pi / 0 | length → error → retry → length | 已恢复 | — | 缺失 | output_truncated（2x） |
+   | 41 | velites / 1 | error（HTTP 401、HTTP 200 错误体 `code=401` 或 API key disabled / invalid / revoked） | 有 | — | 缺失 | model_error（#1502；其他非鉴权错误仍归原 exit 错误） |
 
    文案中的 `Nx` 是本次运行累计触顶次数，归因前提是最后一次调用触顶：
    `(stopReason=length on the last model call; Nx in this run)`。
