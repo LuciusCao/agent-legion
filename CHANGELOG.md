@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Fixed
+
+- Provider 鉴权失败导致 velites 因声明产物缺失返回 exit 1 时，Worker 结果准备不再丢弃结构化事件中的真实错误并上报裸 `Agent process exited 1`（issue #1502）：对 HTTP 401、HTTP 200 错误体内的 `code=401`，以及 API key disabled / invalid / revoked 等明确签名保留 Provider 原始错误，Host 既有分类随之记录为 `technical/provider_request`，可通过现有技术错误筛选与 `rerun-by-failure` 在修复凭据后手动重跑；普通非鉴权模型错误与其他非零退出仍保持原归因，不新增自动重试。
+
 ## [0.8.6] - 2026-11-11
 
 主打 Agent 批量结果完成与心跳的 lease 死锁修复、Worker 压缩事件与应急证据的嵌套 JSON key 脱敏，并完成 Host、Worker、velites 与治理面的预算回落；三条产品线均有实际源码差异，配套发布 Host/main v0.8.6、worker-v0.8.6 与 velites-v0.5.11。

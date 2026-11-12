@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,29 @@ logger = logging.getLogger(__name__)
 
 # 无 errorMessage 时代表模型调用已成功返回的停止原因：清除此前的瞬态错误。
 _RECOVERED_STOP_REASONS = ("stop", "toolUse", "length")
+_PROVIDER_AUTH_STATUS_RE = re.compile(r"\b(?:HTTP\s+401|code\s*=\s*401)\b", re.IGNORECASE)
+_PROVIDER_API_KEY_AUTH_RE = re.compile(
+    r"\b(?:(?:disabled|invalid|revoked)\s+api[ _-]?key"
+    r"|api[ _-]?key\s+(?:(?:is|was|has\s+been|had\s+been)\s+)?"
+    r"(?:disabled|invalid|revoked))\b",
+    re.IGNORECASE,
+)
+
+
+def is_provider_auth_error(message: str | None) -> bool:
+    """Recognize explicit HTTP and adjacent API-key auth signatures."""
+    if not message or not message.startswith("provider call failed"):
+        return False
+    return bool(
+        _PROVIDER_AUTH_STATUS_RE.search(message) or _PROVIDER_API_KEY_AUTH_RE.search(message)
+    )
+
+
+def model_error_for_exit(exit_code: int, message: str | None) -> str | None:
+    """Use exit-0 model errors and explicit Provider auth errors on exit 1."""
+    if exit_code == 0 or (exit_code == 1 and is_provider_auth_error(message)):
+        return message
+    return None
 
 
 def fold_model_error(event: dict[str, Any], last_error: str | None) -> str | None:
