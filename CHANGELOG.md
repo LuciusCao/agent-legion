@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Fixed
 
 - Provider 鉴权失败导致 velites 因声明产物缺失返回 exit 1 时，Worker 结果准备不再丢弃结构化事件中的真实错误并上报裸 `Agent process exited 1`（issue #1502）：对 HTTP 401、HTTP 200 错误体内的 `code=401`，以及 API key disabled / invalid / revoked 等明确签名保留 Provider 原始错误，Host 既有分类随之记录为 `technical/provider_request`，可通过现有技术错误筛选与 `rerun-by-failure` 在修复凭据后手动重跑；普通非鉴权模型错误与其他非零退出仍保持原归因，不新增自动重试。
-- 发布钉点漂移与 standalone 默认镜像过旧（issues #504/#1112）：新增离线 fail-closed 的 `scripts/check_release_pins.py` 并接入 backend 静态轮与 governance 兜底，强制 `install-worker.sh` 默认 Worker/velites 版本及两份 Compose 的 `image` 与 `AGENT_WORKER_IMAGE_VERSION` 跟随 `pyproject.toml` 和 `velites/Cargo.toml`；安装器 usage 从同一默认值派生，保留显式版本覆盖、Compose 插值和 Worker 镜像 `-rN` 重发兼容，当前四处 Compose 钉点同步至 0.8.6，standalone 不再回落到低于最低受支持版本的 0.6.0。
+- 发布钉点漂移与 standalone 默认镜像过旧（issues #504/#1112）：新增离线、幂等、fail-closed 的 `scripts/check_release_pins.py` 并接入 backend 静态轮与 governance 兜底，以隔离、超时的真实只读 `--help` 行为校验安装器默认版本，以 PyYAML 节点树校验 Compose 结构与重复键，强制 `install-worker.sh` 默认 Worker/velites 版本及两份 Compose 的 `image` 与 `AGENT_WORKER_IMAGE_VERSION` 跟随 `pyproject.toml` 和 `velites/Cargo.toml`；安装器 usage 从同一默认值派生，保留显式版本覆盖、Compose 插值和 Worker 镜像 `-rN` 重发兼容，当前四处 Compose 钉点同步至 0.8.6，standalone 不再回落到低于最低受支持版本的 0.6.0。
 
 ## [0.8.6] - 2026-11-11
 

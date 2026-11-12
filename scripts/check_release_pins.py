@@ -1,203 +1,178 @@
 #!/usr/bin/env python3
-"""Keep Worker installer and Compose defaults aligned with release manifests.
+"""Validate Worker release pins with installer behavior and structured YAML.
 
-The Worker image tags use ``check_versions.normalize()`` so PEP 440 and tag-style
-prereleases compare equally; an ``-rN`` image rebuild suffix is also accepted.
-Velites tags instead match its Cargo manifest exactly because the release workflow
-uses that literal version in the tag name. Installer uses an exact-name occurrence
-census plus a three-purpose allowlist: one canonical declaration, one effective
-derivation, and one usage printf must each appear exactly once and explain all
-three occurrences. Quoted, escaped, commented, prose, or eval-text references and
-changed allowed lines fail closed; new legitimate references require updating this
-contract. Compose fields are counted and their complete values must match the
-standalone interpolation or fixed-scalar contract. Installer text is normalized only by POSIX
-backslash-newline removal first; a unique continued assignment is accepted when
-its normalized shape is valid. Compose tags must fullmatch the Docker-compatible
-character set before version normalization, so PEP 440 local suffixes are not
-accepted as Docker tags. Missing, duplicate, or malformed pins are errors.
+Installer defaults are checked by running the supported, side-effect-free
+``sh install-worker.sh --help`` path in an isolated HOME/install directory with
+version overrides removed and a timeout. This validates real defaults instead of
+emulating shell quoting. Canonical declaration, effective derivation, and usage
+printf remain exact single-point contracts. The behavior check does not attempt
+to defend against malicious conditional branches or arbitrary dynamic code.
 
-This check is deliberately offline and read-only. Release-tag existence remains
-an installer/runtime concern, with explicit version overrides as the escape hatch.
+Compose files are parsed with ``yaml.compose(..., Loader=yaml.SafeLoader)``.
+Mapping paths, duplicate fields, scalar tags/styles, and complete image values
+are validated structurally; no objects are constructed and ``!reset`` needs no
+custom constructor. Worker image tags use ``check_versions.normalize()`` after
+Docker-compatible lexical validation, including prerelease and ``-rN`` handling.
+Velites versions compare exactly. All checks are offline and idempotent, but the
+installer check does execute the supported read-only help path.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
-import tomllib
-from dataclasses import dataclass
+import tempfile
 from pathlib import Path
+
+import yaml
+from yaml.nodes import MappingNode, Node, ScalarNode
 
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
-from scripts.check_versions import normalize  # noqa: E402
+from scripts.check_versions import manifest_version_from_text, normalize  # noqa: E402
 
 WORKER_IMAGE = "ghcr.io/luciuscao/agent-legion-worker"
 _TAG = r"[0-9A-Za-z._-]+"
 _IMAGE_REFIX = re.compile(rf"^(?P<core>{_TAG})-r\d+$")
-_VALUE_TAIL = r"(?:[ \t]*|[ \t]+#.*)"
-_STANDALONE_VALUE = re.compile(
-    rf"[ \t]*\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:"
-    rf"(?P<version>{_TAG})\}}{_VALUE_TAIL}"
+INSTALLERS = (
+    (
+        "WORKER_VERSION_DEFAULT",
+        "printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\\n' \"$WORKER_VERSION_DEFAULT\"",
+    ),
+    (
+        "VELITES_VERSION_DEFAULT",
+        "printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' \"$VELITES_VERSION_DEFAULT\"",
+    ),
 )
-_FIXED_VALUE = re.compile(rf"[ \t]*{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG}){_VALUE_TAIL}")
-
-
-@dataclass(frozen=True)
-class Pin:
-    label: str
-    path: Path
-    component: str
-    discovery: re.Pattern[str]
-    shape: re.Pattern[str]
-    where: str
-    compare: str = "image_tag"
-    purposes: tuple[str, ...] = ()
-
-
-def _installer_pins() -> tuple[Pin, ...]:
-    installer = Path("scripts/install-worker.sh")
-    return tuple(
-        Pin(
-            label=f"install-worker {variable.removesuffix('_DEFAULT')}",
-            path=installer,
-            component="agent-legion" if variable == "WORKER_VERSION_DEFAULT" else "velites",
-            discovery=re.compile(rf"(?<![0-9A-Za-z_]){variable}(?![0-9A-Za-z_])"),
-            shape=re.compile(rf'^[ \t]*{variable}="(?P<version>{_TAG})"[ \t]*$', re.M),
-            where=f"{variable} 默认值",
-            compare="exact" if variable == "VELITES_VERSION_DEFAULT" else "image_tag",
-            purposes=(
-                'WORKER_VERSION="${AGENT_WORKER_VERSION:-$WORKER_VERSION_DEFAULT}"'
-                if variable == "WORKER_VERSION_DEFAULT"
-                else 'VELITES_VERSION="${VELITES_VERSION:-$VELITES_VERSION_DEFAULT}"',
-                "printf '  --version TAG         worker 镜像 tag（默认 %s；须存在 worker-v<TAG> 发布 tag）\\n' \"$WORKER_VERSION_DEFAULT\""
-                if variable == "WORKER_VERSION_DEFAULT"
-                else "printf '  --velites-version VER velites 二进制版本（默认 %s）\\n' \"$VELITES_VERSION_DEFAULT\"",
-            ),
-        )
-        for variable in ("WORKER_VERSION_DEFAULT", "VELITES_VERSION_DEFAULT")
-    )
-
-
-def _compose_pins() -> tuple[Pin, ...]:
-    return tuple(
-        Pin(
-            label=f"compose.worker.{name}.yaml {field}",
-            path=Path(f"deploy/compose.worker.{name}.yaml"),
-            component="agent-legion",
-            discovery=re.compile(
-                rf"^[ \t]*(?P<prefix>(?:-[ \t]+)?[\"']?){field}(?P<suffix>[\"']?):"
-                r"(?P<value>.*)$",
-                re.M,
-            ),
-            shape=_STANDALONE_VALUE if name == "standalone" else _FIXED_VALUE,
-            where=f"{field}: GHCR 镜像默认 tag",
-        )
-        for name in ("standalone", "pull.example")
-        for field in ("image", "AGENT_WORKER_IMAGE_VERSION")
-    )
-
-
-PINS: tuple[Pin, ...] = _installer_pins() + _compose_pins()
 
 
 def _pin_matches(found: str, want: str, compare: str) -> bool:
     if compare == "exact":
         return found == want
-    core = found
-    if compare == "image_tag":
-        refixed = _IMAGE_REFIX.match(found)
-        if refixed:
-            core = refixed.group("core")
-    return normalize(core) == normalize(want)
-
-
-def _manifest_version(root: Path, rel: Path, section: str) -> str:
-    data = tomllib.loads((root / rel).read_text(encoding="utf-8"))
-    value = data.get(section, {}).get("version")
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{rel} 缺 {section}.version")
-    return value.strip()
+    refixed = _IMAGE_REFIX.match(found)
+    return normalize(refixed.group("core") if refixed else found) == normalize(want)
 
 
 def manifest_versions(root: Path) -> dict[str, str]:
-    return {
-        "agent-legion": _manifest_version(root, Path("pyproject.toml"), "project"),
-        "velites": _manifest_version(root, Path("velites/Cargo.toml"), "package"),
-    }
+    agent = manifest_version_from_text(
+        Path("pyproject.toml"), (root / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    velites = manifest_version_from_text(
+        Path("velites/Cargo.toml"), (root / "velites/Cargo.toml").read_text(encoding="utf-8")
+    )
+    if not agent or not velites:
+        raise ValueError("版本清单缺 project.version 或 package.version")
+    return {"agent-legion": agent, "velites": velites}
+
+
+def installer_errors(root: Path, expected: dict[str, str]) -> list[str]:
+    path = (root / "scripts/install-worker.sh").resolve()
+    errors = []
+    text = path.read_text(encoding="utf-8")
+    lines = [line.strip() for line in text.replace("\\" + "\n", "").splitlines()]
+    with tempfile.TemporaryDirectory(prefix="release-pins-") as temporary:
+        options = {"capture_output": True, "text": True, "timeout": 10, "check": False}
+        try:
+            result = subprocess.run(
+                ["/bin/sh", str(path), "--help"],
+                cwd=temporary,
+                env={"HOME": temporary, "AGENT_WORKER_INSTALL_DIR": f"{temporary}/worker-install"},
+                **options,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return [*errors, f"install-worker --help 执行失败或超时：{exc}"]
+        if result.returncode != 0:
+            errors.append(f"install-worker --help 返回 {result.returncode}")
+        if (Path(temporary) / "worker-install").exists():
+            errors.append("install-worker --help 创建了安装目录（应为无副作用路径）")
+        for variable, usage in INSTALLERS:
+            component = "agent-legion" if variable == "WORKER_VERSION_DEFAULT" else "velites"
+            compare = "exact" if variable == "VELITES_VERSION_DEFAULT" else "image_tag"
+            environment = (
+                "AGENT_WORKER_VERSION" if component == "agent-legion" else "VELITES_VERSION"
+            )
+            effective = f'{variable.removesuffix("_DEFAULT")}="${{{environment}:-${variable}}}"'
+            marker = usage.split("（默认", 1)[0].split("'", 1)[1].strip()
+            declaration = re.compile(rf'{variable}="(?P<version>{_TAG})"')
+            matches = [match for line in lines if (match := declaration.fullmatch(line))]
+            valid = len(matches) == 1 and all(
+                lines.count(purpose) == 1 for purpose in (effective, usage)
+            )
+            found = matches[0].group("version") if valid else ""
+            if not valid or not _pin_matches(found, expected[component], compare):
+                errors.append(f"{variable}: 单点声明/用途或发布版本不符合契约")
+            defaults = re.findall(rf"{re.escape(marker)}.*默认 ([^；）\s]*)", result.stdout)
+            if result.returncode == 0 and (
+                len(defaults) != 1 or not _pin_matches(defaults[0], expected[component], compare)
+            ):
+                errors.append(f"{variable}: --help 实际默认版本不符合发布线")
+    return errors
+
+
+def _field(node: Node | None, key: str, path: str) -> Node:
+    if not isinstance(node, MappingNode):
+        raise ValueError(f"{path} 应为 mapping")
+    entries = [
+        value for name, value in node.value if isinstance(name, ScalarNode) and name.value == key
+    ]
+    if len(entries) != 1:
+        raise ValueError(f"{path}.{key} 出现 {len(entries)} 次（应为 1）")
+    return entries[0]
+
+
+def compose_errors(root: Path, want: str) -> list[str]:
+    errors = []
+    for name in ("standalone", "pull.example"):
+        try:
+            document = yaml.compose(
+                (root / f"deploy/compose.worker.{name}.yaml").read_text(encoding="utf-8"),
+                Loader=yaml.SafeLoader,
+            )
+            worker = _field(_field(document, "services", "root"), "worker", "services")
+            image = _field(worker, "image", "services.worker")
+            environment = _field(worker, "environment", "services.worker")
+            env = _field(environment, "AGENT_WORKER_IMAGE_VERSION", "services.worker.environment")
+            pattern = (
+                rf"\$\{{AGENT_WORKER_IMAGE:-{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG})\}}"
+                if name == "standalone"
+                else rf"{re.escape(WORKER_IMAGE)}:(?P<version>{_TAG})"
+            )
+            for field, node in (("image", image), ("AGENT_WORKER_IMAGE_VERSION", env)):
+                if (
+                    not isinstance(node, ScalarNode)
+                    or node.tag != "tag:yaml.org,2002:str"
+                    or node.style is not None
+                    or not (match := re.fullmatch(pattern, node.value))
+                    or not _pin_matches(match.group("version"), want, "image_tag")
+                ):
+                    errors.append(f"{name}.{field}: 镜像默认值与发布线 {want} 不一致或形态非法")
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            errors.append(f"{name}: YAML 结构读取失败：{exc}")
+    return errors
 
 
 def pin_errors(root: Path) -> tuple[list[str], list[str]]:
-    """Return release-pin errors and successful pin summaries for ``root``."""
-    errors: list[str] = []
-    notes: list[str] = []
     try:
         expected = manifest_versions(root)
+        errors = installer_errors(root, expected)
     except (OSError, ValueError) as exc:
-        return ([f"版本清单读取失败：{exc}（钉点校验无从对齐）"], [])
-
-    for pin in PINS:
-        want = expected[pin.component]
-        try:
-            text = (root / pin.path).read_text(encoding="utf-8")
-        except OSError as exc:
-            errors.append(f"{pin.label}: 读取 {pin.path} 失败：{exc}")
-            continue
-        text = text.replace("\\" + "\n", "") if pin.purposes else text
-        matches = list(pin.discovery.finditer(text))
-        if len(matches) != (3 if pin.purposes else 1):
-            found = max(0, len(matches) - len(pin.purposes)) if pin.purposes else len(matches)
-            errors.append(
-                f"{pin.label}: 在 {pin.path} 找到 {found} 处 {pin.where} "
-                f"（变量名总出现 {len(matches)} 次，应为 {3 if pin.purposes else 1}）"
-                "——钉点形态即契约，改形态必须同步更新 scripts/check_release_pins.py"
-            )
-            continue
-        shaped = None
-        if pin.purposes:
-            canonical = list(pin.shape.finditer(text))
-            if len(canonical) == 1 and all(
-                sum(line.strip() == purpose for line in text.splitlines()) == 1
-                for purpose in pin.purposes
-            ):
-                shaped = canonical[0]
-        elif not matches[0].group("prefix") and not matches[0].groupdict().get("suffix"):
-            shaped = pin.shape.fullmatch(matches[0].group("value"))
-        if shaped is None:
-            errors.append(
-                f"{pin.label}: {pin.path} 的 {pin.where} 完整赋值/字段形态非法"
-                "（空值、引号、插值括号、后缀或垃圾文本不符合契约）"
-            )
-            continue
-        found = shaped.group("version")
-        if not _pin_matches(found, want, pin.compare):
-            errors.append(
-                f"{pin.label}: {pin.path} 的 {pin.where} 为 {found}，"
-                f"与发布线 {want} 不一致——发布时必须同步 bump"
-                f"（issues #504/#1112；修复：把该钉点改为 {want}）"
-            )
-        else:
-            notes.append(f"{pin.label}: {found} ✓")
-    return errors, notes
+        return [f"版本清单读取失败：{exc}（钉点校验无从对齐）"], []
+    errors.extend(compose_errors(root, expected["agent-legion"]))
+    return errors, []
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", type=Path, default=project_root, help="仓库根目录")
     args = parser.parse_args(argv)
-
-    errors, notes = pin_errors(args.root)
-    for note in notes:
-        print(f"[release-pins] {note}")
-    for error in errors:
-        print(f"[release-pins] 错误: {error}", file=sys.stderr)
+    errors, _ = pin_errors(args.root)
     if errors:
-        print(f"[release-pins] 发布钉点检查失败（{len(errors)} 处）", file=sys.stderr)
-        return 1
-    return 0
+        print("\n".join(f"[release-pins] 错误: {error}" for error in errors), file=sys.stderr)
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":

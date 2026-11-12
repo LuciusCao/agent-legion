@@ -354,9 +354,11 @@ release-train `HEAD`-only exception.
   invariant registry, spec health, version-manifest consistency via
   `scripts/check_versions.py` — the decoupled versioning discipline for
   velites/frontend, see CONTRIBUTING "House rules" — and offline, fail-closed
-  release-pin consistency via `scripts/check_release_pins.py`, covering the
-  installer defaults plus `image` and `AGENT_WORKER_IMAGE_VERSION` in both the
-  standalone and pull-example Compose files, #504/#1112) plus the
+  release-pin consistency via `scripts/check_release_pins.py`, which executes only
+  the supported side-effect-free installer `--help` path in an isolated,
+  timeout-bounded environment and validates Compose structure with PyYAML node
+  trees (installer defaults plus `image` and `AGENT_WORKER_IMAGE_VERSION` in both
+  the standalone and pull-example Compose files, #504/#1112) plus the
   PostgreSQL-offline unit tier (`GATE_TIER=unit`), uploading its coverage
   data file as a 1-day artifact. Like the other sandbox lanes, it runs on the
   validated `ubuntu-24.04` runner, installs bubblewrap and enables unprivileged
