@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""review-questions 输出校验：exercises_review.json 结构合规且覆盖全部题目。
+"""review-questions 输出校验：声明产物质量与 Agent 过程合规。
 
-用法：python validate_output.py <job_dir>；退出码 0 = 通过。
+Agent 自查显式设置 AGENT_LEGION_VALIDATE_CONTEXT=agent；Host 复验由平台
+注入 host，只检查声明 inputs/outputs。变量缺失保留完整检查的旧行为。
 只依赖标准库。
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -22,11 +24,30 @@ def fail(message: str) -> int:
 
 def _load_json(path: Path, label: str):
     if not path.is_file():
-        raise FileNotFoundError(f"missing required output: {label}")
+        raise FileNotFoundError(f"missing required file: {label}")
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError(f"{label} is not valid JSON: {exc}") from exc
+
+
+def _check_agent_process(job_dir: Path, expected_ids: list[str]) -> int | None:
+    """Check undeclared work evidence only where the Agent can produce it."""
+    if os.environ.get("AGENT_LEGION_VALIDATE_CONTEXT") == "host":
+        return None
+    label = ".work/review-questions.json"
+    try:
+        process = _load_json(job_dir / label, label)
+    except (FileNotFoundError, ValueError) as exc:
+        return fail(str(exc))
+    verified_ids = process.get("answer_verified_ids") if isinstance(process, dict) else None
+    if (
+        not isinstance(verified_ids, list)
+        or not all(isinstance(item, str) for item in verified_ids)
+        or sorted(verified_ids) != expected_ids
+    ):
+        return fail(f"{label}.answer_verified_ids must cover every exercise exactly once")
+    return None
 
 
 def main() -> int:
@@ -67,7 +88,7 @@ def main() -> int:
         return fail(
             f"exercise_reviews ids {reviewed_ids} do not match exercises ids {expected_ids}"
         )
-    return 0
+    return _check_agent_process(job_dir, expected_ids) or 0
 
 
 if __name__ == "__main__":

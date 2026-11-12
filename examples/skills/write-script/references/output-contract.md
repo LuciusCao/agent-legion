@@ -29,9 +29,9 @@
 运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
 harness 内置引擎校验（存在性、文本长度、必备标题）。
 
-`scripts/validate_output.py` 为业务规则层
-（`python validate_output.py <job_dir>`，退出码 0 为通过），检查项与
-契约一致：
+`scripts/validate_output.py` 为业务规则层，检查项与契约一致。Agent 收尾
+自查显式运行 `AGENT_LEGION_VALIDATE_CONTEXT=agent python validate_output.py <job_dir>`；
+Host 复验由平台注入 `host`，两种上下文都执行以下声明产物检查（退出码 0 为通过）：
 
 - `script.md` 存在且为合法 UTF-8 文本；
 - 五个必备小节标题全部出现；

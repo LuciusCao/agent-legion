@@ -19,7 +19,10 @@ description: 评审一组中小学数学练习题的质量（可解性、答案�
 
 1. **可解性**：题干信息是否完备、无歧义？该年级学生用已学方法能否解出？
 2. **答案正确性**：亲自把题完整做一遍，核对 `answer` 与你的结果一致；
-   再核对 `analysis` 的每一步推导没有错误、结论与 `answer` 一致。
+   再核对 `analysis` 的每一步推导没有错误、结论与 `answer` 一致。每完成
+   一题就把它的 id 追加到 `.work/review-questions.json` 的
+   `answer_verified_ids` 数组；全部完成后该数组必须覆盖每题恰好一次。
+   这是过程工作文件，不是声明产物，不要把它当作评审结论提交。
 3. **难度标定**：实际难度与标注的 `difficulty` 是否相称？5 题整体是否
    构成 easy ×2 / medium ×2 / hard ×1 的梯度？
 4. **知识点覆盖**：题目是否围绕核心概念？是否有超纲内容？易错点是否被
@@ -36,4 +39,6 @@ description: 评审一组中小学数学练习题的质量（可解性、答案�
   全部通过时整体 `verdict` 为 `pass`。
 - `summary` 用一句话概括整组题的质量。
 
-只输出 `exercises_review.json`，不要修改 `exercises.json`。
+声明产物只输出 `exercises_review.json`，不要修改 `exercises.json`。完成后运行
+`AGENT_LEGION_VALIDATE_CONTEXT=agent python scripts/validate_output.py <job_dir>`
+自查；过程记录缺失或覆盖不全时必须补做工序，不得改用文件存在性探测绕过。

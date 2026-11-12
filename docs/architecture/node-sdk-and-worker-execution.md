@@ -179,7 +179,27 @@ SDK 版本，SDK 承诺向后兼容（只加不减，破坏性变更走 `NodeCon
 - 连接键按节点白名单收束（secret 下发二期）未实施；当前以 config_schema 声明作事实最小下发。
 - 存量 published 旧式（SDK 之前）节点版本的只读盘点报告与 Studio「迁移到 SDK」能力未实施。
 
-## 8. 测试锚点
+## 8. Agent skill 输出校验上下文（#1345）
+
+业务规则脚本 `scripts/validate_output.py` 有两个调用形态，必须由
+`AGENT_LEGION_VALIDATE_CONTEXT` 显式区分，不得用中间文件是否在场猜测：
+
+| 上下文 | 信号来源 | 文件可见性与检查范围 |
+| --- | --- | --- |
+| Host 复验 | `run_output_validator` 在子进程 env 中强制覆盖为 `host` | 校验视图只含声明 inputs/outputs，另有 skill 自身；声明产物质量检查必须执行，非声明工作文件的过程合规检查可跳过 |
+| Agent 收尾自查 | skill 指令显式以 `agent` 调用同一脚本 | 执行目录包含过程工作文件；声明产物质量与过程合规检查都执行 |
+
+变量缺失保留旧脚本的完整检查语义；只有精确的 `host` 可跳过过程检查，其他值
+（包括拼写错误）按 Agent 完整检查处理。不读取该变量的既有校验脚本无需修改，
+两种调用下行为不变。任何上下文都不得跳过声明 inputs/outputs 的质量检查，也不得
+把「工作文件不存在」当成 Host 信号，否则 Agent 未执行工序时会逃闸。契约引擎只检查
+声明产物，不执行该 Python 脚本，因此不需要此环境信号。
+
+仓库内 `examples/skills/review-questions/` 是参考实现：`.work/review-questions.json`
+记录逐题答案核验，Agent 上下文要求它完整覆盖题目，Host 上下文仍核对声明的
+`exercises.json` 与 `exercises_review.json`，但不要求该中间文件。
+
+## 9. 测试锚点
 
 `tests/workflow_nodes/test_node_sdk.py`（SDK 单测）、沙箱 import 契约测试、
 `tests/executors/test_code_executor.py`、`tests/workflow_nodes/test_node_self_containment.py`

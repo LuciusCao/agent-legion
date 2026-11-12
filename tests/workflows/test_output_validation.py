@@ -18,7 +18,9 @@ tests/services/test_result_validate_pool.py).
 
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -262,6 +264,117 @@ def test_eviction_during_validation_does_not_affect_the_result(tmp_path: Path) -
     thread.join(timeout=30)
     assert not thread.is_alive()
     assert outcome["verdict"] is None
+
+
+# --- #1345: explicit Host/Agent business-rule validation contexts ---
+
+
+def _run_agent_validator(
+    skill_dir: Path, job_dir: Path, *, context: str | None = "agent"
+) -> subprocess.CompletedProcess[str]:
+    env = {} if context is None else {"AGENT_LEGION_VALIDATE_CONTEXT": context}
+    return subprocess.run(
+        [sys.executable, str(skill_dir / "scripts" / "validate_output.py"), str(job_dir)],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        env=env,
+    )
+
+
+def test_host_context_overrides_an_inherited_agent_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    validator = (
+        "import os, sys\n"
+        "context = os.environ.get('AGENT_LEGION_VALIDATE_CONTEXT')\n"
+        "if context != 'host':\n"
+        "    sys.stderr.write(f'wrong context: {context}\\n')\n"
+        "    sys.exit(1)\n"
+    )
+    manager = _manager(tmp_path, validator)
+    monkeypatch.setenv("AGENT_LEGION_VALIDATE_CONTEXT", "agent")
+
+    assert (
+        validate_worker_outputs(
+            manager, {"skill": _KEY, "skill_ref": _REF}, tmp_path / "job", tmp_path / "job"
+        )
+        is None
+    )
+
+
+def test_legacy_validator_without_context_handling_keeps_output_checks(tmp_path: Path) -> None:
+    validator = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "text = (Path(sys.argv[1]) / 'result.txt').read_text()\n"
+        "if text != 'ok':\n"
+        "    sys.stderr.write('bad declared output\\n')\n"
+        "    sys.exit(1)\n"
+    )
+    manager = _manager(tmp_path, validator)
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    output = job_dir / "result.txt"
+    manifest = {"skill": _KEY, "skill_ref": _REF, "expected_outputs": ["result.txt"]}
+    output.write_text("ok")
+
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
+
+    output.write_text("bad")
+    error = validate_worker_outputs(manager, manifest, job_dir, job_dir)
+    assert error is not None
+    assert "bad declared output" in error
+
+
+def test_example_validator_separates_host_artifacts_from_agent_process(tmp_path: Path) -> None:
+    """A file-presence heuristic would skip the required Agent check when no
+    process file was written; explicit contexts close that mutation while Host
+    continues checking declared artifacts without undeclared work files."""
+    skill_dir = Path(__file__).parents[2] / "examples" / "skills" / "review-questions"
+    manager = _manager(tmp_path, (skill_dir / "scripts" / "validate_output.py").read_text())
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    exercise_ids = [f"q{index}" for index in range(1, 6)]
+    (job_dir / "exercises.json").write_text(
+        json.dumps({"exercises": [{"id": item} for item in exercise_ids]})
+    )
+    review = {
+        "verdict": "pass",
+        "summary": "ok",
+        "exercise_reviews": [
+            {"id": item, "verdict": "pass", "issues": []} for item in exercise_ids
+        ],
+    }
+    review_path = job_dir / "exercises_review.json"
+    review_path.write_text(json.dumps(review))
+    manifest = {
+        "skill": _KEY,
+        "skill_ref": _REF,
+        "inputs": ["exercises.json"],
+        "expected_outputs": ["exercises_review.json"],
+    }
+
+    for context in ("agent", "host-typo", None):
+        proc = _run_agent_validator(skill_dir, job_dir, context=context)
+        assert proc.returncode == 1, context
+        assert ".work/review-questions.json" in proc.stderr
+
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
+
+    process_path = job_dir / ".work" / "review-questions.json"
+    process_path.parent.mkdir()
+    process_path.write_text(json.dumps({"answer_verified_ids": exercise_ids}))
+    assert _run_agent_validator(skill_dir, job_dir).returncode == 0
+    # Even when the raw job has process evidence, the Host view carries only
+    # declared artifacts and reaches the same artifact-quality verdict.
+    assert validate_worker_outputs(manager, manifest, job_dir, job_dir) is None
+
+    review["exercise_reviews"][0]["id"] = "wrong"
+    review_path.write_text(json.dumps(review))
+    error = validate_worker_outputs(manager, manifest, job_dir, job_dir)
+    assert error is not None
+    assert "do not match exercises ids" in error
 
 
 # --- #443: contract engine layer (velites-sandbox validate) ---
