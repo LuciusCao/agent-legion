@@ -6,9 +6,9 @@
    awk 精确匹配裸文件名，恒为空 → 默认升级路径中止。本测试把脚本里
    真实的 awk 管道抠出来，对「发布端同款格式」的合成清单执行，
    钉住解析契约。
-2. 默认版本漂移（#529 的同类）：install-worker.sh 的 VELITES_VERSION
-   默认值必须与 velites/Cargo.toml 的 package version 一致——velites
-   落版 bump 是两处手工同步点，漏一边就是「安装默认装旧版」。
+2. 默认版本漂移（#529 的同类）：install-worker.sh 的 VELITES_VERSION_DEFAULT
+   必须与 velites/Cargo.toml 的 package version 一致；effective VELITES_VERSION
+   从该单点默认值派生并保留环境覆盖，发布钉点门禁止落版时漏 bump。
 """
 
 from __future__ import annotations
@@ -70,8 +70,11 @@ def test_sha256_listing_parses_bare_filename_format(tmp_path: Path) -> None:
 
 def test_installer_default_version_matches_velites_crate() -> None:
     script = INSTALLER.read_text()
-    default = re.search(r'VELITES_VERSION="\$\{VELITES_VERSION:-([^}]+)\}"', script)
-    assert default, "install-worker.sh 里找不到 VELITES_VERSION 默认值"
+    default = re.search(r'^VELITES_VERSION_DEFAULT="([^"]+)"$', script, re.M)
+    assert default, "install-worker.sh 里找不到 VELITES_VERSION_DEFAULT 字面默认值"
+    assert 'VELITES_VERSION="${VELITES_VERSION:-$VELITES_VERSION_DEFAULT}"' in script, (
+        "effective VELITES_VERSION 必须保留环境覆盖并从 VELITES_VERSION_DEFAULT 派生"
+    )
     package = re.search(r'(?ms)^\[package\].*?^version = "([^"]+)"', CARGO_TOML.read_text())
     assert package, "velites/Cargo.toml 里找不到 package version"
     assert default.group(1) == package.group(1), (
