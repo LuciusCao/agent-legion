@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app.workflows.builtin import BUILTIN_WORKFLOW_DEFINITIONS
+from server.app.workflows.loader import load_workflow_nodes_with_execution
+from server.app.workflows.schema import WorkflowDefinitionError
 
 
 def check_workflow_raw_definitions(definitions: dict[str, Any]) -> list[str]:
@@ -16,6 +18,7 @@ def check_workflow_raw_definitions(definitions: dict[str, Any]) -> list[str]:
         if not isinstance(raw, dict):
             errors.append(f"{source}: workflow definition must be a mapping")
             continue
+        previous_error_count = len(errors)
         if "concurrency" in raw:
             errors.append(
                 f"{source}: top-level 'concurrency' was removed; "
@@ -39,12 +42,11 @@ def check_workflow_raw_definitions(definitions: dict[str, Any]) -> list[str]:
                     f"{source}: node {node_key}: field 'agent' was removed; "
                     "invocation details belong to Executor capabilities"
                 )
-            # start 节点豁免 capability（入口契约载体，EXEC-WORKFLOW-START-001）。
-            if node.get("type") == "start":
-                continue
-            capability = node.get("capability", "")
-            if not isinstance(capability, str) or not capability:
-                errors.append(f"{source}: node {node_key} must declare a non-empty capability")
+        if len(errors) == previous_error_count:
+            try:
+                load_workflow_nodes_with_execution(raw, nodes)
+            except WorkflowDefinitionError as exc:
+                errors.append(f"{source}: {exc}")
     return errors
 
 

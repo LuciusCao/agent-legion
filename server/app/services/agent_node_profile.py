@@ -128,12 +128,14 @@ def legacy_agent_candidates(
     ``resolve_agent_node_profile``. *index* (``build_capability_index`` of
     the same catalog) replaces the per-call catalog scan.
     """
+    # Empty capability is valid only on a self-contained node. It can never
+    # form a legacy route, even if an invalid catalog row also has ''.
     if index is not None:
-        return index.get(node.capability, ())
+        return index.get(node.capability, ()) if node.capability else ()
     return tuple(
         agent_id
         for agent_id, definition in legacy_catalog.items()
-        if definition.capability == node.capability
+        if node.capability and definition.capability == node.capability
     )
 
 
@@ -169,5 +171,5 @@ def resolve_routed_agent_profile(
     agent_id: str, legacy_catalog: Mapping[str, AgentDefinition]
 ) -> AgentNodeProfile | None:
     """Profile of the Agent a materialized route (``workspace_node_routes``) targets."""
-    definition = legacy_catalog.get(agent_id)
-    return profile_from_definition(agent_id, definition) if definition is not None else None
+    d = legacy_catalog.get(agent_id)
+    return profile_from_definition(agent_id, d) if d and d.capability else None

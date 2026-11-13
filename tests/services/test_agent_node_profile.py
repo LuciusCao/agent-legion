@@ -180,8 +180,14 @@ def test_legacy_empty_capability_never_falls_back_to_node_key_or_current_agent()
     node = _node(capability="")
     catalog = {
         "n1": _definition("generate"),
-        "current": _definition("review"),
+        # Invalid empty catalog rows must not turn the empty node label into
+        # a legacy route, whether resolution scans or uses the shared index.
+        "current": _definition(""),
     }
+    index = build_capability_index(catalog)
 
     assert legacy_agent_candidates(node, catalog) == ()
+    assert legacy_agent_candidates(node, catalog, index=index) == ()
     assert resolve_agent_node_profile(node, catalog) is None
+    assert resolve_agent_node_profile(node, catalog, index=index) is None
+    assert resolve_routed_agent_profile("current", catalog) is None
