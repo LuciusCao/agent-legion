@@ -4,7 +4,6 @@ import {
   render,
   screen,
   waitFor,
-  waitForElementToBeRemoved,
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -186,11 +185,17 @@ describe('WorkflowStudioPage', () => {
   // 关闭 YAML 全屏 Dialog 并等退出过渡结束：过渡期间 modal 仍挂着，
   // 顶栏被 aria-hidden，role 查询会失败。#795 PR②：Agent Dock 也是常驻的
   // role=dialog——断言必须按名定位到「编辑 YAML」，不能用泛 dialog 查询。
+  async function waitForYamlEditorToClose() {
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: '编辑 YAML' })
+      ).not.toBeInTheDocument()
+    )
+  }
+
   async function closeYamlEditor(user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole('button', { name: 'close YAML editor' }))
-    await waitForElementToBeRemoved(() =>
-      screen.queryByRole('dialog', { name: '编辑 YAML' })
-    )
+    await waitForYamlEditorToClose()
   }
 
   it('redirects non-admin users away from the studio (P4)', () => {
@@ -265,6 +270,25 @@ describe('WorkflowStudioPage', () => {
     await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
     expect(
       await screen.findByDisplayValue(/key: demo_video_workflow/)
+    ).toBeInTheDocument()
+  })
+
+  it('handles YAML editor removal before or during the close wait (#1233)', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findByText('题目审题')
+
+    await waitForYamlEditorToClose()
+    expect(
+      screen.getByRole('button', { name: '编辑 YAML' })
+    ).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '编辑 YAML' }))
+    await screen.findByRole('dialog', { name: '编辑 YAML' })
+    await user.click(screen.getByRole('button', { name: 'close YAML editor' }))
+    await waitForYamlEditorToClose()
+    expect(
+      screen.getByRole('button', { name: '编辑 YAML' })
     ).toBeInTheDocument()
   })
 
