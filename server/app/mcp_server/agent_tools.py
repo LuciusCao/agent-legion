@@ -7,11 +7,8 @@ All are loopback tools and stay ``async def`` for the single-event-loop
 reason documented in ``server.py``.
 
 The historical Agent definitions and runtime/model catalogs are read-only
-(STUDIO-AGENT-001). The deprecated ``create_agent_definition`` write tool is
-registered from ``agent_definition_tools`` between the read tools to preserve
-the tool order; it writes nothing and only returns migration guidance (#935).
-None of this group can edit worker-owned provider/model declarations
-(EXEC-RUNTIME-MODELS-001) or the code-defined static tool catalog
+(STUDIO-AGENT-001). None of this group can edit worker-owned provider/model
+declarations (EXEC-RUNTIME-MODELS-001) or the code-defined static tool catalog
 (EXEC-RUNTIME-CATALOG-001), and none publishes (a human does that in Studio).
 """
 
@@ -19,7 +16,6 @@ from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
 
-from server.app.mcp_server.agent_definition_tools import register_create_agent_definition_tool
 from server.app.mcp_server.skill_tool_common import ClientFactory
 
 
@@ -31,8 +27,6 @@ def register_agent_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         fields + version metadata. New profiles go on the workflow node."""
         _, client = await client_factory()
         return await client.call("GET", f"/workspaces/{workspace_id}/agent-definitions")
-
-    register_create_agent_definition_tool(mcp)
 
     @mcp.tool(structured_output=False)
     async def get_runtime_models(workspace_id: str) -> str:

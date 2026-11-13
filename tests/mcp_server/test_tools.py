@@ -145,8 +145,6 @@ def test_loopback_tools_are_async() -> None:
         "get_publish_request_status",
         "save_node_code_draft",
         "get_node_code",
-        "save_agent_definition_draft",
-        "create_agent_definition",
         "get_agent_definitions",
         "get_runtime_models",
         "get_agent_runtimes",
@@ -300,43 +298,14 @@ def test_get_node_code(recorded) -> None:
     assert calls[0]["url"].endswith("/workspaces/ws-1/nodes/n/code")
 
 
-@pytest.mark.parametrize(
-    ("tool", "args"),
-    [
-        (
-            "save_agent_definition_draft",
-            {
-                "workspace_id": "ws-1",
-                "agent_id": "a-1",
-                "capability": "cap",
-                "runtime": "pi",
-                "skill": "s/k",
-                "requires_labels": {"gpu": "a100"},
-            },
-        ),
-        (
-            "create_agent_definition",
-            {
-                "workspace_id": "ws-1",
-                "capability": "review_keywords",
-                "runtime": "velites",
-                "skill": "g/s",
-            },
-        ),
-    ],
-)
-def test_agent_definition_write_tools_are_deprecated_guidance(recorded, tool, args) -> None:
-    """#935 (#440 P3, D3): the Agent definition write tools keep their names
-    (P4 removes them) but write nothing — they steer the agent to the node
-    execution profile saved through save_workflow_draft."""
+def test_agent_definition_write_tools_are_not_registered(recorded) -> None:
     server, calls = recorded
 
-    text = _run_tool(server, tool, args)
-
+    assert {
+        "save_agent_definition_draft",
+        "create_agent_definition",
+    }.isdisjoint(server._tool_manager._tools)
     assert calls == []
-    assert text.startswith("DEPRECATED")
-    assert "save_workflow_draft" in text
-    assert "execution.runtime" in text
 
 
 def test_get_agent_definitions(recorded) -> None:
@@ -593,7 +562,7 @@ def test_static_config_without_session_skips_session_tools() -> None:
     # "unavailable"); the callable-resolver HTTP transport keeps them.
     server = create_mcp_server(_CONFIG)
     tools = server._tool_manager._tools  # pinned mcp==1.30 internals
-    assert len(tools) == 33
+    assert len(tools) == 31
     assert "get_studio_context" not in tools
     assert "get_job_context" not in tools
 
@@ -601,7 +570,7 @@ def test_static_config_without_session_skips_session_tools() -> None:
         McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
     )
     bound_tools = bound._tool_manager._tools
-    assert len(bound_tools) == 35
+    assert len(bound_tools) == 33
 
 
 def test_listing_has_no_output_schema_and_slim_input_schema() -> None:

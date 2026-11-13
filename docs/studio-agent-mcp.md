@@ -1,6 +1,6 @@
 # Studio Agent MCP Server
 
-把平台的 studio-agent 工具面（`/api/studio-agent/tools/*`）以 MCP stdio server 的形式暴露给任意外部 agent（Kimi Code、Claude Code 等）。外部（自助）agent 拿到 33 个工具；Studio 对话内绑定会话时是 35 个（多 `get_studio_context` / `get_job_context` 两个会话绑定工具，无会话绑定时它们不注册，#660）。工具名的权威清单是 `server/app/mcp_server/tool_names.py`（与注册结果由测试钉成全等），下面按组说明语义。
+把平台的 studio-agent 工具面（`/api/studio-agent/tools/*`）以 MCP stdio server 的形式暴露给任意外部 agent（Kimi Code、Claude Code 等）。外部（自助）agent 拿到 31 个工具；Studio 对话内绑定会话时是 33 个（多 `get_studio_context` / `get_job_context` 两个会话绑定工具，无会话绑定时它们不注册，#660）。工具名的权威清单是 `server/app/mcp_server/tool_names.py`（与注册结果由测试钉成全等），下面按组说明语义。
 
 workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校验 / 草稿级**：workflow 发布、回滚、归档与预览面板发布等生效操作永远由人在 Studio 里完成（见下方「权限边界」）。**Skill 写工具例外**（`save_skill_version`、`sync_shared_materials`，以及 `create_skill` 的初始 commit）：它们直接提交到 in-place skill 仓库并推进 HEAD，而节点 `skill.ref` 为空或 `latest` 时每次 dispatch 都现读该仓库 HEAD（`server/app/skills/manager.py` 的 `checkout_skill`），所以这些写入不经 Studio 发布、下一次 dispatch 即对引用该 skill 的 `latest` 节点生效；只有 pin 到具体 tag 的节点不受影响（重锁定仍是 `make skills-lock` 人操作）。workflow 没有注册概念，它就是 workspace 内部的一份 DAG（workspace id 即 workflow key）。
 
@@ -29,7 +29,8 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 - `get_agent_definitions`（只读）：workspace 的历史 Agent 定义清单，每个 Agent 取最新版本，携带全部字段与版本元数据（version / status / definition_hash / created_by / created_at / published_at）；#440 起 Agent 定义不再充当节点执行档案，只读供追溯。
 - `get_runtime_models`（只读）：workspace 在线 Worker 声明聚合出的 `{runtime: {provider: [models]}}` 视图。
 - `get_agent_runtimes`（只读）：每个 runtime（pi / velites）的 agent 工具目录——工具名、三档 tier（default 预选 / opt-in 显式开启 / forced 带激活条件）与参数。
-- `save_agent_definition_draft` / `create_agent_definition`（#633）：#935 起 deprecated——不再写库，只返回引导：agent 节点的执行档案（`execution.runtime`、`tools`、`requires_labels`、`config_schema`、`skill`）写在 workflow 草稿的节点上，经 `save_workflow_draft` 保存；工具名保留到 P4 删除。
+
+Agent 定义在本工具面只有只读历史视图；agent 节点的执行档案（`execution.runtime`、`tools`、`requires_labels`、`config_schema`、`skill`）写在 workflow 草稿的节点上，经 `save_workflow_draft` 保存。
 
 **Skill**
 
@@ -143,7 +144,7 @@ curl -b /tmp/al-cookies.txt -X DELETE \
 
 - `AGENT_LEGION_STUDIO_AGENT_TOKEN`（必填，缺失即启动失败）
 - `AGENT_LEGION_MCP_API_BASE`（可选，默认 `http://127.0.0.1:8000`）
-- `AGENT_LEGION_MCP_SESSION_ID`（可选；自助配置不设置即可——不设置时 `get_studio_context` / `get_job_context` 两个会话绑定工具不注册，工具面为 33 个，#660）
+- `AGENT_LEGION_MCP_SESSION_ID`（可选；自助配置不设置即可——不设置时 `get_studio_context` / `get_job_context` 两个会话绑定工具不注册，工具面为 31 个，#660）
 
 ### Kimi Code
 
@@ -186,7 +187,7 @@ curl -b /tmp/al-cookies.txt -X DELETE \
 }
 ```
 
-配置后新 session 里会出现 33 个 `mcp__agent-legion-studio__*` 工具（无会话绑定的外部接入；Studio 对话内为 35 个）。
+配置后新 session 里会出现 31 个 `mcp__agent-legion-studio__*` 工具（无会话绑定的外部接入；Studio 对话内为 33 个）。
 - token 泄露处置：`DELETE /api/studio-agent-tokens/<id>` 吊销即可，即刻生效。
 - token 到期或吊销后 MCP 调用返回 `HTTP 401: ...` 文本，按第 1 节重新铸造并更新配置。
 - 依赖钉在 `mcp>=1.12,<2`：mcp 2.0 移除了 `mcp.server.fastmcp`，独立 fastmcp 3.x 与之不兼容（见 pyproject.toml 注释）。

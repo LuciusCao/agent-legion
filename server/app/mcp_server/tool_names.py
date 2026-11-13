@@ -19,14 +19,12 @@ from __future__ import annotations
 # Grouped by registering module, in create_mcp_server's registration order.
 AGENT_LEGION_MCP_TOOL_NAMES: frozenset[str] = frozenset(
     {
-        # studio_tools.py / node_code_tools.py / agent_definition_tools.py:
-        # the local authoring playbook, session-bound studio context,
-        # code-node draft pair, and agent-definition draft save.
+        # studio_tools.py / node_code_tools.py: the local authoring playbook,
+        # session-bound studio context, and the code-node draft pair.
         "get_authoring_guide",
         "get_studio_context",
         "save_node_code_draft",
         "get_node_code",
-        "save_agent_definition_draft",
         # skill_tools.py: skill read / contract validation / local-repo
         # save-version / workspace skill-dir creation (#217, #633).
         "get_skill",
@@ -57,9 +55,9 @@ AGENT_LEGION_MCP_TOOL_NAMES: frozenset[str] = frozenset(
         "get_preview_context",
         "get_preview_panel",
         "save_preview_panel_draft",
-        # agent_tools.py: agent-definition catalog visibility (#633).
+        # agent_tools.py: read-only historical Agent definitions and
+        # runtime/model catalog visibility (#633).
         "get_agent_definitions",
-        "create_agent_definition",
         "get_runtime_models",
         "get_agent_runtimes",
         # job_tools.py: read-only job observation surface (#329).

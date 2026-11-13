@@ -7,7 +7,6 @@ import inspect
 
 import pytest
 
-from server.app.mcp_server.agent_definition_tools import AGENT_DEFINITION_RETIRED
 from server.app.mcp_server.config import McpServerConfig
 from server.app.mcp_server.server import create_mcp_server
 from server.app.mcp_server.tool_client import ToolClient
@@ -23,7 +22,6 @@ _REGISTRATION_ORDER = [
     "get_studio_context",
     "save_node_code_draft",
     "get_node_code",
-    "save_agent_definition_draft",
     "get_skill",
     "validate_skill",
     "save_skill_version",
@@ -45,7 +43,6 @@ _REGISTRATION_ORDER = [
     "get_preview_panel",
     "save_preview_panel_draft",
     "get_agent_definitions",
-    "create_agent_definition",
     "get_runtime_models",
     "get_agent_runtimes",
     "get_job_context",
@@ -97,35 +94,6 @@ The response carries the saved draft's code_hash.""",
                 "code_path": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             },
             "required": ["workspace_id", "node_key"],
-            "type": "object",
-        },
-    },
-    "save_agent_definition_draft": {
-        "async": True,
-        "description": """DEPRECATED — writes nothing. Agent execution profiles now live on
-the workflow agent node (execution.runtime, tools, requires_labels,
-config_schema, skill); edit them with save_workflow_draft.""",
-        "inputSchema": {
-            "properties": {
-                "workspace_id": {"type": "string"},
-                "agent_id": {"type": "string"},
-                "capability": {"type": "string"},
-                "runtime": {"type": "string"},
-                "skill": {"type": "string"},
-                "tools": {
-                    "anyOf": [{"items": {"type": "string"}, "type": "array"}, {"type": "null"}]
-                },
-                "requires_labels": {
-                    "anyOf": [
-                        {"additionalProperties": {"type": "string"}, "type": "object"},
-                        {"type": "null"},
-                    ]
-                },
-                "config_schema": {
-                    "anyOf": [{"additionalProperties": True, "type": "object"}, {"type": "null"}]
-                },
-            },
-            "required": ["workspace_id", "agent_id", "capability", "runtime", "skill"],
             "type": "object",
         },
     },
@@ -188,23 +156,3 @@ def test_save_node_code_draft_forwards_capability_and_conflict_text(monkeypatch)
             },
         )
     ]
-
-
-def test_agent_definition_write_tools_keep_identical_retired_response(monkeypatch) -> None:
-    async def unexpected_call(*args, **kwargs):
-        raise AssertionError("deprecated Agent-definition writes must not call the backend")
-
-    monkeypatch.setattr(ToolClient, "call", unexpected_call)
-    server = create_mcp_server(_CONFIG)
-    common = {
-        "workspace_id": "ws-1",
-        "capability": "occupied_capability",
-        "runtime": "velites",
-        "skill": "group/skill",
-    }
-
-    save = _call_tool(server, "save_agent_definition_draft", {**common, "agent_id": "agent-1"})
-    create = _call_tool(server, "create_agent_definition", common)
-
-    assert save == AGENT_DEFINITION_RETIRED
-    assert create == AGENT_DEFINITION_RETIRED

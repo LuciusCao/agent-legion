@@ -58,7 +58,7 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     # 工具面清单变化时同步这里与工具文档（docs/studio-agent-mcp.md）。
     # get_authoring_guide / get_preview_guide 是本地静态工具（不发 HTTP），
     # 不影响下方 recorded == table 的路由比对。
-    assert len(tools) == 35
+    assert len(tools) == 33
     for tool in tools:
         schema = tool.inputSchema
         args = {}
@@ -122,12 +122,4 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
         )
         for call in calls
     }
-    # #935 (#440 P3, D3): the Agent definition write tools no longer call
-    # their routes (deprecated guidance only); the routes stay, deprecated,
-    # until P4 removes both sides together.
-    deprecated_unused = {
-        ("PUT", "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft"),
-        ("POST", "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions"),
-    }
-    assert deprecated_unused <= table
-    assert recorded == table - deprecated_unused
+    assert recorded == table

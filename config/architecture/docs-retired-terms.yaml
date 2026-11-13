@@ -131,6 +131,17 @@ terms:
     note: 回放的执行档案按 workflow revision（或当前草稿）选，副本 run 冻结
       node_profiles pin {revision_id, node_key, profile_hash}（EXEC-QUALITY-REPLAY-001）；
       旧 agent_versions pin 只读兼容存量 run，不再为新回放写入
+  - pattern: '`create_agent_definition\(\.\.\.\)`|`save_agent_definition_draft\(\.\.\.\)`'
+    retired_in: '#936（#440 P4：Studio/MCP 写面删除）'
+    note: 只匹配 MCP 调用形态；人类 REST 路由的同名处理函数由后续切片处置。
+      执行配置写在 workflow 节点并经 save_workflow_draft 保存
+  - pattern: 'studio-agent/tools/workspaces/\{workspace_id\}/agent-definitions/\{agent_id\}/draft'
+    retired_in: '#936（#440 P4：Studio scoped 写端点删除）'
+    note: scoped AgentDefinition draft PUT 已删除；历史定义 GET 与旧 job/replay
+      resolver 保留，执行配置经 workflow 草稿维护
+  - pattern: 'POST (?:/api)?/studio-agent/tools/workspaces/\{workspace_id\}/agent-definitions'
+    retired_in: '#936（#440 P4：Studio scoped 写端点删除）'
+    note: scoped AgentDefinition create POST 已删除；同路径 GET 只读清单保留
   - pattern: 'workspace-executor-evidence-matrix'
     retired_in: '#1103（证据矩阵改名）'
     note: 证据矩阵文件名沿用了已退役的 executor 概念（schema v47），已改名为

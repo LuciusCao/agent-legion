@@ -29,7 +29,6 @@ from mcp.server.fastmcp import FastMCP
 # them with their draft lifecycle) live in workflow_tools; the other tool
 # groups likewise live in cohesive sibling modules (file-size budget).
 from server.app.mcp_server import (
-    agent_definition_tools,
     agent_tools,
     draft_tools,
     job_tools,
@@ -73,10 +72,6 @@ def create_mcp_server(config: McpServerConfig | ConfigResolver) -> FastMCP:
 
     studio_tools.register_studio_tools(mcp, _client, session_bound=session_bound)
     node_code_tools.register_node_code_tools(mcp, _client)
-    # #935（#440 P3，D3）：Agent 定义写工具 deprecate——不再写库，返回
-    # 改用 save_workflow_draft 写节点执行档案的引导；P4 删除（tool_names
-    # 契约同步）。
-    agent_definition_tools.register_save_agent_definition_draft_tool(mcp)
 
     # Skill read/validate/save-version tools (issue #217) and node prompt
     # preview/save tools, both split into sibling modules for the budget;

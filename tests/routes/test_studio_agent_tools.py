@@ -53,10 +53,6 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             f"{base}/nodes/node/code/draft",
             {"code": "not python"},
         ),
-        ("PUT", f"{base}/agent-definitions/agent-x/draft", {}),
-        # Agent-definition creation tool (#635): an invalid definition is a
-        # 422 business rejection — the scope guard let the token through.
-        ("POST", f"{base}/agent-definitions", {"runtime": "bogus"}),
         ("POST", f"{base}/node-prompt", {"node_key": "node"}),
         ("PUT", f"{base}/node-prompt", {"node_key": "node", "prompt": "x"}),
         ("GET", f"{base}/workflow/active", None),
@@ -390,72 +386,6 @@ def test_save_node_code_draft_rejects_invalid_code(client, job_db) -> None:
     )
     assert response.status_code == 400
     assert "run" in response.json()["detail"]
-
-
-def test_save_agent_definition_draft_attributes_studio_agent(client, job_db) -> None:
-    workspace_id = _create_workspace(client)
-    scoped, admin_id = _scoped_client(client, job_db)
-
-    saved = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        "/agent-definitions/studio-test-agent/draft",
-        json={
-            "capability": "studio_test_capability",
-            "runtime": "pi",
-            "skill": "studio/test",
-        },
-    )
-
-    assert saved.status_code == 200, saved.text
-    payload = saved.json()
-    assert payload["agent_id"] == "studio-test-agent"
-    assert payload["status"] == "draft"
-    assert payload["created_by"] == f"studio-agent:{admin_id}"
-    assert payload["definition"]["capability"] == "studio_test_capability"
-
-
-def test_save_agent_definition_draft_rejects_invalid_payload(client, job_db) -> None:
-    workspace_id = _create_workspace(client)
-    scoped, _ = _scoped_client(client, job_db)
-    response = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        "/agent-definitions/studio-test-agent/draft",
-        json={"capability": "", "runtime": "pi", "skill": "studio/test"},
-    )
-    assert response.status_code == 422
-
-
-# #1173 codex 二轮（codex finding：Studio 端点路径参数/capability 派生
-# 绕过契约层字段校验）：service 写边界单点封死——PUT 路径参数的新非法键
-# 400 拒绝；create 派生的非法 capability 400 引导。
-def test_save_agent_definition_draft_rejects_executor_id_form_agent_id(client, job_db) -> None:
-    """路径④ Studio PUT 路径参数：``code:x`` 形态新键在 service 写边界被拒
-    （400，零落库）。"""
-    workspace_id = _create_workspace(client)
-    scoped, _ = _scoped_client(client, job_db)
-    response = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/code:x/draft",
-        json={"capability": "studio_test_capability", "runtime": "pi", "skill": "studio/test"},
-    )
-    assert response.status_code == 400, response.text
-    assert "不在合法字符域" in response.json()["detail"]
-    listed = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions")
-    assert all(row["agent_id"] != "code:x" for row in listed.json()["versions"])
-
-
-def test_create_agent_definition_derivation_rejects_colon_capability(client, job_db) -> None:
-    """路径④ Studio create 派生：含 ``:`` 的 capability 派生 id 不合法——
-    service 写边界拒绝并引导（该工具面不收 agent_id，引导文案同时覆盖
-    「改用合法 capability 命名」）。"""
-    workspace_id = _create_workspace(client)
-    scoped, _ = _scoped_client(client, job_db)
-    response = scoped.post(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
-        json={"capability": "code:x", "runtime": "pi"},
-    )
-    assert response.status_code == 400, response.text
-    assert "显式指定合法 agent_id" in response.json()["detail"]
-    assert "code:x" in response.json()["detail"]
 
 
 def test_validate_workflow_unknown_workspace_reports_binding_errors(client, job_db) -> None:

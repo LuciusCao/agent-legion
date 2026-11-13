@@ -1,15 +1,13 @@
 """Behavioral tests for the studio-agent catalog read tool endpoints (#633).
 
-``GET /api/studio-agent/tools/workspaces/{id}/agent-definitions`` (latest
-versions, all fields), ``POST .../agent-definitions`` (create a NEW Agent
-definition draft — capability-derived id, studio-agent attribution),
-``.../runtime-models`` (online-worker aggregation) and
-``.../agent-runtimes`` (per-runtime tool catalog). Read-only or draft-only
-visibility: provider/model declarations stay worker-owned
+``GET /api/studio-agent/tools/workspaces/{id}/agent-definitions`` returns
+latest historical versions with all fields, ``.../runtime-models`` aggregates
+online-worker declarations, and ``.../agent-runtimes`` reads the per-runtime
+tool catalog. Provider/model declarations stay worker-owned
 (EXEC-RUNTIME-MODELS-001) and the tool catalog is a code-defined static
-projection (EXEC-RUNTIME-CATALOG-001) — neither is editable through the
-tool surface; the create only starts a draft (publishing stays human,
-STUDIO-AGENT-001).
+projection (EXEC-RUNTIME-CATALOG-001). The retired scoped Agent-definition
+write URLs are unmounted and cannot mutate historical rows; node execution
+profiles are edited through workflow drafts (STUDIO-AGENT-001).
 """
 
 from __future__ import annotations
@@ -38,9 +36,10 @@ def workspace_id(client, job_db) -> str:
     return str(response.json()["workspace"]["id"])
 
 
-def _draft_agent(scoped, workspace_id: str, agent_id: str, capability: str) -> dict:
-    saved = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
+def _draft_agent(client, workspace_id: str, agent_id: str, capability: str) -> dict:
+    saved = client.put(
+        f"/api/agent-definitions/{agent_id}/draft",
+        params={"workspace_id": workspace_id},
         json={"capability": capability, "runtime": "velites", "skill": "g/s"},
     )
     assert saved.status_code == 200, saved.text
@@ -51,8 +50,8 @@ def test_list_agent_definitions_returns_all_fields_with_version_metadata(
     client, job_db, workspace_id
 ) -> None:
     scoped, admin_id = _scoped_client(client, job_db)
-    _draft_agent(scoped, workspace_id, "agent-a", "review_keywords")
-    _draft_agent(scoped, workspace_id, "agent-b", "generate_questions")
+    _draft_agent(client, workspace_id, "agent-a", "review_keywords")
+    _draft_agent(client, workspace_id, "agent-b", "generate_questions")
 
     response = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions")
 
@@ -72,7 +71,7 @@ def test_list_agent_definitions_returns_all_fields_with_version_metadata(
     assert item["definition"]["requires_labels"] == {}
     assert item["definition"]["config_schema"] == {}
     assert item["definition_hash"]
-    assert item["created_by"] == f"studio-agent:{admin_id}"
+    assert item["created_by"] == f"user:{admin_id}"
     assert item["created_at"]
     assert item["published_at"] is None
 
@@ -94,7 +93,7 @@ def test_list_agent_definitions_latest_beats_published_row(client, job_db, works
     HUMAN action (the scoped token gets 403 on the publish endpoint — pinned
     in test_studio_agent_scope.py), so the publish rides the admin client."""
     scoped, _ = _scoped_client(client, job_db)
-    _draft_agent(scoped, workspace_id, "agent-a", "review_keywords")
+    _draft_agent(client, workspace_id, "agent-a", "review_keywords")
     assert (
         scoped.post(
             f"/api/agent-definitions/agent-a/publish?workspace_id={workspace_id}"
@@ -103,7 +102,7 @@ def test_list_agent_definitions_latest_beats_published_row(client, job_db, works
     )
     published = _admin_publish(client, workspace_id, "agent-a")
     assert published.status_code == 200, published.text
-    _draft_agent(scoped, workspace_id, "agent-a", "review_keywords")
+    _draft_agent(client, workspace_id, "agent-a", "review_keywords")
 
     listed = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions")
 
@@ -218,154 +217,53 @@ def test_agent_runtimes_lists_per_runtime_tool_catalog(client, job_db, workspace
     assert pi_names == ["read", "write", "bash"]
 
 
-def test_create_agent_definition_starts_draft_with_derived_id_and_attribution(
+def _agent_rows(job_db, workspace_id: str) -> list[dict]:
+    with job_db.read() as conn:
+        rows = conn.execute(
+            "select id, entity_key, version, status, definition_hash, created_by,"
+            " created_at, published_at from versioned_entities"
+            " where entity_type='agent' and workspace_id=%s order by id",
+            (workspace_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def test_retired_agent_definition_writes_are_unmounted_and_write_nothing(
     client, job_db, workspace_id
 ) -> None:
-    """201 + the draft row exists with agent_id == capability (the tool
-    surface takes no explicit id) and the studio-agent:{user_id} stamp."""
-    scoped, admin_id = _scoped_client(client, job_db)
-
-    response = scoped.post(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
-        json={"capability": "review_keywords", "runtime": "velites", "skill": "g/s"},
-    )
-
-    assert response.status_code == 201, response.text
-    created = response.json()
-    assert created["agent_id"] == "review_keywords"
-    assert created["version"] == 1
-    assert created["status"] == "draft"
-    assert created["definition"]["tools"] == ["read", "write", "bash"]
-    assert created["created_by"] == f"studio-agent:{admin_id}"
-    # The draft row reads back through the list tool (one capability, one
-    # latest row — no duplicate entity).
-    listed = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions")
-    assert listed.status_code == 200
-    assert [item["agent_id"] for item in listed.json()["versions"]] == ["review_keywords"]
-
-
-def test_create_agent_definition_forwards_optional_fields(client, job_db, workspace_id) -> None:
+    seeded = seed_workspace_agent_definitions(workspace_id)
     scoped, _ = _scoped_client(client, job_db)
-    response = scoped.post(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
-        json={
-            "capability": "generate_questions",
-            "runtime": "pi",
-            "skill": "g/q",
-            "tools": ["read"],
-            "requires_labels": {"gpu": "a100"},
-            "config_schema": {
-                "type": "object",
-                "properties": {"dry_run": {"type": "boolean"}},
-            },
-        },
-    )
-    assert response.status_code == 201, response.text
-    definition = response.json()["definition"]
-    assert definition["tools"] == ["read"]
-    assert definition["requires_labels"] == {"gpu": "a100"}
-    assert definition["config_schema"] == {
-        "type": "object",
-        "properties": {"dry_run": {"type": "boolean"}},
-    }
-
-
-def test_create_agent_definition_conflict_on_occupied_capability(
-    client, job_db, workspace_id
-) -> None:
-    """409 for every occupancy face the create-entry policy guards: an
-    existing draft, a published Agent, and a published row hidden behind a
-    renamed draft (the #460 P1 face)."""
-    scoped, _ = _scoped_client(client, job_db)
-
-    def create(capability: str):
-        return scoped.post(
-            f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
-            json={"capability": capability, "runtime": "velites", "skill": "g/s"},
-        )
-
-    assert create("review_keywords").status_code == 201
-    # Same capability again → 409.
-    assert create("review_keywords").status_code == 409
-    # Published Agent on the capability → 409 (publishing rides the admin
-    # client; the scoped token is refused on the publish endpoint).
-    assert create("generate_questions").status_code == 201
-    assert (
-        scoped.post(
-            f"/api/agent-definitions/generate_questions/publish?workspace_id={workspace_id}"
-        ).status_code
-        == 403
-    )
-    published = _admin_publish(client, workspace_id, "generate_questions")
-    assert published.status_code == 200, published.text
-    assert create("generate_questions").status_code == 409
-    # Renamed-draft face: the draft renames the capability, but the
-    # published v1 still routes — the capability stays occupied.
-    renamed = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}"
-        "/agent-definitions/generate_questions/draft",
-        json={"capability": "generate_questions_v2", "runtime": "velites", "skill": "g/s"},
-    )
-    assert renamed.status_code == 200, renamed.text
-    assert create("generate_questions").status_code == 409
-    # An entity keyed by the capability itself also blocks (save_draft on
-    # that key would overwrite its draft — never a second entity).
-    saved = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/agent-x/draft",
-        json={"capability": "other_capability", "runtime": "velites", "skill": "g/s"},
-    )
-    assert saved.status_code == 200, saved.text
-    assert create("agent-x").status_code == 409
-
-
-def test_create_agent_definition_rejects_invalid_payload(client, job_db, workspace_id) -> None:
-    scoped, _ = _scoped_client(client, job_db)
+    before = _agent_rows(job_db, workspace_id)
     base = f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions"
 
-    assert scoped.post(base, json={}).status_code == 422  # missing capability/runtime
-    assert (
-        scoped.post(base, json={"capability": "c", "runtime": "bogus", "skill": "s"}).status_code
-        == 422
-    )
-    assert (
-        scoped.post(
-            base,
-            json={
-                "capability": "c",
-                "runtime": "pi",
-                "skill": "/abs/path",
-            },
-        ).status_code
-        == 422
-    )
-    # agent_id is not part of the tool-surface payload — an explicit id is
-    # silently DROPPED (pydantic default), so the create still derives the
-    # id from the capability: the tool never spawns a second entity.
-    explicit = scoped.post(
+    created = scoped.post(
         base,
-        json={"capability": "c", "runtime": "pi", "skill": "s", "agent_id": "explicit"},
+        json={"capability": "new_capability", "runtime": "velites", "skill": "g/s"},
     )
-    assert explicit.status_code == 201
-    assert explicit.json()["agent_id"] == "c"
-    # Nothing was created by any of the rejected payloads (only the one
-    # deliberate create above).
+    saved = scoped.put(
+        f"{base}/{seeded[0]}/draft",
+        json={"capability": "changed_capability", "runtime": "pi", "skill": "g/s"},
+    )
+
+    assert created.status_code in (404, 405), created.text
+    assert saved.status_code in (404, 405), saved.text
+    assert _agent_rows(job_db, workspace_id) == before
     listed = scoped.get(base)
-    assert [item["agent_id"] for item in listed.json()["versions"]] == ["c"]
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()["versions"]) == len(seeded)
 
-
-def test_create_agent_definition_404_for_unknown_workspace(client, job_db) -> None:
-    scoped, _ = _scoped_client(client, job_db)
-    response = scoped.post(
-        "/api/studio-agent/tools/workspaces/ws-missing/agent-definitions",
-        json={"capability": "c", "runtime": "pi", "skill": "s"},
-    )
-    assert response.status_code == 404
+    paths = client.app.openapi()["paths"]
+    base_template = "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions"
+    assert "get" in paths[base_template]
+    assert "post" not in paths[base_template]
+    assert f"{base_template}/{{agent_id}}/draft" not in paths
+    schemas = client.app.openapi()["components"]["schemas"]
+    assert "StudioAgentAgentCreateRequest" not in schemas
 
 
 def test_workspace_bound_token_is_refused_on_other_workspaces(client, job_db) -> None:
-    """Schema v45 binding, asserted once behaviorally for the new reads: a
-    run token bound to workspace A gets 403 on workspace B's catalog reads
-    — and on the create write too."""
+    """Schema v45 binding: a run token bound to workspace A gets 403 on
+    workspace B's catalog reads."""
     workspace_id = str(job_db.create_workspace("Catalog Reads")["id"])
     other_id = str(job_db.create_workspace("Catalog Reads B")["id"])
     admin_id = str(job_db.get_user_credentials("admin")["id"])
@@ -374,13 +272,6 @@ def test_workspace_bound_token_is_refused_on_other_workspaces(client, job_db) ->
         f"Bearer {scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=workspace_id)}"
     )
     base = "/api/studio-agent/tools/workspaces"
-    create_payload = {"capability": "c", "runtime": "pi", "skill": "s"}
-    assert bound.post(
-        f"{base}/{workspace_id}/agent-definitions", json=create_payload
-    ).status_code in (200, 201)
-    assert (
-        bound.post(f"{base}/{other_id}/agent-definitions", json=create_payload).status_code == 403
-    )
     for tail in ("agent-definitions", "runtime-models", "agent-runtimes"):
         assert bound.get(f"{base}/{workspace_id}/{tail}").status_code == 200, tail
         assert bound.get(f"{base}/{other_id}/{tail}").status_code == 403, tail

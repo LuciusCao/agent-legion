@@ -108,7 +108,6 @@ def test_initialize_and_tool_listing(client, job_db) -> None:
     assert names == [
         "compare_jobs",
         "compare_workflow",
-        "create_agent_definition",
         "create_skill",
         "get_active_workflow",
         "get_agent_definitions",
@@ -131,7 +130,6 @@ def test_initialize_and_tool_listing(client, job_db) -> None:
         "list_jobs",
         "read_artifact",
         "request_workflow_publish",
-        "save_agent_definition_draft",
         "save_node_code_draft",
         "save_node_prompt",
         "save_preview_panel_draft",
