@@ -279,6 +279,39 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(node).not.toHaveProperty('config')
   })
 
+  it('switches approval→agent without prompting or renaming the capability', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('unexpected')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const setDefinitionYaml = vi.fn()
+    render(
+      <WorkflowNodeInspector
+        workflow={null}
+        selectedNodeKey="gate"
+        definitionYaml={approvalGateYaml}
+        setDefinitionYaml={setDefinitionYaml}
+        onClose={() => {}}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.change(await screen.findByLabelText('节点类型'), {
+      target: { value: 'agent' },
+    })
+
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const node = (
+      yaml.load(setDefinitionYaml.mock.calls[0][0]) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    expect(node?.type).toBe('agent')
+    expect(node?.capability).toBe('')
+    expect(node?.label).toBe('审批')
+    expect(node?.execution).toEqual({ runtime: 'velites' })
+    expect(node).not.toHaveProperty('config')
+  })
+
   it('keeps the draft untouched when the capability prompt is dismissed (#405)', async () => {
     const promptSpy = vi
       .spyOn(window, 'prompt')

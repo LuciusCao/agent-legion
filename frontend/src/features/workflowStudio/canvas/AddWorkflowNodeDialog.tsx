@@ -33,7 +33,7 @@ type Props = {
 }
 
 // 画布「添加节点」对话框（#392 Phase 3）：类型三选一 + key（label 与
-// capability 缺省 = key，approval 无 capability）。提交经
+// code capability 缺省 = key；agent capability 可选；approval 无）。提交经
 // appendWorkflowNode 全量校验后追加进草稿并选中新节点；新节点默认
 // 不接线——提示文案说明接线方式（approval 需可执行入边，validate 会
 // 引导）。失败 toast 原因、草稿不动（AGENTS.md L88）。open 切换时整体
@@ -119,7 +119,7 @@ function AddWorkflowNodeForm(props: Props) {
         {nodeType !== 'approval' && (
           <label className={styles.field}>
             <span className={styles.fieldLabel}>
-              能力 Key（缺省 = 节点 Key）
+              能力 Key（code 缺省 = 节点 Key；agent 可选标签）
             </span>
             <input
               aria-label="能力 Key"

@@ -13,8 +13,8 @@ export class WorkflowNodeTypeSwitchError extends Error {}
 //   （_ALLOWED_CONFIG_KEYS，未知键同样会被 loader 拒绝）。
 // - code 禁 skill（EXEC-SKILL-NODE-001：code 节点不得声明 skill），
 //   不剥 execution（code 节点可读 workflow 级 execution 默认值）。
-// - agent 无额外剥离（skill/execution/capability 均合法；发布门禁另行
-//   要求 capability 恰好解析到一个 published Agent）。
+// - agent 的 capability 是可选标签（空字符串不归一为 node key）；
+//   skill/execution 均合法，发布门禁另行要求完整自含执行档案。
 // approval 专属 config 键只在源类型是 approval 时剥除（可执行节点的
 // config 合法键由自身/Agent 的 config_schema 决定，rework_target 等并非
 // 全局保留字——code↔agent 往返不得动它们）。
@@ -54,14 +54,14 @@ export function sanitizeNodeForType(
     if (Object.keys(config).length === 0) delete node.config
   }
   if (targetType === 'code') delete node.skill
+  if (targetType === 'agent') node.capability = node.capability ?? ''
 }
 
 // 类型切换前置校验：目标类型必需的状态在写入前检查，不满足即抛错并
 // 保留原类型（草稿可自动保存，半应用态会被持久化）。loader 侧对应：
-// - code/agent 必须有非空 capability（loader.py 空 capability 拒绝）。
-//   approval 节点按契约无 capability，approval→code/agent 必须随切换
-//   原子补上（capabilityChannel；结构化 UI 对 approval 隐藏 capability
-//   输入框，「先补再切」在该形态下不可达，#405）。
+// - code 必须有非空 capability；approval→code 必须随切换原子补上
+//   （capabilityChannel；结构化 UI 对 approval 隐藏 capability 输入框，
+//   「先补再切」在该形态下不可达，#405）。agent 可省略该可选标签。
 // - approval 必须有来自可执行节点的入边（approval_node.py
 //   validate_approval_edges；仅 start 驱动的根节点不满足，start 的合成
 //   边不算数）。判定源 = 节点 after ∪ 草稿 edges 中进入本节点的边的
@@ -79,7 +79,7 @@ export function validateNodeTypeSwitch(
   targetType: 'code' | 'agent' | 'approval',
   capabilityChannel?: string
 ): void {
-  if (targetType !== 'approval' && !node.capability && !capabilityChannel) {
+  if (targetType === 'code' && !node.capability && !capabilityChannel) {
     throw new WorkflowNodeTypeSwitchError(
       `切换为 ${targetType} 需要先在「基本设置」填写 capability（当前节点没有）`
     )

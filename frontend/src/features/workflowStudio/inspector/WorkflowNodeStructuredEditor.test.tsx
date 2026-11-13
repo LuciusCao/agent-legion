@@ -68,6 +68,51 @@ describe('WorkflowNodeStructuredEditor', () => {
     )
   })
 
+  it('does not revive the published capability when the draft omits it', () => {
+    const draftWithoutCapability = yaml.replace(
+      '    capability: fetch_items\n',
+      ''
+    )
+    render(
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={draftWithoutCapability}
+        onDefinitionYamlChange={vi.fn()}
+      />
+    )
+
+    expect(screen.getByLabelText('能力')).toHaveValue('')
+    expect(screen.getByLabelText('节点名称')).toHaveValue('Fetch')
+  })
+
+  it('clears capability without losing values, renaming it, or published fallback', () => {
+    const onChange = vi.fn()
+    const { rerender } = render(
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={yaml}
+        onDefinitionYamlChange={onChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('能力'), { target: { value: '' } })
+
+    const nextYaml = onChange.mock.calls[0][0] as string
+    expect(nextYaml).toContain("capability: ''")
+    expect(nextYaml).toContain('label: Fetch')
+    expect(nextYaml).toContain('questions.json')
+    expect(nextYaml).not.toContain('capability: fetch')
+    rerender(
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={nextYaml}
+        onDefinitionYamlChange={onChange}
+      />
+    )
+    expect(screen.getByLabelText('能力')).toHaveValue('')
+    expect(screen.getByLabelText('节点名称')).toHaveValue('Fetch')
+  })
+
   it('derives input values from definitionYaml draft', () => {
     const { rerender } = render(
       <WorkflowNodeStructuredEditor
