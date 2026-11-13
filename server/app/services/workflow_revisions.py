@@ -14,10 +14,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from server.app.agent_catalog.builtin import (
-    DEMO_WORKFLOW_KEY,
-    seed_demo_workspace_agent_definitions,
-)
 from server.app.services.workflow_revision_pipeline import publish_workflow_revision
 from server.app.services.workflow_revision_runtime import save_revision_runtime_or_publish
 from server.app.workflows.definition import WorkflowDefinition
@@ -75,10 +71,4 @@ class WorkflowRevisionService:
         existing = self.job_db.get_active_workflow_revision(workspace_id, definition.key)
         if existing is not None:
             return existing
-        if definition.key == DEMO_WORKFLOW_KEY:
-            # Demo seed exception (schema v46): a workspace binding the
-            # built-in demo workflow gets the factory agent templates
-            # instantiated into its own catalog, seed-if-absent. Admin edits
-            # inside the workspace are never overwritten.
-            seed_demo_workspace_agent_definitions(self.job_db, workspace_id)
         return self.publish_workspace_revision(workspace_id, definition)

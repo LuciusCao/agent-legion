@@ -1,20 +1,14 @@
-"""Built-in Agent definition templates for the demo workflow.
+"""Legacy demo Agent templates for compatibility tests and fixtures.
 
-Agent definitions are workspace-scoped (schema v46): nothing here is seeded
-globally anymore. This module pins the factory *templates* for the
-open-source demo workflow ``education_video_problems_generation``; the demo
-seed (``seed_demo_workspace_agent_definitions``) instantiates them into a
-workspace that binds the demo workflow, seed-if-absent, so admin edits and
-archivals inside the workspace are never overwritten or resurrected.
+Production demo and workflow-revision seeding no longer instantiates these
+definitions: the demo DAG carries self-contained agent node profiles instead.
+``seed_demo_workspace_agent_definitions`` remains only for the existing test
+helper and explicit legacy-history setup; a later test-migration slice owns
+its removal. Historical rows stay readable by old job/replay resolvers.
 
-Execution configuration (provider/model/thinking) is deliberately NOT part of
-these definitions — the loader merges the workflow top-level ``execution``
-defaults into every non-start node (code nodes simply never read them) and
-node ``execution.*`` overrides win; workspace-level defaults were retired at
-schema v64. The demo expects the operator to configure execution in Studio.
-Skill bindings live on the demo DAG nodes (issue #76), not on these
-definitions; the referenced skills resolve to the in-place repos imported by
-``make import-demo`` under the skills root.
+The demo nodes declare ``execution.runtime`` individually and bind their
+skills directly (issue #76). Provider/model/thinking remain operator-owned
+node execution settings, not properties of these historical definitions.
 """
 
 from __future__ import annotations
@@ -39,16 +33,12 @@ BUILTIN_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
 def seed_demo_workspace_agent_definitions(
     database_dsn: ConnectSource, workspace_id: str
 ) -> list[str]:
-    """Publish each built-in demo agent into the workspace when absent.
+    """Publish legacy templates for a test fixture or explicit history setup.
 
+    This is not a production seed entry point. Seed-if-absent preserves admin
+    edits and archived rows; only a completely absent entity key is created.
     ``database_dsn`` accepts the JobQueries facade or a bare DSN string
-    (BOUNDARY-DATA-001, #187); production callers pass the facade.
-    Called when a workspace binds the demo workflow (workspace create /
-    workflow switch). Seed-if-absent: an agent the admin already touched in
-    this workspace (published a new definition, or archived every version to
-    disable it) is never overwritten or resurrected — only a completely
-    absent entity key gets the factory definition. Returns the agent IDs
-    seeded this run.
+    (BOUNDARY-DATA-001, #187). Returns the agent IDs seeded this run.
     """
     service = AgentService(database_dsn, workspace_id)
     seeded: list[str] = []

@@ -1,9 +1,10 @@
 # scripts/seed — workflow 种子包导出/导入工具
 
-平台级项目工具：把一套 workflow 定义（DAG、Agent 定义、自定义节点代码、
+平台级项目工具：把一套 workflow 定义（DAG、legacy Agent 定义、自定义节点代码、
 skill 版本锁定）从任意实例导出为可移植的 **种子包**（`seed.json`），再幂等
-导入另一个实例。典型场景：把生产实例的 workflow 定义搬到 develop 实例
-做开发测试；开源后任何公司都可以用它迁移自己的 workflow 定义。
+导入另一个实例。导入时 legacy Agent 定义只内联到节点档案，不在目标实例
+创建或发布 AgentDefinition。典型场景：把生产实例的 workflow 定义搬到
+develop 实例做开发测试；开源后任何公司都可以用它迁移自己的 workflow 定义。
 
 **工具公开、数据私有**：本目录是通用工具，不含任何业务硬编码（不含具体
 workflow key、workspace 名、capability 清单）；种子包是数据，业务种子包
@@ -25,6 +26,7 @@ workflow key、workspace 名、capability 清单）；种子包是数据，业�
 
 - `agents[]` 只收「capability 被导出 workflow 引用」的 published Agent
   （Agent 目录自 schema v46 起按 workspace 作用域，导出取自源 workspace）。
+  这些定义在导入时仅作为 legacy 节点的内联输入；目标实例不创建 Agent 行。
 - `node_codes[]` 按节点解析：`--node-code` 文件覆盖 > 源 workspace 的
   published 版本（多 workspace 不一致会告警跳过）> global 出厂种子版本。
 - `skills.lock` 是源实例 `skill_lock` 文档的如实拷贝（#322 起全局
@@ -66,20 +68,22 @@ uv run python -m scripts.seed.import_seed \
     --seed seed.json [--workspace "My Team=my_pipeline:entity"]
 ```
 
-六步：workspace 绑定（已绑定的自动纳入；`--workspace` 仅在无绑定时创建，
+五步：workspace 绑定（已绑定的自动纳入；`--workspace` 仅在无绑定时创建，
 blank 模式——schema v50 后 workflow 无注册概念，种子定义经发布流落地）
-→ Agent 发布（按 workspace 作用域，内容一致跳过）→ 首版 revision 发布
-（仅缺失时）→ 节点代码发布（文本一致跳过）→ skill pin 报告（advisory）
-→ 校验报告（有 FAIL 非零退出）。
+→ 首版 revision 发布（仅缺失时；旧 `agents[]` 只内联到节点，不调用 Agent
+写 API）→ 节点代码发布（文本一致跳过）→ skill pin 报告（advisory）→
+校验报告（含 runtime/skill/tools/requires_labels/config_schema 节点档案，
+有 FAIL 非零退出）。
 
-step 5 自 #322 起降级为 advisory：skill_sources 注册表与 admin 端点已退役，
+step 4 自 #322 起降级为 advisory：skill_sources 注册表与 admin 端点已退役，
 种子包不再能经 API 安装/锁定 skill。operator 需在目标实例的 skill root
 （`~/.agents/skills`）下放置各 skill 的 in-place 仓库；pin 在首次 dispatch
 或 `make skills-lock` 时按目标实例的仓库现场冻结，本步只报告种子包携带
 的 pinned refs 供对照。
 
 幂等语义：每步先内容比较（canonical JSON / 代码文本逐字节 / ref+commit），
-一致即 skip，**不产生新版本**；对同一实例连跑两次，第二次 0 个写动作。
+一致即 skip，**不产生新版本**；对同一实例连跑两次，第二次 0 个写动作，
+两次都不创建或更新 AgentDefinition。
 
 ## 安全注意
 
@@ -95,7 +99,7 @@ step 5 自 #322 起降级为 advisory：skill_sources 注册表与 admin 端点�
 
 发布 workflow 的**首个** revision 要求每个 code 节点已有 published 节点
 代码，而节点代码 API 要求已有 active revision——两者互相前置，因此全新
-workspace + custom-code-only 节点目前无法纯经 API 完成首次引导（step 3
+workspace + custom-code-only 节点目前无法纯经 API 完成首次引导（step 2
 会报 "no published node code"）。已有 active revision 的实例（prod →
 develop 迁移场景）不受影响；全新部署可先在 Studio 手工首发，或等平台
 补引导通道。

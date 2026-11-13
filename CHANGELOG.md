@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Removed
 
+- **Breaking（Refs #936，#440 P4 第三片，不关闭 #936/#440）**：内置 demo 与通用 seed importer 不再创建或发布 AgentDefinition；fresh demo seed 的 published Agent 数从 4 降为 0，四个 agent 节点逐一显式声明 `execution.runtime: velites` 并保留节点 skill/tools/requires_labels/config_schema 执行语义。通用 importer 的旧 `agents[]` 仅作为首版 revision 的内联输入，verify 改验 active revision 的规范化节点档案；既有历史行、旧 job/replay resolver 与测试 helper 保持兼容，后续切片再迁移测试夹具。
 - **Breaking（Refs #936，#440 P4 第二片，不关闭 #936/#440）**：停止新建 legacy Agent-version quality replay；`POST .../quality/sample-items/{item_id}/replays` 的请求字段 `agent_version` 已删除，旧客户端发送任意值（含 `null`）均收到带 `revision_id` / `use_draft` 迁移指引的 422，legacy 快照未选择自含 revision/draft 也在任何 replay/run/job/request 写入前返回 400。历史 replay 的 `agent_id` / `agent_version` 响应身份、请求行/hash 镜像和既有 run 的 `agent_versions` pin 不删除，仍按原不可变 version/hash 完成 enqueue、claim、stale/unclaimable sweep 与 Worker 失联重排；只读 reader/resolver 内迁 `node_profile_pins`，旧 `agent_version_pins` 模块及新写入口删除。新 `node_profiles` replay、pre-v93 rerun/upgrade、versioned_entities 归档行与只读 catalog 不变。
 
 - **Breaking（issue #936，#440 P4 首片，不关闭 Epic）**：删除 studio-agent MCP 的 `create_agent_definition` / `save_agent_definition_draft` no-op 工具，以及 scoped `POST /api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions`、`PUT .../{agent_id}/draft` 和对应服务入口；执行配置改在 workflow 节点上维护并经 `save_workflow_draft` 保存。`get_agent_definitions`、runtime/model reads、历史定义、只读 API、旧 job/replay resolver 及本切片外的人类 Agent 写端点保持不动。

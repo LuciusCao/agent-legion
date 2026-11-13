@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import sys
 from pathlib import Path
@@ -14,13 +15,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.seed.import_seed import (  # noqa: E402
     parse_workspace_spec,
     step1_workspaces,
-    step2_agents,
-    step3_first_revisions,
-    step4_node_codes,
-    step5_skills,
+    step2_first_revisions,
+    step3_node_codes,
+    step4_skills,
     verify,
 )
 from scripts.seed.seed_common import sha256_text  # noqa: E402
+from server.app.services.workflow_revision_format import definition_to_yaml  # noqa: E402
+from server.app.workflows.definition import workflow_definition_from_dict  # noqa: E402
 
 pytestmark = pytest.mark.no_db
 
@@ -37,12 +39,14 @@ def make_definition() -> dict:
         "label": "Invoices",
         "nodes": {
             "fetch": {
+                "type": "code",
                 "capability": "fetch_invoices",
                 "after": [],
                 "inputs": [],
                 "outputs": ["invoices.json"],
             },
             "summarize": {
+                "type": "agent",
                 "capability": "summarize_invoices",
                 "after": ["fetch"],
                 "inputs": ["invoices.json"],
@@ -51,6 +55,33 @@ def make_definition() -> dict:
         },
         "edges": [{"from": "fetch", "to": "summarize"}],
     }
+
+
+def make_agent_definition() -> dict:
+    return {
+        "capability": "summarize_invoices",
+        "runtime": "velites",
+        "skill": "acme/summarize",
+        "tools": ["read", "write"],
+        "requires_labels": {"region": "cn"},
+        "config_schema": {
+            "type": "object",
+            "properties": {"locale": {"type": "string", "default": "zh-CN"}},
+        },
+    }
+
+
+def make_self_contained_definition() -> dict:
+    definition = make_definition()
+    agent = make_agent_definition()
+    definition["nodes"]["summarize"].update(
+        execution={"runtime": agent["runtime"]},
+        skill={"key": agent["skill"], "ref": "latest"},
+        tools=agent["tools"],
+        requires_labels=agent["requires_labels"],
+        config_schema=agent["config_schema"],
+    )
+    return definition
 
 
 def make_seed() -> dict:
@@ -69,14 +100,7 @@ def make_seed() -> dict:
             {
                 "agent_id": "invoice-summarizer-v1",
                 "capability": "summarize_invoices",
-                "definition": {
-                    "capability": "summarize_invoices",
-                    "runtime": "velites",
-                    "skill": "acme/summarize",
-                    "tools": ["read", "write"],
-                    "requires_labels": {},
-                    "config_schema": {},
-                },
+                "definition": make_agent_definition(),
                 "source_workspace": WORKSPACE_ID,
                 "source_version": 1,
             }
@@ -92,7 +116,7 @@ def make_seed() -> dict:
             }
         ],
         "skills": {
-            # #322: lock only (the source registry is retired); step 5 is advisory.
+            # #322: lock only (the source registry is retired); step 4 is advisory.
             "lock": {
                 "skills": {
                     "acme/summarize": {"repo": "/opt/acme/skills", "refs": {"v1.0.0": SKILL_COMMIT}}
@@ -107,10 +131,15 @@ def _api_payload(definition: dict) -> dict:
         "nodes": [
             {
                 "key": key,
+                "node_type": node.get("type", "code"),
                 "capability": node.get("capability"),
                 "inputs": node.get("inputs") or [],
                 "outputs": node.get("outputs") or [],
                 "after": node.get("after") or [],
+                "execution": node.get("execution") or {},
+                "skill": node.get("skill"),
+                "tools": node.get("tools") or [],
+                "requires_labels": node.get("requires_labels") or {},
                 "terminal": node.get("terminal"),
             }
             for key, node in (definition.get("nodes") or {}).items()
@@ -135,7 +164,10 @@ class FakeClient:
                 "default_entity": "invoice",
             }
         }
-        self.revisions: dict[str, dict] = {WORKSPACE_ID: make_definition()} if with_revision else {}
+        self.revisions: dict[str, dict] = (
+            {WORKSPACE_ID: make_self_contained_definition()} if with_revision else {}
+        )
+        # Historical rows are plain fixture state: any Agent API access fails.
         self.agents: dict[tuple[str, str], dict] = {}
         self.node_codes: dict[tuple[str, str, str], dict] = {}
 
@@ -153,19 +185,14 @@ class FakeClient:
             workspace_id = path.split("/")[3]
             if workspace_id not in self.revisions:
                 return self._missing(path, allow_404)
+            definition = self.revisions[workspace_id]
             return {
                 "revision": {"version": 1},
-                "workflow": _api_payload(self.revisions[workspace_id]),
+                "workflow": _api_payload(definition),
+                "definition_yaml": definition_to_yaml(workflow_definition_from_dict(definition)),
             }
-        if path.startswith("/api/agent-definitions/"):
-            agent_id = path.rsplit("/", 1)[1]
-            state = self.agents.get(((params or {}).get("workspace_id"), agent_id))
-            if state is None:
-                return self._missing(path, allow_404)
-            return {
-                "latest": state.get("draft") or state.get("published"),
-                "published": state.get("published"),
-            }
+        if path.startswith("/api/agent-definitions"):
+            raise AssertionError(f"import must not read the Agent catalog: GET {path}")
         if "/nodes/" in path and path.endswith("/code"):
             workspace_id, workflow_key, node_key = _node_code_key(path)
             revision = self.revisions.get(workspace_id)
@@ -204,6 +231,8 @@ class FakeClient:
 
     def _apply(self, method: str, path: str, body: dict | None, params: dict | None) -> Any:
         body = body or {}
+        if "/agent-definitions" in path:
+            raise AssertionError(f"import must not write the Agent catalog: {method} {path}")
         if method == "POST" and path == "/api/workspaces":
             workspace_id = body["id"]
             self.workspaces[workspace_id] = {"id": workspace_id, **body}
@@ -213,42 +242,21 @@ class FakeClient:
             definition = _definition_from_yaml(body["definition_yaml"])
             errors = []
             for node_key, node in (definition.get("nodes") or {}).items():
-                capability = node.get("capability")
-                routed = any(
-                    (state.get("published") or {}).get("definition", {}).get("capability")
-                    == capability
-                    for (ws, _), state in self.agents.items()
-                    if ws == workspace_id
-                )
+                if node.get("type") == "agent":
+                    if not (node.get("execution") or {}).get("runtime"):
+                        errors.append(f"agent node {node_key} has no execution.runtime")
+                    if not node.get("skill"):
+                        errors.append(f"agent node {node_key} has no skill")
+                    continue
                 coded = (self.node_codes.get((workspace_id, WORKFLOW_KEY, node_key)) or {}).get(
                     "published"
                 )
-                if not routed and not coded:
+                if not coded:
                     errors.append(f"no published node code for {WORKFLOW_KEY}.{node_key}")
             if errors:
                 return {"valid": False, "errors": errors}
             self.revisions[workspace_id] = definition
             return {"valid": True, "errors": []}
-        if method == "POST" and path == "/api/agent-definitions":
-            workspace_id = (params or {})["workspace_id"]
-            definition = {k: v for k, v in body.items() if k != "agent_id"}
-            self.agents[(workspace_id, body["agent_id"])] = {"draft": definition, "published": None}
-            return {"version": 1, "status": "draft", "definition_hash": _fake_hash(definition)}
-        if method == "PUT" and path.endswith("/draft") and "/agent-definitions/" in path:
-            agent_id = path.split("/")[3]
-            workspace_id = (params or {})["workspace_id"]
-            self.agents.setdefault((workspace_id, agent_id), {"published": None})
-            self.agents[(workspace_id, agent_id)]["draft"] = body
-            return {"status": "draft", "definition_hash": _fake_hash(body)}
-        if method == "POST" and path.endswith("/publish") and "/agent-definitions/" in path:
-            agent_id = path.split("/")[3]
-            workspace_id = (params or {})["workspace_id"]
-            state = self.agents[(workspace_id, agent_id)]
-            # #841: publish must assert the hash of the draft just saved.
-            assert body == {"expected_hash": _fake_hash(state["draft"])}
-            version = ((state.get("published") or {}).get("version") or 0) + 1
-            state["published"] = {"version": version, "definition": state["draft"]}
-            return {"version": version}
         if method == "PUT" and path.endswith("/code"):
             key = _node_code_key(path)
             state = self.node_codes.setdefault(key, {"published": None})
@@ -289,10 +297,9 @@ def _definition_from_yaml(text: str) -> dict:
 def run_all(client: FakeClient, seed: dict, specs: list[str]) -> list[str]:
     failures: list[str] = []
     bound = step1_workspaces(client, seed, specs, failures)
-    step2_agents(client, seed, bound, failures)
-    step3_first_revisions(client, seed, bound, failures)
-    step4_node_codes(client, seed, bound, failures)
-    step5_skills(client, seed, failures)
+    step2_first_revisions(client, seed, bound, failures)
+    step3_node_codes(client, seed, bound, failures)
+    step4_skills(client, seed, failures)
     return failures + verify(client, seed, bound)
 
 
@@ -300,12 +307,40 @@ def test_first_import_writes_and_verifies():
     client = FakeClient()
     failures = run_all(client, make_seed(), [])
     assert failures == []
-    assert client.agents[(WORKSPACE_ID, "invoice-summarizer-v1")]["published"]["version"] == 1
+    assert client.agents == {}
     assert client.node_codes[(WORKSPACE_ID, WORKFLOW_KEY, "fetch")]["published"]["code"] == CODE
+    assert not any("agent-definitions" in action for action in client.actions)
+
+
+def test_first_revision_only_inlines_legacy_agents():
+    client = FakeClient(with_revision=False)
+    seed = make_seed()
+    definition = make_definition()
+    summarize = definition["nodes"].pop("summarize")
+    summarize.update(after=[], inputs=[])
+    seed["workflows"][0]["definition"] = {
+        "key": WORKFLOW_KEY,
+        "label": "Invoices",
+        "nodes": {"summarize": summarize},
+        "edges": [],
+    }
+    seed["node_codes"] = []
+
+    assert run_all(client, seed, []) == []
+
+    agent = make_agent_definition()
+    node = client.revisions[WORKSPACE_ID]["nodes"]["summarize"]
+    assert node["execution"] == {"runtime": agent["runtime"]}
+    assert node["skill"] == {"key": agent["skill"], "ref": "latest"}
+    assert node["tools"] == agent["tools"]
+    assert node["requires_labels"] == agent["requires_labels"]
+    assert node["config_schema"] == agent["config_schema"]
+    assert client.agents == {}
+    assert not any("agent-definitions" in action for action in client.actions)
 
 
 def test_import_tolerates_v1_lock_shape(capsys):
-    """#322: step 5 is advisory only — a legacy v1 lock entry ({repo, ref,
+    """#322: step 4 is advisory only — a legacy v1 lock entry ({repo, ref,
     commit}) is reported through the same lock_entry_refs upgrade, never
     written back over deleted admin endpoints."""
     seed = make_seed()
@@ -328,22 +363,37 @@ def test_second_run_is_fully_idempotent():
     assert writes == []
 
 
-def test_content_guard_republishes_only_drifted_agent():
+def test_import_preserves_agent_history_without_catalog_api_calls():
     client = FakeClient()
-    assert run_all(client, make_seed(), []) == []
-    # Simulate an admin editing the Agent definition on the target instance.
-    state = client.agents[(WORKSPACE_ID, "invoice-summarizer-v1")]
-    edited = dict(state["published"]["definition"])
-    edited["skill"] = "acme/summarize-v2"
-    state["published"]["definition"] = edited
+    client.agents[(WORKSPACE_ID, "invoice-summarizer-v1")] = {
+        "published": {"version": 7, "definition": make_agent_definition()}
+    }
+    history_before = copy.deepcopy(client.agents)
 
-    client.actions.clear()
     assert run_all(client, make_seed(), []) == []
-    writes = [a for a in client.actions if a.startswith("DID")]
-    assert len(writes) == 2  # save draft + publish, for the drifted Agent only
-    assert all("agent-definitions" in action for action in writes)
-    assert state["published"]["version"] == 2
-    assert state["published"]["definition"]["skill"] == "acme/summarize"
+
+    assert client.agents == history_before
+    assert not any("agent-definitions" in action for action in client.actions)
+
+
+def test_verify_rejects_node_profile_drift():
+    client = FakeClient()
+    client.revisions[WORKSPACE_ID]["nodes"]["summarize"]["config_schema"] = {}
+
+    failures = run_all(client, make_seed(), [])
+
+    assert any("agent profiles" in failure and "matches=False" in failure for failure in failures)
+
+
+def test_verify_rejects_an_incomplete_node_profile():
+    client = FakeClient()
+    client.revisions[WORKSPACE_ID]["nodes"]["summarize"].pop("skill")
+    seed = make_seed()
+    seed["agents"][0]["definition"]["skill"] = ""
+
+    failures = run_all(client, seed, [])
+
+    assert any("incomplete=['summarize']" in failure for failure in failures)
 
 
 def test_node_code_drift_republishes_only_that_node():

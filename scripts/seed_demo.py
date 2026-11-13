@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Idempotently seed the repository-shipped demo into the local instance."""
+"""Seed the demo idempotently with self-contained nodes and no Agent rows."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from server.app.agent_catalog import builtin as agent_catalog_builtin
 from server.app.jobs import JobQueries
 from server.app.services.demo_material_seed import seed_demo_workspace_materials
 from server.app.services.demo_node_migration import migrate_demo_node_codes_to_workspaces
@@ -44,7 +43,6 @@ class SeedDemoResult:
     workspace_created: bool
     locks_updated: int
     node_codes_added: int
-    agents_added: int
     materials_added: int
 
 
@@ -132,11 +130,6 @@ def seed_demo(
         seed_demo_workspace_node_codes(settings, workspace_id, connect_source=job_db)
     )
 
-    # Older demo workspaces may have a revision but lack one of the factory
-    # Agents, so seed the two resources independently.
-    agents_added = len(
-        agent_catalog_builtin.seed_demo_workspace_agent_definitions(job_db, workspace_id)
-    )
     # Sample materials (design §9): seed-if-absent; skipped with a warning
     # when object storage is not configured on this instance.
     materials_added = len(
@@ -152,7 +145,6 @@ def seed_demo(
         workspace_created=workspace_created,
         locks_updated=locks_updated,
         node_codes_added=node_codes_added,
-        agents_added=agents_added,
         materials_added=materials_added,
     )
 
@@ -173,8 +165,7 @@ def main() -> None:
     print(
         f"[demo seed] workspace {action}: {result.workspace_id}; "
         f"lock 更新 {result.locks_updated}，"
-        f"node code 新增 {result.node_codes_added}，Agent 新增 {result.agents_added}，"
-        f"材料新增 {result.materials_added}"
+        f"node code 新增 {result.node_codes_added}，材料新增 {result.materials_added}"
     )
     print(
         "[demo seed] 接下来配置 workspace 的 provider/model，并开启 workspace 自动调度与 "

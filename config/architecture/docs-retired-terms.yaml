@@ -146,6 +146,14 @@ terms:
   - pattern: 'POST (?:/api)?/studio-agent/tools/workspaces/\{workspace_id\}/agent-definitions'
     retired_in: '#936（#440 P4：Studio scoped 写端点删除）'
     note: scoped AgentDefinition create POST 已删除；同路径 GET 只读清单保留
+  - pattern: '`step2_agents`'
+    retired_in: '#936（#440 P4：通用 seed importer 自含化）'
+    note: 旧 agents[] 只作为节点档案内联输入；importer 不再调用 Agent 写 API，
+      verify 改为校验 active revision 的规范化节点档案
+  - pattern: 'Agent 发布（按 workspace 作用域，内容一致跳过）'
+    retired_in: '#936（#440 P4：通用 seed importer 自含化）'
+    note: 通用 importer 的 Agent 发布步骤已删除；历史 versioned_entities 行与旧
+      job/replay resolver 保留，首版 revision 只发布内联后的节点档案
   - pattern: 'workspace-executor-evidence-matrix'
     retired_in: '#1103（证据矩阵改名）'
     note: 证据矩阵文件名沿用了已退役的 executor 概念（schema v47），已改名为
