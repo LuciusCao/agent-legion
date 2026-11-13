@@ -1,20 +1,51 @@
 """Exit-code verdicts and the shared error_message bound for the upload
 bulk lane.
 
-Split out of ``prepare.py`` for the file budget. The failed-result payload
-writers and the degraded archive writers (the v2 recycle targets: every
-reported archive must carry the metadata being reported as its
-``result.json`` member) moved one step further into
-``worker/upload/degraded_archive.py`` (#1168/#1169 收口轮的按主题拆分)；
-this module keeps the exit-code verdict face and the error_message
-truncation bound both sides share.
+Split out of ``prepare.py`` for the file budget. This module keeps the
+exit-code verdict face, the shared failed-result payload and the agent body
+archive writer; the metadata-only/degraded archive writers live in
+``worker/upload/degraded_archive.py``. Every reported archive carries its
+metadata as the reserved ``result.json`` member, written later by the result
+manifest lane.
 """
 
 from __future__ import annotations
 
+import tarfile
+from pathlib import Path, PurePosixPath
+from typing import Any
+
 from worker.upload.stderr_evidence import stderr_error_message
 
 MAX_ERROR_MESSAGE_CHARS = 4000
+
+
+def failed_metadata(task: Any, error_message: str) -> dict[str, Any]:
+    """failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态 / report 降级共用）。"""
+    return {
+        "status": "failed",
+        "exit_code": 1,
+        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
+        "command": list(task.command),
+        "output_artifacts": {},
+    }
+
+
+def write_agent_body(
+    archive: Path,
+    job_dir: Path,
+    evidence_dir: Path | None,
+    outputs: list[str],
+    direct: bool,
+    run_dir: Path,
+) -> None:
+    """Write declared outputs and the selected evidence directory as a body archive."""
+    with tarfile.open(archive, "w:gz") as tar:
+        if not direct:
+            for name in outputs:
+                tar.add(job_dir / PurePosixPath(name), arcname=name)
+        if evidence_dir is not None:
+            tar.add(evidence_dir, arcname=str(run_dir.relative_to(job_dir)))
 
 
 def exit_verdict(exit_code: int, failure: str | None, stderr_tail: bytes) -> tuple[str, str]:

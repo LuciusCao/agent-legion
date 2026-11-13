@@ -443,7 +443,7 @@ def test_pump_write_failure_diverts_events_to_state_dump(
     proc = _spawn_child(first, diverted, pause=0.5)
     reactor = _fresh_reactor()
     try:
-        handle = reactor.register(proc, str(events), "exec-9", "node_a")
+        handle = reactor.register(proc, str(events), "exec-9", "node_a", "lease-9")
         # 第一行成功落盘（写路径仍健康），随后删掉运行目录模拟 agent 自删。
         wait_for_predicate(lambda: events.read_text(encoding="utf-8") != "", timeout=10)
         shutil.rmtree(run_dir)
@@ -461,10 +461,12 @@ def test_pump_write_failure_diverts_events_to_state_dump(
     content = dump.read_text(encoding="utf-8")
     assert SECRET not in content
     lines = content.splitlines()
-    kept_event = json.loads(lines[0])
+    attempt = json.loads(lines[0])
+    assert attempt == {"type": "worker_attempt_start", "lease_id": "lease-9"}
+    kept_event = json.loads(lines[1])
     assert kept_event["type"] == "tool_execution_end"
     assert kept_event["result"]["content"][0]["text"] == "TOKEN=***"
-    assert lines[1] == "crash echo TOKEN=***"
+    assert lines[2] == "crash echo TOKEN=***"
     assert first not in content  # 删除前已交付原文件的行不重复进转储
 
 

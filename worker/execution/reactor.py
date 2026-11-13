@@ -165,11 +165,10 @@ class EventPumpReactor:
         output_path: str,
         execution_id: str = "",
         node_key: str = "",
+        lease_id: str = "",
     ) -> ReactorPumpHandle:
-        """Register one stream; the identity pair scopes the #1147 emergency
-        evidence dump (``<state_dir>/evidence/<exec>__<node>``) when the
-        events path stops accepting writes."""
-        stream = _Stream(proc, output_path, execution_id, node_key)
+        """Register one stream; identity and lease scope its emergency evidence."""
+        stream = _Stream(proc, output_path, execution_id, node_key, lease_id)
         self._register_stream(stream)
         return ReactorPumpHandle(self, stream)
 
@@ -411,7 +410,12 @@ class ReactorPumpHandle:
 
 
 def spawn_agent_pump(
-    proc: subprocess.Popen[bytes], output: Any, execution_id: str, node_key: str = ""
+    proc: subprocess.Popen[bytes],
+    output: Any,
+    execution_id: str,
+    node_key: str = "",
+    *,
+    lease_id: str = "",
 ) -> Any:
     """Event pump facade for one spawned agent process (#578 phase 1).
 
@@ -420,11 +424,13 @@ def spawn_agent_pump(
     ``AGENT_WORKER_EVENT_PUMP=thread`` keeps the legacy per-execution thread;
     a reactor that is disabled (or fails at registration) also falls back to
     it — the pump surface, ``join(timeout)``, is identical either way. The
-    identity pair rides the registration for the #1147 emergency evidence
-    dump (see EventPumpReactor.register)."""
+    identity pair and lease ride the registration for the #1147 emergency
+    evidence dump (see EventPumpReactor.register)."""
     if os.environ.get("AGENT_WORKER_EVENT_PUMP", "reactor") == "reactor":
         try:
-            return EventPumpReactor.get().register(proc, output.name, execution_id, node_key)
+            return EventPumpReactor.get().register(
+                proc, output.name, execution_id, node_key, lease_id
+            )
         except (ReactorUnavailable, OSError):
             print(
                 f"event-pump reactor unavailable for {execution_id}; using thread pump",
