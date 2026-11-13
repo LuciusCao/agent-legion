@@ -6,9 +6,10 @@ code_contract.RESULT_METADATA_MEMBER），头里只带固定 ASCII 引导值—�
 ``X-Agent-Result`` 头预算（h11 16KiB）与 #748/#755 的降级链随之退役。
 本模块只做「从提交的归档（spool/staging 文件）读回该成员」这一件事：
 
-- 流式 ``r|gz`` 扫到成员即停；找到后同样模式的防御性上限
-  （超限 = 畸形归档 = 拒收 400，半截 JSON 无法解析、截断无意义，口径
-  与 result_output_manifest._MAX_MANIFEST_BYTES 的既有纪律一致）。
+- 流式扫到成员即停；前序跳过成员与 tar 开销共享累计解压上限，找到后
+  成员自身还有防御性上限（超限 = 畸形归档 = 拒收 400，半截 JSON 无法
+  解析、截断无意义，口径与 result_output_manifest._MAX_MANIFEST_BYTES
+  的既有纪律一致）。
 - 任何契约违反（缺成员 / 非法 JSON / 非 dict / 超限）都 ValueError
   （带可定位原因）——与 v1 头路径「非法 JSON 即 ValueError → 路由
   400」的语义对齐；归档解包本身的既有错误路径（AgentBundleError 等）
@@ -28,8 +29,10 @@ from __future__ import annotations
 
 import json
 import tarfile
+from contextlib import closing
 from pathlib import Path
 
+from server.app.agent_broker.result_archive_stream import open_result_archive_stream
 from shared.code_contract import RESULT_METADATA_MEMBER
 
 # result.json 成员的读取上限：元数据的理论构成是 command 段数、stderr
@@ -37,6 +40,9 @@ from shared.code_contract import RESULT_METADATA_MEMBER
 # result_output_manifest._MAX_MANIFEST_BYTES 同口径（40 倍余量），超限即
 # 畸形归档，拒绝而非截断（半截 JSON 无法解析）。
 _MAX_RESULT_METADATA_BYTES = 1024 * 1024
+# 默认压缩包上限 64 MiB 的 8 倍：允许末尾元数据前的合法产物扫描，同时
+# 把单个请求在 threadpool 中的 gzip 解压工作限定在宽松硬上限内。
+_MAX_RESULT_ARCHIVE_SCAN_BYTES = 512 * 1024 * 1024
 
 
 def read_archived_result_metadata(archive: Path) -> str:
@@ -54,7 +60,8 @@ def read_archived_result_metadata(archive: Path) -> str:
     的 Host 侧故障，不是 Worker 的契约违约。
     """
     try:
-        with tarfile.open(archive, "r|gz") as tar:
+        with closing(open_result_archive_stream(archive, _MAX_RESULT_ARCHIVE_SCAN_BYTES)) as stream:
+            tar = tarfile.TarFile(str(archive), "r", stream)
             for member in tar:
                 if member.name != RESULT_METADATA_MEMBER:
                     continue
