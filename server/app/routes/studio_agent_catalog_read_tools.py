@@ -1,44 +1,30 @@
-"""Studio-agent agent-definition tool endpoints (issue #633).
+"""Studio-agent agent-definition read tool endpoints (issue #633).
 
-The workspace-scoped Agent surface for the authoring agent: read the
-workspace's Agent definitions (latest versions, all fields), start a NEW
-Agent definition draft, draft an EXISTING Agent definition, read the
-workspace's runtime → provider → models view aggregated from online
-Workers, and read the per-runtime tool catalog. Read-only or draft-only by
-design:
+The workspace-scoped Agent surface for the authoring agent reads historical
+Agent definitions (latest versions, all fields), the runtime → provider →
+models view aggregated from online Workers, and the per-runtime tool catalog:
 
 - Provider/model declarations are worker-owned (EXEC-RUNTIME-MODELS-001);
   this surface only reads the aggregation — there is no edit tool.
 - The agent tool catalog is a code-defined static projection
-  (EXEC-RUNTIME-CATALOG-001); the only editable tool surface is the
-  ``tools`` selection inside an Agent definition draft.
-- Publishing/archiving Agent definitions stays on the guarded human router
-  (STUDIO-AGENT-001).
+  (EXEC-RUNTIME-CATALOG-001); node ``tools`` selections are edited in the
+  workflow draft through ``save_workflow_draft``.
+- Publishing/archiving historical Agent definitions stays on the guarded
+  human router (STUDIO-AGENT-001).
 """
 
-from typing import Annotated, Any
+from fastapi import APIRouter, Depends
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import ValidationError
-
-from server.app.agent_catalog import AgentDefinition
 from server.app.auth.dependencies import (
     require_studio_agent_scope,
     require_studio_agent_workspace,
 )
 from server.app.jobs import JobQueries
-from server.app.routes.agent_definition_contracts import (
-    AgentDefinitionPayload,
-    AgentVersionResponse,
-)
+from server.app.routes.agent_definition_contracts import AgentVersionResponse
 from server.app.routes.agent_runtimes_contracts import AgentRuntimesResponse
-from server.app.routes.studio_agent_tool_contracts import (
-    StudioAgentAgentCreateRequest,
-    StudioAgentAgentVersionsResponse,
-)
+from server.app.routes.studio_agent_tool_contracts import StudioAgentAgentVersionsResponse
 from server.app.routes.workspace_runtime_models import WorkspaceRuntimeModelsResponse
 from server.app.services.studio_agent_catalog_reads import StudioAgentCatalogReads
-from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.services.versioned_entities import VersionedEntity
 from server.app.settings import Settings
 
@@ -57,25 +43,17 @@ def _version_response(entity: VersionedEntity) -> AgentVersionResponse:
     )
 
 
-def _parse_agent_definition(payload: AgentDefinitionPayload) -> AgentDefinition:
-    try:
-        return AgentDefinition.model_validate(payload.model_dump())
-    except ValidationError as exc:
-        # ctx carries the raw exception objects — not JSON serializable.
-        detail = [{k: v for k, v in error.items() if k != "ctx"} for error in exc.errors()]
-        raise HTTPException(status_code=422, detail=detail) from exc
-
-
 def create_studio_agent_catalog_read_tools_router(
     job_db: JobQueries, settings: Settings
 ) -> APIRouter:
-    """Workspace-scoped Agent-definition catalog tools (issue #633).
+    """Workspace-scoped Agent-definition catalog read tools (issue #633).
 
     Mounted on the ``workspace_scoped`` sub-router inside
     ``studio_agent_tools.create_studio_agent_tools_router``: every endpoint
     requires a studio-agent scoped token AND honors the run token's
     workspace binding (STUDIO-AGENT-001).
     """
+    del settings  # the read-only surface has no write-service dependencies
     router = APIRouter(
         dependencies=[Depends(require_studio_agent_scope), Depends(require_studio_agent_workspace)]
     )
@@ -86,54 +64,10 @@ def create_studio_agent_catalog_read_tools_router(
         response_model=StudioAgentAgentVersionsResponse,
     )
     def list_agent_definitions(workspace_id: str) -> StudioAgentAgentVersionsResponse:
-        """Latest version per Agent of the workspace (a pending draft beats
-        the published row), with the full definition payload — the read side
-        of the agent-authoring loop."""
+        """Latest historical version per Agent of the workspace (a pending
+        draft beats the published row), with the full definition payload."""
         entities = reads.list_agent_definitions(workspace_id)
         return StudioAgentAgentVersionsResponse(versions=[_version_response(e) for e in entities])
-
-    # #935（#440 P3，D3）：两个 Agent 定义写端点 deprecated——MCP 写工具
-    # 已改为返回引导、不再调用；P4 与工具一并删除。
-    @router.put(
-        "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
-        response_model=AgentVersionResponse,
-        deprecated=True,
-    )
-    def save_agent_definition_draft(
-        workspace_id: str,
-        agent_id: str,
-        payload: AgentDefinitionPayload,
-        user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
-    ) -> AgentVersionResponse:
-        """Draft-only write: a human publishes it in Studio (STUDIO-AGENT-001)."""
-        definition = _parse_agent_definition(payload)
-        entity = StudioAgentToolsService(job_db, settings).save_agent_definition_draft(
-            workspace_id, agent_id, definition, str(user["id"])
-        )
-        return _version_response(entity)
-
-    @router.post(
-        "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions",
-        response_model=AgentVersionResponse,
-        status_code=201,
-        deprecated=True,
-    )
-    def create_agent_definition(
-        workspace_id: str,
-        payload: StudioAgentAgentCreateRequest,
-        user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
-    ) -> AgentVersionResponse:
-        """Start a NEW Agent definition draft: the agent_id derives from the
-        capability (no explicit id on this surface — a colliding capability
-        gets a 409 pointing at the existing Agent), the draft stamps
-        ``studio-agent:{user_id}``. Draft-only like the save: a human
-        publishes it in Studio (STUDIO-AGENT-001)."""
-        definition = _parse_agent_definition(payload)
-        service = StudioAgentToolsService(job_db, settings)
-        entity = service.save_agent_definition_draft(
-            workspace_id, None, definition, str(user["id"])
-        )
-        return _version_response(entity)
 
     @router.get(
         "/studio-agent/tools/workspaces/{workspace_id}/runtime-models",
@@ -153,9 +87,9 @@ def create_studio_agent_catalog_read_tools_router(
     )
     def get_agent_runtimes(workspace_id: str) -> AgentRuntimesResponse:
         """Per-runtime agent tool catalog (tool names, tiers, activation).
-        Static code-defined projection (EXEC-RUNTIME-CATALOG-001): agent
-        "tools" are not runtime-editable — the editable surface is the
-        ``tools`` selection inside Agent definition drafts."""
+        Static code-defined projection (EXEC-RUNTIME-CATALOG-001): runtime
+        catalogs are not editable; node ``tools`` selections live in the
+        workflow draft."""
         del workspace_id  # catalog is global; the path keys it to the workspace
         return AgentRuntimesResponse(**reads.agent_runtimes())
 

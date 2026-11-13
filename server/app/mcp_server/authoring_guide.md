@@ -118,11 +118,8 @@ editing and re-read before submitting.
   workspace's retired Agent definitions (latest version per agent with all
   fields and version metadata). Agent definitions no longer supply node
   profiles (#440); read them only to see where an inlined node profile came
-  from. New or changed profiles go on the workflow node (section 5).
-- `create_agent_definition(...)` / `save_agent_definition_draft(...)` —
-  DEPRECATED, write nothing: they return guidance to put the profile on the
-  workflow agent node with `save_workflow_draft` (section 5). Do not call
-  them.
+  from. New or changed profiles go on the workflow node and are saved with
+  `save_workflow_draft` (section 5).
 - `get_runtime_models(workspace_id)` — the workspace's available
   `{runtime: {provider: [models]}}` view aggregated from its ONLINE workers'
   declarations. Discovery only: provider/model declarations are worker-owned

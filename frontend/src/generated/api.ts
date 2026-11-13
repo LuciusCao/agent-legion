@@ -1227,42 +1227,11 @@ export interface paths {
     }
     /**
      * List Agent Definitions
-     * @description Latest version per Agent of the workspace (a pending draft beats
-     *     the published row), with the full definition payload — the read side
-     *     of the agent-authoring loop.
+     * @description Latest historical version per Agent of the workspace (a pending
+     *     draft beats the published row), with the full definition payload.
      */
     get: operations['list_agent_definitions_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_get']
     put?: never
-    /**
-     * Create Agent Definition
-     * @deprecated
-     * @description Start a NEW Agent definition draft: the agent_id derives from the
-     *     capability (no explicit id on this surface — a colliding capability
-     *     gets a 409 pointing at the existing Agent), the draft stamps
-     *     ``studio-agent:{user_id}``. Draft-only like the save: a human
-     *     publishes it in Studio (STUDIO-AGENT-001).
-     */
-    post: operations['create_agent_definition_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /**
-     * Save Agent Definition Draft
-     * @deprecated
-     * @description Draft-only write: a human publishes it in Studio (STUDIO-AGENT-001).
-     */
-    put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']
     post?: never
     delete?: never
     options?: never
@@ -1280,9 +1249,9 @@ export interface paths {
     /**
      * Get Agent Runtimes
      * @description Per-runtime agent tool catalog (tool names, tiers, activation).
-     *     Static code-defined projection (EXEC-RUNTIME-CATALOG-001): agent
-     *     "tools" are not runtime-editable — the editable surface is the
-     *     ``tools`` selection inside Agent definition drafts.
+     *     Static code-defined projection (EXEC-RUNTIME-CATALOG-001): runtime
+     *     catalogs are not editable; node ``tools`` selections live in the
+     *     workflow draft.
      */
     get: operations['get_agent_runtimes_api_studio_agent_tools_workspaces__workspace_id__agent_runtimes_get']
     put?: never
@@ -7498,37 +7467,6 @@ export interface components {
       workflow_key?: string | null
     }
     /**
-     * StudioAgentAgentCreateRequest
-     * @description Tool-surface create payload: same editable fields as the save, minus
-     *     an explicit agent_id (#635) — the capability derives it, so the tool
-     *     never spawns a second entity for an occupied capability (409 instead).
-     *     The human route keeps its optional agent_id for legacy clients.
-     */
-    StudioAgentAgentCreateRequest: {
-      /** Capability */
-      capability: string
-      /** Config Schema */
-      config_schema?: {
-        [key: string]: unknown
-      }
-      /** Requires Labels */
-      requires_labels?: {
-        [key: string]: string
-      }
-      /**
-       * Runtime
-       * @enum {string}
-       */
-      runtime: 'pi' | 'velites'
-      /**
-       * Skill
-       * @default
-       */
-      skill: string
-      /** Tools */
-      tools?: string[]
-    }
-    /**
      * StudioAgentAgentVersionsResponse
      * @description Latest version per Agent with the FULL definition payload (#633) —
      *     the human list route carries only a summary, but the authoring agent's
@@ -11875,77 +11813,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['StudioAgentAgentVersionsResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  create_agent_definition_api_studio_agent_tools_workspaces__workspace_id__agent_definitions_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['StudioAgentAgentCreateRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentDefinitionPayload']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
         }
       }
       /** @description Validation Error */

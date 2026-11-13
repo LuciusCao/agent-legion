@@ -2,9 +2,9 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 35 tools, and a tools/call round-trip
+handshake, tools/list discovers the 33 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
-text. A second spawn without a session binding lists 32 tools (#660: the two
+text. A second spawn without a session binding lists 31 tools (#660: the two
 session-bound tools only register when a chat session is bound).
 """
 
@@ -97,7 +97,6 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             assert names == [
                 "compare_jobs",
                 "compare_workflow",
-                "create_agent_definition",
                 "create_skill",
                 "get_active_workflow",
                 "get_agent_definitions",
@@ -120,7 +119,6 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "list_jobs",
                 "read_artifact",
                 "request_workflow_publish",
-                "save_agent_definition_draft",
                 "save_node_code_draft",
                 "save_node_prompt",
                 "save_preview_panel_draft",
@@ -164,7 +162,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
     asyncio.run(asyncio.wait_for(run(), timeout=60))
 
 
-def test_mcp_stdio_without_session_lists_33_tools(stub_backend: str) -> None:
+def test_mcp_stdio_without_session_lists_31_tools(stub_backend: str) -> None:
     # #660 phase C: a static config without AGENT_LEGION_MCP_SESSION_ID never
     # registers the two session-bound tools (external self-service setups).
     async def run() -> None:
@@ -184,7 +182,7 @@ def test_mcp_stdio_without_session_lists_33_tools(stub_backend: str) -> None:
             await session.initialize()
             tools = await session.list_tools()
             names = {tool.name for tool in tools.tools}
-            assert len(names) == 33
+            assert len(names) == 31
             assert "get_studio_context" not in names
             assert "get_job_context" not in names
 
