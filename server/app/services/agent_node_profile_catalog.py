@@ -27,7 +27,7 @@ from server.app.services.agent_service import (
     has_published_agent_definitions,
     published_agent_definitions,
 )
-from server.app.services.agent_version_pins import resolve_pinned_agent_definition
+from server.app.services.node_profile_pins import resolve_pinned_agent_definition
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries

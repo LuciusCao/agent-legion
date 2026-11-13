@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from server.app.services.quality_labels import QUALITY_REASON_CODES
 
@@ -114,19 +114,20 @@ class QualityLabelResponse(BaseModel):
 
 
 class QualityReplayCreateRequest(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_retired_agent_version(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "agent_version" in value:
+            raise ValueError(
+                "agent_version is retired (#936); use revision_id or use_draft"
+                " to select a self-contained agent execution profile"
+            )
+        return value
+
     # #1079（#440 D6）：agent 节点按 workflow revision（或当前草稿）选执行
-    # 档案回放；都不选 = 原运行自身的执行档案。
+    # 档案回放；自含节点都不选 = 原运行自身的执行档案，legacy 节点必须选择。
     revision_id: str | None = None
     use_draft: bool = False
-    # Legacy Agent-version pin, only for not-yet-inlined agent nodes of older
-    # job snapshots (unset = the Agent version the sampled run ran, falling
-    # back to the currently published one when the sample recorded none).
-    agent_version: int | None = Field(
-        default=None,
-        gt=0,
-        description="Deprecated (#440 D6): replay with a workflow revision instead.",
-        json_schema_extra={"deprecated": True},
-    )
 
 
 class QualityReplay(BaseModel):

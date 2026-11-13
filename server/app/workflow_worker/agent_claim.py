@@ -14,14 +14,13 @@ from server.app.executors.models import ConfigurationFailureRequest
 from server.app.services.agent_node_profile_types import (
     PROFILE_SOURCE_DEFINITION,
 )
-from server.app.services.agent_version_pins import agent_version_pin
 from server.app.services.node_config import dispatch_config_resolution
 from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_execution_config import (
     agent_effective_schema,
     node_config_reserved_defaults,
 )
-from server.app.services.node_profile_pins import node_profile_pin
+from server.app.services.node_profile_pins import agent_version_pin, node_profile_pin
 from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_claim_profile import resolve_claim_profile
 from server.app.workflow_worker.agent_gate import agent_claim_allowed

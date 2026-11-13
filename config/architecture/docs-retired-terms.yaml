@@ -127,10 +127,14 @@ terms:
       revision 中 v93 未能内联的节点（新 job 仍按 capability 解析，直到节点补
       runtime 并发布新 revision）
   - pattern: 'agent_version_pins'
-    retired_in: '#1079（#440 P3b，D6：quality replay pin 改按 revision）'
-    note: 回放的执行档案按 workflow revision（或当前草稿）选，副本 run 冻结
-      node_profiles pin {revision_id, node_key, profile_hash}（EXEC-QUALITY-REPLAY-001）；
-      旧 agent_versions pin 只读兼容存量 run，不再为新回放写入
+    retired_in: '#936（#440 P4：legacy Agent-version replay 新建面退役）'
+    note: 旧模块已删除，存量 run 的 reader/resolver 内迁 node_profile_pins；新回放只写
+      node_profiles pin {revision_id, node_key, profile_hash}，旧 agent_versions pin
+      继续按原 version/hash 执行与恢复（EXEC-QUALITY-REPLAY-001）
+  - pattern: 'QualityReplayCreateRequest.*agent_version'
+    retired_in: '#936（legacy Agent-version replay 新建契约删除）'
+    note: 新建请求只接受 revision_id/use_draft；旧字段给明确迁移错误，历史
+      QualityReplay 响应的 agent_id/agent_version 身份列保留
   - pattern: '`create_agent_definition\(\.\.\.\)`|`save_agent_definition_draft\(\.\.\.\)`'
     retired_in: '#936（#440 P4：Studio/MCP 写面删除）'
     note: 只匹配 MCP 调用形态；人类 REST 路由的同名处理函数由后续切片处置。

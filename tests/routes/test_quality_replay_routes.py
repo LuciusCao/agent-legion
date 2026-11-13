@@ -194,17 +194,23 @@ def test_replay_unknown_ids_return_404(client, tmp_path):
     assert response.status_code == 404
 
 
-def test_replay_agent_version_validation(client, tmp_path):
+@pytest.mark.parametrize("agent_version", [1, 0, None])
+def test_replay_agent_version_field_is_retired(client, tmp_path, agent_version):
     workspace_id = _seed(tmp_path)
     base = f"/api/workspaces/{workspace_id}/quality"
-    # Executor-routed node: an Agent version pin makes no sense.
-    response = client.post(f"{base}/sample-items/item-1/replays", json={"agent_version": 1})
-    assert response.status_code == 400
-    # Contract validation: version numbers are positive.
-    assert (
-        client.post(f"{base}/sample-items/item-1/replays", json={"agent_version": 0}).status_code
-        == 422
+
+    response = client.post(
+        f"{base}/sample-items/item-1/replays", json={"agent_version": agent_version}
     )
+
+    assert response.status_code == 422, response.text
+    assert "agent_version is retired (#936)" in response.text
+    assert "revision_id" in response.text and "use_draft" in response.text
+    job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    with job_db.connect() as conn:
+        for table in ("quality_replays", "runs", "agent_execution_requests"):
+            assert conn.execute(f"select count(*) as n from {table}").fetchone()["n"] == 0
+        assert conn.execute("select count(*) as n from jobs").fetchone()["n"] == 1
 
 
 def test_replay_by_workflow_revision(client, tmp_path):

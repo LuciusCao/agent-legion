@@ -51,7 +51,6 @@ class QualityReplaySetup:
         definition: WorkflowDefinition,
         node: WorkflowNode,
         replay_id: str,
-        pin: dict[str, Any] | None,
         profile: ReplayProfile | None = None,
     ) -> str:
         """Create the isolated copy job and set its node states atomically."""
@@ -76,7 +75,9 @@ class QualityReplaySetup:
             "source_job_id": str(job["id"]),
         }
         node_code_versions = (original_payload or {}).get("node_code_versions") or {}
-        agent_versions = {node.key: pin} if pin is not None else {}
+        # #936: new replays never write a legacy pin. The empty member keeps
+        # the established run-id digest and reconstructed-payload shape.
+        agent_versions: dict[str, Any] = {}
         node_profiles = {node.key: profile.pin} if profile is not None else {}
         # The digest payload mirrors the retired batch payload so the
         # deterministic run id is stable across the cutover; the authoritative
