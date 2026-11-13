@@ -128,6 +128,8 @@ class UploadTask:
     # 判败载荷的调试/观测锚点。
     prepared_metadata: dict[str, Any] | None = None
     prepared_archive: Path | None = None
+    # 同任务直传回落重打包使用的首次扫描证据目录；运行态、不持久化。
+    scanned_evidence_dir: Path | None = None
     # #551 观测：分段计时器（submit 时创建；运行态，不入 marker——崩溃恢复
     # 的任务重新计时，queue_wait 从重新入队起算）。
     report_timer: Any = None

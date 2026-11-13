@@ -136,6 +136,43 @@ def test_cleaned_run_rejects_old_success_plus_incomplete_current_attempt(
     assert client.uploads == {}
 
 
+def test_recovered_archive_excludes_previous_lease_events(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    old_attempt = [
+        {"type": "worker_attempt_start", "lease_id": "lease-old"},
+        {"type": "agent_start"},
+        {
+            "type": "message_end",
+            "message": {"role": "assistant", "stopReason": "length"},
+        },
+        {"type": "outputs_validation", "missing": [], "violations": []},
+        {"type": "agent_end"},
+    ]
+    current_attempt = [
+        {"type": "worker_attempt_start", "lease_id": "lease-1"},
+        *_successful_events(),
+    ]
+    _write_emergency(evidence_root, [*old_attempt, *current_attempt], lease_id=None)
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    client = _ArchiveClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert "output_truncation" not in report
+    assert [event["type"] for event in _archive_events(client)] == [
+        "agent_start",
+        "message_end",
+        "outputs_validation",
+        "agent_end",
+    ]
+
+
 def test_recovered_emergency_events_use_outbound_redaction(
     tmp_path: Path, evidence_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -458,6 +495,38 @@ def test_direct_fallback_after_cleanup_reuses_scanned_verdict(
     assert report["exit_code"] == exit_code
     assert report["error_message"] == error
     assert set(report["output_artifacts"]) == {"output.json"}
+    assert list(client.uploads.values()) == [b"{}"]
+
+
+def test_direct_fallback_preserves_recovered_evidence_directory(
+    tmp_path: Path, evidence_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from worker.artifact.upload import DirectUploadError
+    from worker.upload import queue as upload_queue
+
+    def failing_direct(_path: Path, _spec: object, **_kwargs: object) -> str:
+        raise DirectUploadError("presigned PUT rejected")
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", failing_direct)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _write_emergency(evidence_root, _successful_events())
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    task = _task(work_root, exit_code=0)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    client = _ArchiveClient()
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert client.reports[0]["status"] == "completed"
+    assert set(client.reports[0]["output_artifacts"]) == {"output.json"}
+    assert [event["type"] for event in _archive_events(client)] == [
+        "agent_start",
+        "message_end",
+        "outputs_validation",
+        "agent_end",
+    ]
     assert list(client.uploads.values()) == [b"{}"]
 
 
