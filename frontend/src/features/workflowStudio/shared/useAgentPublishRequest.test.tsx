@@ -89,6 +89,40 @@ describe('useAgentPublishRequest', () => {
     )
   })
 
+  it('refetches the server draft when a publish request arrives (#1198)', async () => {
+    let releaseRequest: ((record: StudioPublishRequestRecord) => void) | null =
+      null
+    mocks.fetchPendingPublishRequest.mockImplementation(
+      () =>
+        new Promise<StudioPublishRequestRecord>((resolve) => {
+          releaseRequest = resolve
+        })
+    )
+    const client = createTestQueryClient()
+    const draftFetch = vi.fn(async () => null)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(
+      () => {
+        useQuery({
+          queryKey: extraQueryKeys.workflowStudioDraft('ws1'),
+          queryFn: draftFetch,
+        })
+        return useAgentPublishRequest('ws1')
+      },
+      { wrapper }
+    )
+    await waitFor(() => expect(draftFetch).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      releaseRequest?.(requestRecord())
+    })
+
+    await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
+    await waitFor(() => expect(draftFetch).toHaveBeenCalledTimes(2))
+  })
+
   it('keeps pendingRequest null when the workspace has no request', async () => {
     const { result } = renderHookWithProviders()
 
@@ -436,7 +470,8 @@ describe('useAgentPublishRequest', () => {
       { wrapper }
     )
     await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
-    // 初始装载的取数不计入 confirm 段。
+    // #1198 的 pending 到达重取落定后，再把初始装载取数排除出 confirm 段。
+    await waitFor(() => expect(draftFetch).toHaveBeenCalledTimes(2))
     order.length = 0
     draftFetch.mockClear()
 

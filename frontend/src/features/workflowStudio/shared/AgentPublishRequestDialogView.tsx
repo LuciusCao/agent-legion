@@ -27,14 +27,15 @@ export function AgentPublishRequestDialogView({
       canceling={agentRequest.canceling}
       // #542：发布面 advisory（skill 无机器契约）——poll 读取侧现算透传。
       advisories={agentRequest.pendingRequest.warnings ?? []}
+      allowConfirmWithoutLocalChanges
       onConfirm={onConfirm}
       onCancel={() => void agentRequest.cancel()}
     />
   )
 }
 
-/** 手动与 agent 两个确认对话框共享的 props（workflow/revision/compare
- * 数据流）：两个对话框对同一份草稿展示同一份比对结果。 */
+/** 手动与 Agent 对话框共享展示 props；本地 compare 只负责展示，Agent
+ * 请求确认身份由服务端 draft_hash 绑定。 */
 export function reviewDialogProps(studio: {
   revision?: WorkflowRevisionSummary | null
   createsRevision?: boolean

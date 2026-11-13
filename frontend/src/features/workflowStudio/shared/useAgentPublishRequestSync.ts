@@ -15,6 +15,16 @@ export function useAgentPublishRequestSync(
   const landNotice = useAgentPublishNoticeStore((s) => s.landNotice)
   /** 上一轮见过的 pending id：观测 pending→null 跳变用。 */
   const lastSeenPendingId = useRef<string | null>(null)
+  const pendingRequestId = pendingRequest?.id ?? null
+
+  useEffect(() => {
+    if (!workspaceId || !pendingRequestId) return
+    // #1198：Agent 保存并请求发布时，立即重取服务端草稿；现有 hydrate
+    // 只在画布未触碰时应用，本地未保存编辑仍走 CAS 冲突保护。
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.workflowStudioDraft(workspaceId),
+    })
+  }, [pendingRequestId, queryClient, workspaceId])
 
   const invalidate = useCallback(async () => {
     if (!workspaceId) return
