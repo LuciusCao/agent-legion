@@ -15,6 +15,7 @@ from server.app.services.agent_node_profile import resolve_agent_node_profile
 from server.app.services.agent_service import AgentService
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.skill_lock_store import SkillLockStore
+from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
 from server.app.workflows.definition import workflow_definition_from_dict
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -50,7 +51,8 @@ def _agent_rows(settings, workspace_id: str) -> list[dict]:
 
 def _assert_demo_profiles(revision: dict) -> None:
     definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-    assert not definition.execution.runtime
+    assert definition.execution.runtime == "velites"
+    assert DEMO_WORKFLOW_DEFINITION["execution"] == {"runtime": "velites"}
     expected = {
         "write_script": ("example-write-script-v1", "write-script"),
         "review_script": ("example-review-script-v1", "review-script"),
@@ -58,6 +60,7 @@ def _assert_demo_profiles(revision: dict) -> None:
         "review_questions": ("example-review-questions-v1", "review-questions"),
     }
     for node_key, (agent_id, skill_name) in expected.items():
+        assert DEMO_WORKFLOW_DEFINITION["nodes"][node_key]["execution"] == {"runtime": "velites"}
         node = definition.nodes[node_key]
         assert node.execution.runtime == "velites"
         assert node.skill is not None
