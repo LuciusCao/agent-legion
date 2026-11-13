@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+
+- 存量悬挂 job 产物恢复调查（issue #1019，M4）：新增 `scripts/clean_dangling_job_artifacts.py` 默认且仅 dry-run 的扫描 CLI，以服务器只读事务和 keyset 分页钉住 latest 清单行、job 代次与 rerun 范围，经双 HEAD、完整 LIST、流式 raw/gzip sha256、跨 job 正面对照及 unknown/空 LIST/20 行/2% 熔断生成带稳定 `plan_sha256` 的机器可读计划；不删行或对象、不执行 rerun、不撤 hydration 公告、不恢复调度，阈值未校准前禁止生产 apply，后续受计划约束的 rerun apply 由 M5 另行交付。
+
 ### Fixed
 
 - Provider 鉴权失败导致 velites 因声明产物缺失返回 exit 1 时，Worker 结果准备不再丢弃结构化事件中的真实错误并上报裸 `Agent process exited 1`（issue #1502）：对 HTTP 401、HTTP 200 错误体内的 `code=401`，以及 API key disabled / invalid / revoked 等明确签名保留 Provider 原始错误，Host 既有分类随之记录为 `technical/provider_request`，可通过现有技术错误筛选与 `rerun-by-failure` 在修复凭据后手动重跑；普通非鉴权模型错误与其他非零退出仍保持原归因，不新增自动重试。

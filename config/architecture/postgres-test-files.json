@@ -158,6 +158,7 @@
     "tests/routes/test_workspace_runtime_models.py",
     "tests/routes/test_workspace_secrets.py",
     "tests/scripts/test_bind_legacy_material_etags.py",
+    "tests/scripts/test_clean_dangling_job_artifacts.py",
     "tests/services/test_agent_artifact_inject.py",
     "tests/services/test_agent_artifacts.py",
     "tests/services/test_agent_backfill_report.py",

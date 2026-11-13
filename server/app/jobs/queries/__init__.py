@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from server.app.jobs.queries.artifact_dangling import ArtifactDanglingQueriesMixin  # #1019
 from server.app.jobs.queries.base import JobQueriesBase
 from server.app.jobs.queries.groups import (
     IdentityQueriesMixin,
@@ -52,6 +53,8 @@ class JobQueries(
     JobBatchOperationQueriesMixin,
     # M61: batch-ops task-center listing/archive views (standalone mixin).
     JobBatchOperationListingQueriesMixin,
+    # #1019: read-only artifact recovery dry-run scans.
+    ArtifactDanglingQueriesMixin,
     JobQueriesBase,
 ):
     """Backward-compatible facade for all workspace/job query operations.
