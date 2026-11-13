@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -83,7 +82,7 @@ def recover_completed_run(task: UploadTask, job_dir: Path, run_dir: Path) -> Pat
 
 
 def copy_completed_emergency_events(task: UploadTask) -> Path | None:
-    """Stage the current lease's complete emergency stream for result delivery."""
+    """Stage only the latest matching lease's complete events for delivery."""
     incident = incident_dir(task.execution_id, task.node_key)
     if incident is None:
         return None
@@ -92,7 +91,23 @@ def copy_completed_emergency_events(task: UploadTask) -> Path | None:
         return None
     target = incident / "recovered"
     target.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(source, target / "events.jsonl")
+    with (
+        source.open(encoding="utf-8", errors="replace") as src,
+        (target / "events.jsonl").open("w", encoding="utf-8") as dst,
+    ):
+        selected = False
+        for line in src:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                event = None
+            if isinstance(event, dict) and event.get("type") == EMERGENCY_ATTEMPT_EVENT:
+                selected = event.get("lease_id") == task.lease_id
+                dst.seek(0)
+                dst.truncate()
+                continue
+            if selected:
+                dst.write(line)
     return target
 
 
@@ -130,5 +145,6 @@ def repack_scanned_result(
     archive = task.execution_dir / "result.tar.gz"
     job_dir = task.execution_dir / "job"
     run_dir = job_dir / "runs" / task.node_key / "worker"
-    write_agent_archive(task, archive, job_dir, run_dir, run_dir, outputs, True)
+    evidence_dir = task.scanned_evidence_dir or run_dir
+    write_agent_archive(task, archive, job_dir, run_dir, evidence_dir, outputs, True)
     return dict(metadata), archive, list(outputs)

@@ -123,6 +123,7 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     job_dir = task.execution_dir / "job"
     run_dir = job_dir / "runs" / task.node_key / "worker"
     evidence_dir = recovery.recover_completed_run(task, job_dir, run_dir)
+    task.scanned_evidence_dir = evidence_dir
     events = evidence_dir / "events.jsonl"
     # Pi exits 0 even when the model call fails (e.g. provider 401); one
     # pass folds the model-error scan into the compression rewrite.
