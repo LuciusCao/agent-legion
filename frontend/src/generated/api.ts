@@ -223,11 +223,7 @@ export interface paths {
     /** List Agent Definitions */
     get: operations['list_agent_definitions_api_agent_definitions_get']
     put?: never
-    /**
-     * Create Agent Definition
-     * @deprecated
-     */
-    post: operations['create_agent_definition_api_agent_definitions_post']
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -245,90 +241,6 @@ export interface paths {
     get: operations['get_agent_definition_api_agent_definitions__agent_id__get']
     put?: never
     post?: never
-    /**
-     * Archive Agent Definition
-     * @deprecated
-     */
-    delete: operations['archive_agent_definition_api_agent_definitions__agent_id__delete']
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/agent-definitions/{agent_id}/copy': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * Copy Agent Definition
-     * @deprecated
-     */
-    post: operations['copy_agent_definition_api_agent_definitions__agent_id__copy_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/agent-definitions/{agent_id}/draft': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /**
-     * Save Agent Definition Draft
-     * @deprecated
-     */
-    put: operations['save_agent_definition_draft_api_agent_definitions__agent_id__draft_put']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/agent-definitions/{agent_id}/publish': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * Publish Agent Definition
-     * @deprecated
-     */
-    post: operations['publish_agent_definition_api_agent_definitions__agent_id__publish_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/agent-definitions/{agent_id}/rollback': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /**
-     * Rollback Agent Definition
-     * @deprecated
-     */
-    post: operations['rollback_agent_definition_api_agent_definitions__agent_id__rollback_post']
     delete?: never
     options?: never
     head?: never
@@ -3790,11 +3702,6 @@ export interface components {
       revision: components['schemas']['WorkflowRevisionSummary']
       workflow: components['schemas']['WorkflowDefinitionResponse']
     }
-    /** AgentArchiveResponse */
-    AgentArchiveResponse: {
-      /** Archived */
-      archived: number
-    }
     /**
      * AgentCatalogResponse
      * @description Agent catalog for Studio (issue #198: agents-only semantics).
@@ -3837,66 +3744,6 @@ export interface components {
       node_key: string
       /** Workspace Id */
       workspace_id: string
-    }
-    /** AgentCopyRequest */
-    AgentCopyRequest: {
-      /** New Agent Id */
-      new_agent_id: string
-    }
-    /** AgentCreateRequest */
-    AgentCreateRequest: {
-      /** Agent Id */
-      agent_id?: string | null
-      /** Capability */
-      capability: string
-      /** Config Schema */
-      config_schema?: {
-        [key: string]: unknown
-      }
-      /** Requires Labels */
-      requires_labels?: {
-        [key: string]: string
-      }
-      /**
-       * Runtime
-       * @enum {string}
-       */
-      runtime: 'pi' | 'velites'
-      /**
-       * Skill
-       * @default
-       */
-      skill: string
-      /** Tools */
-      tools?: string[]
-    }
-    /**
-     * AgentDefinitionPayload
-     * @description Editable Agent definition fields (pure: no provider/model/thinking).
-     */
-    AgentDefinitionPayload: {
-      /** Capability */
-      capability: string
-      /** Config Schema */
-      config_schema?: {
-        [key: string]: unknown
-      }
-      /** Requires Labels */
-      requires_labels?: {
-        [key: string]: string
-      }
-      /**
-       * Runtime
-       * @enum {string}
-       */
-      runtime: 'pi' | 'velites'
-      /**
-       * Skill
-       * @default
-       */
-      skill: string
-      /** Tools */
-      tools?: string[]
     }
     /** AgentDefinitionResponse */
     AgentDefinitionResponse: {
@@ -3977,18 +3824,6 @@ export interface components {
       /** Agents */
       agents: components['schemas']['AgentListItem'][]
     }
-    /**
-     * AgentPublishRequest
-     * @description #692 codex P1: the caller's asserted draft hash — verified atomically
-     *     inside the publish transaction; mismatch raises 409 with zero publish
-     *     side effects. #841: required — a missing body or field is 422 (the
-     *     hash-less legacy semantics are retired; read the draft's
-     *     ``definition_hash`` from the save/detail response first).
-     */
-    AgentPublishRequest: {
-      /** Expected Hash */
-      expected_hash: string
-    }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
       /** Label */
@@ -4026,11 +3861,6 @@ export interface components {
     AgentRegisterTokensResponse: {
       /** Tokens */
       tokens: components['schemas']['AgentRegisterTokenSummary'][]
-    }
-    /** AgentRollbackRequest */
-    AgentRollbackRequest: {
-      /** Version */
-      version: number
     }
     /**
      * AgentRuntimesResponse
@@ -9936,41 +9766,6 @@ export interface operations {
       }
     }
   }
-  create_agent_definition_api_agent_definitions_post: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentCreateRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   get_agent_definition_api_agent_definitions__agent_id__get: {
     parameters: {
       query: {
@@ -9991,187 +9786,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  archive_agent_definition_api_agent_definitions__agent_id__delete: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentArchiveResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  copy_agent_definition_api_agent_definitions__agent_id__copy_post: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentCopyRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_agent_definition_draft_api_agent_definitions__agent_id__draft_put: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentDefinitionPayload']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  publish_agent_definition_api_agent_definitions__agent_id__publish_post: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentPublishRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  rollback_agent_definition_api_agent_definitions__agent_id__rollback_post: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentRollbackRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
         }
       }
       /** @description Validation Error */

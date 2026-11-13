@@ -88,9 +88,7 @@ export type AgentDetailResponse = ApiSchemas['AgentDetailResponse']
 export type AgentVersion = ApiSchemas['AgentVersionResponse']
 export type AgentVersionSummary = ApiSchemas['AgentVersionSummary']
 export type AgentVersionsResponse = ApiSchemas['AgentVersionsResponse']
-export type AgentDefinitionPayload = ApiSchemas['AgentDefinitionPayload']
-export type AgentCreateRequest = ApiSchemas['AgentCreateRequest']
-export type AgentRuntime = AgentDefinitionPayload['runtime']
+export type AgentRuntime = ApiSchemas['AgentDefinitionResponse']['runtime']
 
 // #476：per-runtime 工具目录（GET /api/agent-runtimes）。tier 三档：
 // default（预选中可取消）/ opt-in（显式开启）/ forced（非用户选择，

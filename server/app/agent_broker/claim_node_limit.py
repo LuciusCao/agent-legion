@@ -48,18 +48,13 @@ Contract, deliberately different from the local path
                                over-admitting
   ==================  =======  ==========================================
 
-  Boundary premise (adversarial review P3-1; closed at the root by #1173
-  codex round 2): row 4 is unreachable for NEW ids — the agent_id charset
-  is enforced at the SERVICE write boundary, which closes every write
-  entry (explicit request fields, capability-derived ids, PUT path
-  params, Studio endpoints, copy new keys; single source
-  ``agent_catalog.definition.AGENT_ID_RE``, gates
-  ``AgentService.save_draft``/``copy``/``create_agent_draft``, the
-  path×gate matrix lives in the constant's comment). Legacy
-  pre-constraint rows are grandfathered in place (draft edits, publish,
-  rollback and reads keep working; no new illegal key can enter through
-  a supported write face) and stay conservative, never over-admitting —
-  the residual is stock data only.
+  Boundary premise: the human Agent write faces and their AgentService
+  charset gates were removed by #936. Row 4 remains possible in legacy
+  pre-constraint stock, whose identifiers and reads stay unchanged. The
+  generic VersionedEntityStore deliberately applies no Agent-specific
+  charset policy, so historical-row construction must choose the intended
+  era's key shape explicitly. Counting stays conservative for every stock
+  boundary row, never over-admitting.
 
   The LOCAL path (``_lease_claim_limits.check_claim_capacity``) shared this
   residual until #1171: its node count also spanned every active lease of

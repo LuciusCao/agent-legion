@@ -1,13 +1,8 @@
-"""Agent definition service: DB-backed workspace-scoped Agent catalog (v46).
+"""Read-only access to historical workspace-scoped Agent definitions.
 
-Workspace-scoped versioned entities sharing the draft → published → archived
-lifecycle engine with custom node codes; the v46 migration deleted the global
-rows, so resolution never falls back to a global scope. Execution
-configuration (provider/model/thinking) is not part of the definition: it
-resolves strictly from the node ``execution`` override, then the workflow
-top-level ``execution`` default, else fails — no workspace/global fallback
-(EXEC-RUNTIME-DISPATCH-001; AGENTS.md §6). Self-contained agent nodes
-(``execution.runtime``) bypass this catalog entirely (EXEC-AGENT-PROFILE-001).
+Rows remain in ``versioned_entities`` for the legacy job/replay resolvers;
+execution configuration for new work belongs to self-contained agent nodes
+(EXEC-AGENT-PROFILE-001). Resolution never falls back to a global scope.
 Hot read paths go through the short-TTL module cache below.
 """
 
@@ -16,24 +11,20 @@ from __future__ import annotations
 import time
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_catalog.definition import agent_id_charset_error, is_valid_agent_id
 from server.app.db.connection import DatabaseDsn
 from server.app.db.dialect import ConnectSource, resolve_dsn
 from server.app.db.transaction import read_connection
-from server.app.services.agent_publish_prune import prune_agent_overrides
-from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
+from server.app.services.job_errors import InvalidOperationError
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
 _ENTITY_TYPE: EntityType = "agent"
 
-# Published catalog cache keyed by (DSN, workspace); publishes/archives
-# invalidate. Claim-path reads hit it per candidate.
 PUBLISHED_CACHE_TTL_SECONDS = 5.0
 _published_cache: dict[tuple[DatabaseDsn, str], tuple[float, dict[str, AgentDefinition]]] = {}
 
 
 def reset_published_agent_cache() -> None:
-    """Drop every cached catalog (tests: TRUNCATE isolation bypasses invalidation)."""
+    """Drop every cached catalog after direct historical-row writes or TRUNCATE."""
     _published_cache.clear()
 
 
@@ -63,12 +54,8 @@ def has_published_agent_definitions(connect_source: ConnectSource) -> bool:
     return bool(row["has_any"]) if row is not None else False
 
 
-def _invalidate_published_cache(connect_source: ConnectSource, workspace_id: str) -> None:
-    _published_cache.pop((resolve_dsn(connect_source), workspace_id), None)
-
-
 class AgentService:
-    """Versioned Agent definition storage/publish flow, bound to one workspace."""
+    """Read-only historical Agent definitions, bound to one workspace."""
 
     def __init__(self, connect_source: ConnectSource, workspace_id: str) -> None:
         if not workspace_id:
@@ -103,103 +90,3 @@ class AgentService:
 
     def list_versions(self, agent_id: str) -> list[VersionedEntity]:
         return self._store.list_versions(agent_id, self._workspace_id)
-
-    def save_draft(
-        self, agent_id: str, definition: AgentDefinition, created_by: str
-    ) -> VersionedEntity:  # Create/overwrite draft (legacy explicit-id semantics).
-        # #1173 codex 二轮（#1167 P3-1 根因收口）：字符域校验下沉到本写边界
-        # ——产生路径×校验点矩阵见 ``agent_catalog.definition.AGENT_ID_RE``。
-        # 只挡「新建实体」：合法 id 零额外读直接放行；非法形态且该键无任何
-        # 版本行（=新建，派生路径的省略形态也在此收敛）才拒。存量
-        # pre-constraint 非常规键原位更新、发布、回滚、归档与读取不受影响
-        # （grandfather：若版本行已存在，该键或早于约束、或由受控写面以同键
-        # 创建——非法键首行不可能经本面进入）。
-        if not agent_id:
-            raise InvalidOperationError("agent id must be a non-empty string")
-        if not is_valid_agent_id(agent_id) and not self._store.list_versions(
-            agent_id, self._workspace_id
-        ):
-            raise InvalidOperationError(agent_id_charset_error(agent_id))
-        entity = self._store.save_draft(
-            agent_id,
-            definition.model_dump(mode="json"),
-            definition.definition_hash(),
-            self._workspace_id,
-            created_by,
-        )
-        _invalidate_published_cache(self._store.dsn, self._workspace_id)
-        return entity
-
-    def publish(self, agent_id: str, expected_hash: str | None = None) -> VersionedEntity:
-        """Publish the current draft; the previously published version archives.
-        One published Agent per capability per workspace (routes derive from
-        the capability alone, mirroring the YAML catalog constraint).
-        ``expected_hash`` (#692): verified atomically inside the store's
-        publish transaction — mismatch raises Conflict with zero side
-        effects.
-
-        #841: the store CAS always binds to the draft pre-read here (the one
-        the capability check ran against — the NodeCodeService pattern), so
-        a concurrent overwrite between check and publish fails as Conflict.
-        ``expected_hash`` is the caller's optimistic assertion on top: HTTP
-        callers must send it (the route requires it); in-process seeding
-        passes the hash of the definition it just saved."""
-        versions = self._store.list_versions(agent_id, self._workspace_id)
-        draft = next((v for v in versions if v.status == "draft"), None)
-        if draft is None:
-            raise NotFoundError(f"no draft for {_ENTITY_TYPE} {agent_id}")
-        if expected_hash is not None and expected_hash != draft.definition_hash:
-            raise ConflictError(
-                f"draft hash mismatch for {_ENTITY_TYPE} {agent_id}:"
-                " the draft was overwritten by another session; reload and retry"
-            )
-        self._require_free_capability(agent_id, str(draft.definition.get("capability") or ""))
-        entity = self._store.publish(agent_id, self._workspace_id, draft.definition_hash)
-        _invalidate_published_cache(self._store.dsn, self._workspace_id)
-        # #430: prune overrides by the JUST-published definition (never the
-        # ~5s cache), post-commit, failure-swallowed — agent_publish_prune.
-        published = AgentDefinition.model_validate(entity.definition)
-        prune_agent_overrides(self._store.dsn, self._workspace_id, published)
-        return entity
-
-    def _require_free_capability(self, agent_id: str, capability: str) -> None:
-        """Capability conflict check; the DB partial unique index is the guard."""
-        for other in self._store.list_published(self._workspace_id):
-            if other.entity_key != agent_id and other.definition.get("capability") == capability:
-                raise ConflictError(
-                    f"capability {capability!r} is already published by Agent"
-                    f" {other.entity_key!r} in this workspace; exactly one"
-                    " published Agent per capability"
-                )
-
-    def rollback(self, agent_id: str, version: int, created_by: str) -> VersionedEntity:
-        """Re-publish an old version as a new version (versions stay immutable)."""
-        versions = self._store.list_versions(agent_id, self._workspace_id)
-        source = next((v for v in versions if v.version == version), None)
-        if source is not None:
-            self._require_free_capability(agent_id, str(source.definition.get("capability") or ""))
-        entity = self._store.rollback(agent_id, version, self._workspace_id, created_by)
-        _invalidate_published_cache(self._store.dsn, self._workspace_id)
-        # #430: rollback re-publishes an old definition — same post-commit prune.
-        rolled = AgentDefinition.model_validate(entity.definition)
-        prune_agent_overrides(self._store.dsn, self._workspace_id, rolled)
-        return entity
-
-    def archive_all(self, agent_id: str) -> int:
-        """Archive every version; the Agent stops routing (no published row)."""
-        archived = self._store.archive_all(agent_id, self._workspace_id)
-        _invalidate_published_cache(self._store.dsn, self._workspace_id)
-        return archived
-
-    def copy(self, source_agent_id: str, new_agent_id: str, created_by: str) -> VersionedEntity:
-        """Copy the latest source definition into a new Agent as draft v1.
-
-        #1173 codex 二轮：新键无条件过字符域（copy 直插 v1、永远是新建实体，
-        # 不存在 grandfather 面；同键已有版本行时由 store 层 409 兜底）。"""
-        if not new_agent_id:
-            raise InvalidOperationError("agent id must be a non-empty string")
-        if not is_valid_agent_id(new_agent_id):
-            raise InvalidOperationError(agent_id_charset_error(new_agent_id))
-        entity = self._store.copy(source_agent_id, new_agent_id, self._workspace_id, created_by)
-        _invalidate_published_cache(self._store.dsn, self._workspace_id)
-        return entity
