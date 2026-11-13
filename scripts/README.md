@@ -75,6 +75,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 | `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340）与材料根前缀孤儿（v2g 单次使用 key、对象年龄过 max(宽限窗, 1h)、删除前反查无行才删，旧文法只报告，#1314）；默认 dry-run，`--apply` 回收。 |
 | `agent_backfill_dry_run.py` | Agent 定义退役回填 dry-run 报告（#934 / #440，只读：连接强制 `default_transaction_read_only`、不跑 `init_db`、不碰对象存储）：遍历各 workspace 的 active revision 与草稿，模拟回填每个 agent 节点的 runtime / tools / config_schema / skill / requires_labels，列出共享定义组、解析不到的节点与 config_schema 覆盖差异。`uv run python -m scripts.agent_backfill_dry_run [--workspace ID] [--output PATH]`；报告反映部署数据，只留本地、不进仓库。 |
+| `clean_dangling_job_artifacts.py` | 存量悬挂 job 产物的只读健康证明与 rerun 计划（#1019，M4）：keyset 分页、latest 行双 HEAD/LIST/流式 hash、跨 job 正面对照、unknown 与 20/2% 熔断、稳定 `plan_sha256`。只有 dry-run、没有 apply，不删行/对象、不 rerun、不撤公告、不恢复调度；`uv run python -m scripts.clean_dangling_job_artifacts [--workspace ID ...] [--job ID ...] [--output PATH]`。阈值未校准前禁止生产 apply，报告只留本地。 |
 | `report-orphan-s3-buckets.py` | 报告孤儿派生 bucket（`agent-legion-<worktree>` 命名、对应 worktree 已不存在；只报不删，逐个给出 `clean-worktree.sh` 收尾命令，#340）。 |
 
 ## 一次性与运维脚本

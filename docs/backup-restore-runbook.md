@@ -819,6 +819,18 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
   是 dump 之后写入、清单里没有行的孤儿对象，确认无误后再加 `--apply`。「行在、
   对象缺失」的产物会让依赖它的下游节点停在等待中，job 详情页对应节点显示
   「输入恢复不全，建议重跑 <生产节点>」，按提示重跑生产节点即可。
+
+  需要一份机器可读的悬挂行证据时，在恢复调度前运行（报告含部署标识与对象 key，只留在本地）：
+
+  ```bash
+  uv run python -m scripts.clean_dangling_job_artifacts --output "$BK/dangling-job-artifacts.json"
+  ```
+
+  此 M4 工具只有 dry-run：数据库强制只读且不跑 `init_db`，对象存储只执行 HEAD、完整 LIST 和流式 GET；
+  不删行/对象、不 rerun、不撤公告、不恢复调度。健康门检查 bucket 配置指纹与可达性、跨 job 正面对照、
+  空 LIST 误配、unknown、以及候选 20 行/2% 的保守阈值。退出码 0 表示证据门通过（可以有候选），1 表示
+  熔断，2 表示未配置对象存储。阈值尚未完成生产校准，`production_apply_allowed` 恒为 false；当前版本
+  没有 apply，不能把健康报告当作自动修复许可，仍按详情页提示经现有 rerun 重生成产物。
 - **legacy CAS**（D7，有 §2.2.3 备份时）：`artifact_refs` 引用的每个 blob 都在
   `artifacts/<hash 前 2 位>/<hash>`（`server/app/services/artifact_store.py` 的
   `open_blob`），输出为空即通过：

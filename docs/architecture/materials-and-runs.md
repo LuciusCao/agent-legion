@@ -194,7 +194,35 @@ jobs/{workspace_id}/{job_id}/.v/{version}/{name}[.gz]  # #853 起每次写入
 | 闸拒 / 中途失败的 promote | 新版本 key 孤儿（无行、未签发） | GC / lifecycle |
 | 被取代对象删除前的进行中读取 | 连接中断或 404 | 调用方重取清单（[workspace-api-tokens.md「读取产物」](../workspace-api-tokens.md#读取产物清单直连下载与全链路示例)） |
 
-### 4.6 材料 TTL
+### 4.6 存量悬挂清单的只读恢复计划（#1019，M4）
+
+`uv run python -m scripts.clean_dangling_job_artifacts [--workspace ID ...] [--job ID ...] [--output PATH]`
+生成确定性的 JSON dry-run 计划；**没有 apply 模式**，不裸删 `job_artifacts`，不写对象、不执行
+rerun、不撤 #887 hydration 公告，也不恢复 workspace 调度。DB 连接强制
+`default_transaction_read_only=on`，不运行 `init_db`；job 按 `(created_at, id)` keyset 分页，每页以
+`REPEATABLE READ READ ONLY` 读取 jobs、节点、pending shards、完整清单行和 active revision。
+legacy 无快照 job 只回退本 workspace 的 active revision。
+
+- 每个 `(job, name)` 只探测 `(uploaded_at, node_key)` 决胜的 latest 行，与 hydration/API 同源；计划同时
+  钉住 job 代次、定义与节点状态、同名全部行的 `node_key/storage_key/size_bytes/content_hash/uploaded_at`。
+- `object_missing` 必须同时有两次 HEAD 404 和完整 `jobs/` 分页 LIST 无 key；raw 与 `.gz` 都行式
+  GET，hash 始终对解压后内容重算 sha256，size 仍对存储字节。403/5xx/超时、LIST 不完整、HEAD/LIST
+  矛盾、GET 或 gzip 解码异常一律 `unknown`，不可行动。LIST 只保留与 DB 引用相交的 key，GET 按
+  1 MiB chunk 读取，均不缓存全量 bucket key 或对象字节。
+- 健康证据包括非敏感 bucket/endpoint 配置指纹、`head_bucket`、空 LIST 但 DB 有引用熔断、来自其他
+  job 的非候选 GET+hash 正面对照、`unknown=0`，以及候选数不超过 20 且占扫描 latest 名数不超过 2%。
+  20/2% 是开发初值而非生产校准结论；M4 计划的 `production_apply_allowed` 恒为 false。
+- 可行动范围复用 `live_probe_names`、run-to `defer_scope`、`rewrite_pending`、`rerun_reset_closure` 和
+  `staging_output_names`。终态分支、休眠坏行、RMW/staging 排除、无现存生产者、在途生产者将重写或
+  job 仍有 running 节点时只报告。计划以 synthetic empty job_dir 计算 live 面，不读取或改写本地缓存；
+  后续 M5 必须在写事务内重新校验全部钉点与当下 live 面，只能经现有 rerun 让按名退役生效。
+
+计划不采集墙钟时间，条目排序固定；`plan_sha256` 是移除该字段后 canonical JSON 的 sha256，渲染时再次
+校验，防止报告被改写后冒充原扫描证据。Quality Impact：无 schema/API/auth/UI 变化，无新增生产写面；
+分类、异常、阈值、分页、范围、计划稳定性和隔离 Postgres 零写由 `tests/services/test_artifact_dangling_*`
+与 `tests/scripts/test_clean_dangling_job_artifacts.py` 覆盖。
+
+### 4.7 材料 TTL
 
 实例设置 `materials_ttl_days`（默认 0 关闭）→ complete 写 `materials.expires_at` → sweeper 到期
 翻 `expired`、引用计数为 0 且过 grace 才物理删除；bucket lifecycle 为孤儿兜底（运维细节见
