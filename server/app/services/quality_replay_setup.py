@@ -23,6 +23,7 @@ from server.app.services.node_config_batch import frozen_node_config, run_frozen
 from server.app.services.node_profile_pins import PIN_KEY as NODE_PROFILES_PIN_KEY
 from server.app.services.quality_replay_profiles import ReplayProfile
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.capacity_metadata import node_capacity_requirements
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import ancestor_closure
 
@@ -120,6 +121,7 @@ class QualityReplaySetup:
                 node_keys=list(definition.executable_nodes),
                 workspace_id=workspace_id,
                 revision=revision,
+                needs_capacity_by_node=node_capacity_requirements(definition),
                 frozen_config={node.key: frozen} if frozen is not None else {},
             )
             # #735: an empty ownership result is unreachable for a replay —

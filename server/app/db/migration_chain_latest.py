@@ -10,6 +10,7 @@ from server.app.db.migrations.approval_batch import migrate_approval_batch
 from server.app.db.migrations.job_batch_operations import (
     migrate_job_batch_operations_archive,
 )
+from server.app.db.migrations.job_node_needs_capacity import migrate_job_node_needs_capacity
 from server.app.db.migrations.workflow_execution_defaults_retirement import (
     migrate_workflow_execution_defaults_retirement,
 )
@@ -47,4 +48,6 @@ LATEST_MIGRATIONS: list[SchemaMigration] = [
         "workflow_execution_defaults_retirement",
         migrate_workflow_execution_defaults_retirement,
     ),
+    # v106 (#402): static job-node capacity metadata + approval-park index.
+    SchemaMigration(106, "job_node_needs_capacity", migrate_job_node_needs_capacity),
 ]

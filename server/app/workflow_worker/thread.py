@@ -15,6 +15,7 @@ from server.app.services.agent_node_profile_catalog import agent_profiles_may_ex
 from server.app.services.runtime_profile import profile
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import prepare_agent_pass
+from server.app.workflow_worker.approval_park import park_ready_approvals_without_capacity
 from server.app.workflow_worker.catalog_scan import (
     collect_runnable_workspace_jobs,
     load_workflow_scan_entries,
@@ -153,18 +154,13 @@ class WorkflowWorkerThread:
             self.leases.path, self.settings.executor_runtime.code_capacity
         )
         # Pure-remote deployments (#389): with code_capacity=0 the local
-        # snapshot has no capacity, but remote code Workers can still claim —
-        # the pass must keep scanning (coupling fix ③). Known limit (unchanged
-        # from pre-#389 behavior): a saturated pool plus zero Agents skips the
-        # scan, so a ready approval gate parks only after a slot frees; in
-        # pure-remote mode an offline Worker fleet has the same effect.
-        # #933: "Agents" = a published Agent OR an active revision with a
-        # self-contained agent node — a workspace with no Agent definitions
-        # must still scan its self-contained agent candidates.
+        # snapshot has no capacity, but remote code Workers can still claim.
+        # With no execution lane, only the indexed approval candidates get a
+        # ready evaluation; ordinary code jobs keep the saturated fast path.
         if not (
             snapshot.has_any_capacity() or has_online_code_workers(self.job_db)
         ) and not agent_profiles_may_exist(self.job_db):
-            return False
+            return park_ready_approvals_without_capacity(self)
 
         scan_started = time.monotonic()
         runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
