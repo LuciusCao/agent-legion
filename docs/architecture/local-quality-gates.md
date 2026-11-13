@@ -405,7 +405,7 @@ release-train `HEAD`-only exception.
   `config/architecture/postgres-test-durations.json`; new files fall back to the
   manifest's average per-test cost, and malformed manifests fail fast. Shard b
   additionally runs the velites sandbox integration check and the
-  `tests/full -m full_gate` evidence layer, with 79 seconds reserved in every
+  `tests/full -m full_gate` evidence layer, with 95 seconds reserved in every
   shard's plan so this extra work does not unbalance the critical path.
   `fail-fast` is off, so a failing shard does not cancel its peers' evidence.
 - **backend-coverage** — downloads every shard's coverage artifact, merges
@@ -432,10 +432,10 @@ release-train `HEAD`-only exception.
   strictly, while the base is read leniently so pre-#941 entries without
   `registered_on` remain comparable; backfilling anchor dates on such an
   old-schema entry is a schema migration, not a touch.
-- **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
+- **frontend-logic / frontend-component-a/b/c / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
-  the slower component project is split again with Vitest's deterministic
-  native `--shard=1/2` partition;
+  the slower component project is split into three deterministic native
+  `--shard=i/3` partitions (#1516);
   the coverage job merges the shard blob reports and enforces the frontend
   coverage thresholds plus the production bundle (`npm run build:bundle`),
   and enforces the frontend coverage partitions (auth/bootstrap / api

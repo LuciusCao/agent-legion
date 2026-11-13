@@ -327,7 +327,7 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
         assert f"name: backend-postgres-{shard}-coverage" in workflow
         assert f"name: backend-postgres-{shard}-telemetry" in workflow
         assert f"--junit test-results/backend-postgres-{shard}-junit.xml" in workflow
-    assert 'GATE_SHARD_RESERVED_SECONDS: "0,79,0,0,0"' in workflow
+    assert 'GATE_SHARD_RESERVED_SECONDS: "0,95,0,0,0"' in workflow
     assert "GATE_SHARD_DURATIONS: config/architecture/postgres-test-durations.json" in workflow
     assert "GATE_TIER: postgres" in workflow
     assert "GATE_SHARD: ${{ matrix.gate_shard }}" in workflow
@@ -413,15 +413,16 @@ def test_quality_gate_supports_merge_queue_and_full_workflow_self_validation() -
     )
 
 
-def test_frontend_component_lane_uses_two_native_vitest_shards() -> None:
+def test_frontend_component_lane_uses_three_native_vitest_shards() -> None:
     workflow = (ROOT / ".github/workflows/quality-gate.yml").read_text(encoding="utf-8")
     frontend_gate = (ROOT / "scripts/check-quick-frontend.sh").read_text(encoding="utf-8")
 
     component = workflow.split("\n  frontend-component:\n", 1)[1]
     component = component.split("\n  frontend-coverage:\n", 1)[0]
     assert "name: frontend-component-${{ matrix.shard }}" in component
-    assert "gate_shard: 1/2" in component
-    assert "gate_shard: 2/2" in component
+    assert "gate_shard: 1/3" in component
+    assert "gate_shard: 2/3" in component
+    assert "gate_shard: 3/3" in component
     assert "FRONTEND_TEST_SHARD=${{ matrix.gate_shard }}" in component
     assert "frontend-coverage-blob-component-${{ matrix.shard }}" in component
     assert 'vitest_args+=(--shard "$FRONTEND_TEST_SHARD")' in frontend_gate
