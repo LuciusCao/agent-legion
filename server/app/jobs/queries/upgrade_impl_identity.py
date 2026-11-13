@@ -51,14 +51,24 @@ def acquire_implementation_publication_lock(conn: Any, workspace_id: str | None)
     / ``workflow_revision_runtime.save_revision_runtime_or_publish``）、
     upgrade guard 事务内的 active revision 重读 + 实现身份重验
     （``job_workflow_upgrade_apply``）。加锁序写死在
-    EXEC-GENERATION-001：job-mutation → implementation-publication →
-    skill-lock；发布侧不取 job-mutation 锁（不碰 job 行），无环。
+    EXEC-GENERATION-001：job-mutation → artifact-manifest →
+    implementation-publication → skill-lock；发布侧不取 job-mutation 锁（不碰 job 行），无环。
     """
     scope = workspace_id if workspace_id is not None else "<global>"
     conn.execute(
         "select pg_advisory_xact_lock(hashtext(%s))",
         (_PUBLICATION_LOCK_PREFIX + scope,),
     )
+
+
+def try_acquire_implementation_publication_lock(conn: Any, workspace_id: str | None) -> bool:
+    """Try the publication lock without waiting; used only by recovery's final gate."""
+    scope = workspace_id if workspace_id is not None else "<global>"
+    row = conn.execute(
+        "select pg_try_advisory_xact_lock(hashtext(%s)) as locked",
+        (_PUBLICATION_LOCK_PREFIX + scope,),
+    ).fetchone()
+    return bool(row and row["locked"])
 
 
 class UpgradeImplIdentityQueriesMixin(ConnectionQueriesMixin):

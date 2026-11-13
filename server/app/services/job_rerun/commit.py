@@ -86,7 +86,7 @@ def commit_rerun(
                 staged_artifact_names=staged.artifact_names,
             )
             if plan_guard is not None:
-                plan_guard.validate_retired_rows(deleted_rows)
+                plan_guard.validate_retired_rows(conn, deleted_rows)
     except JobMutationConflict as exc:
         if staged is not None:
             staged.rollback()

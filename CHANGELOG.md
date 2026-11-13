@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Added
 
 - 存量悬挂 job 产物恢复计划（issue #1019，M4）：新增 `scripts/clean_dangling_job_artifacts.py` 默认 dry-run 扫描 CLI，以服务器只读事务和 keyset 分页钉住 latest 清单行、job 代次、完整定义/节点状态与 rerun/retire 范围，经双 HEAD、完整 LIST、流式 raw/gzip sha256、跨 job 正面对照及 unknown/空 LIST/候选阈值熔断生成带稳定 `plan_sha256` 的机器可读计划；dry-run 不删行或对象、不执行 rerun、不撤 hydration 公告、不恢复调度，未显式校准阈值的计划禁止 apply。
-- 存量悬挂 job 产物受控恢复（issue #1019，M5）：`--apply` 仅接受已审计划 `plan_sha256` 与 operator 期望 bucket/endpoint，首次写库前要求新鲜计划哈希完全相同，每批最多 20 job，逐 job 复用既有 lease-guarded rerun、按名 retire、staged rollback、代次 bump 与调度通知，锁内重验全部钉点并在实际删除行集变化时整 job 回滚；首个竞态/失败停止后续且如实报告独立提交，RMW/无生产者/闭包外/unknown 不自动处理，无 `--force` 或新增裸 DELETE/对象回传协议。
+- 存量悬挂 job 产物受控恢复（issue #1019，M5）：`--apply` 仅接受已审计划 `plan_sha256` 与 operator 期望 bucket/endpoint，首次写库前要求新鲜计划哈希完全相同，每批最多 20 job，逐 job 复用既有 lease-guarded rerun、按名 retire、staged rollback、代次 bump 与调度通知，锁内重验全部钉点，COMMIT 前再以 artifact-manifest 与 implementation-publication 最终锁及预期提交后重读封闭清单 phantom 和 legacy active definition 发布窗口，任何变化整 job 回滚；首个竞态/失败停止后续且如实报告独立提交，RMW/无生产者/闭包外/unknown 不自动处理，无 `--force` 或新增裸 DELETE/对象回传协议。
 
 ### Fixed
 

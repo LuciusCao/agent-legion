@@ -222,9 +222,16 @@ apply 只接受 `--apply PLAN --plan-sha256 SHA --expected-bucket B --expected-e
 job，所有计划和批次健康证明先备妥。
 
 每 job 独立进入既有 `lease_guarded_mutation` / rerun 事务，复查 active lease、running nodes，并在锁内重读
-代次、执行控制、定义、完整节点状态和当下 live 面。计划守卫同时逐钉比对同名完整行集；既有按名 retire
-返回实际删除行后再次核对 node/key 与完整集合，若删除前出现新 promote/reconciler 行，整事务回滚，staged 文件恢复，generation 不
-额外 bump。写面仍是既有 `mark_nodes_for_rerun_in_transaction` / `retire_artifact_rows_by_name` / staged
+代次、执行控制、定义、完整节点状态和当下 live 面。计划守卫逐钉比对同名完整行集，按名 retire 后先核对实际
+RETURNING 的 node/key 集合，再在 COMMIT 前依次 try 获取 `artifact-manifest:<job_id>` 与既有
+`implementation-publication:<workspace>`。无 lease `record_remote_many` / `_register_row` 在写事务首句按
+job_id 排序去重获取前者，发布路径本来即持后者。任一锁被活跃写持有即 `stale_plan`；两锁内最终重读预期提交后
+投影（generation+1、seed pending、其余闭包 stale、目标名零行）以及 active definition/live 面，任何漂移同样回滚。
+此后不再写 DB，COMMIT 是唯一后续动作。锁前已提交写入由最终重读发现，活跃写使 try 失败，最终锁后的写入只能
+在 COMMIT 后合法登记。锁序为 job-mutation → artifact-manifest → implementation-publication；普通 rerun 和默认
+读取不加新锁，失败时释放全部锁并恢复 staged 文件。
+
+写面仍是既有 `mark_nodes_for_rerun_in_transaction` / `retire_artifact_rows_by_name` / staged
 rollback / guarded object cleanup，没有新增裸 DELETE 或独立对象回传协议；普通 rerun 不携带计划守卫，行为不变。
 
 首个 stale-plan、健康门或 rerun 失败即停止后续 job。报告逐项区分 `applied`、`not_applied` 与

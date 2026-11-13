@@ -11,7 +11,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from server.app.jobs.queries.artifact_manifest_lock import try_artifact_manifest_lock
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.upgrade_impl_identity import (
+    try_acquire_implementation_publication_lock,
+)
 
 if TYPE_CHECKING:
     from server.app.jobs.queries import JobQueries
@@ -141,6 +145,15 @@ class ArtifactDanglingQueriesMixin(ConnectionQueriesMixin):
         if row is None:
             return None
         return _job_support(conn, [dict(row)], lock=True)[0]
+
+    @staticmethod
+    def try_artifact_recovery_final_locks_in_transaction(
+        conn: Any, job_id: str, workspace_id: str
+    ) -> bool:
+        """Try final manifest→publication locks in their declared order."""
+        if not try_artifact_manifest_lock(conn, job_id):
+            return False
+        return try_acquire_implementation_publication_lock(conn, workspace_id)
 
 
 def artifact_dangling_reader_from_dsn(dsn: str) -> JobQueries:

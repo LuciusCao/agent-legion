@@ -47,6 +47,7 @@ from server.app.executors._artifact_promotion import (
 )
 from server.app.executors._artifact_supersede import collect_superseded_tx
 from server.app.executors._lease_write_gate import lease_artifact_write_current
+from server.app.jobs.queries.artifact_manifest_lock import lock_artifact_manifest_jobs
 from server.app.services.job_artifact_gzip import GZIP_SUFFIX, content_stream
 from server.app.services.job_artifact_rows import upsert_artifact_row_tx
 from server.app.storage import ObjectStorage
@@ -263,6 +264,7 @@ class JobArtifactObjectStore:
         if self.storage is None:
             return None
         with write_transaction(self._dsn) as conn:
+            lock_artifact_manifest_jobs(conn, [str(row["job_id"]) for row in rows])
             return [
                 upsert_artifact_row_tx(
                     conn,
@@ -290,12 +292,14 @@ class JobArtifactObjectStore:
     ) -> dict[str, Any] | None:
         """Single-row upsert in its own transaction (batch path inlines it).
 
-        Ungated by design: the only callers left are the no-lease reconciler
-        and approval direct writes — lease-carrying writes go through
-        ``register_rows_guarded`` inside the shared promote primitive.
+        Generation-ungated by design: the only callers left are the no-lease
+        reconciler and approval direct writes — lease-carrying writes go through
+        ``register_rows_guarded`` inside the shared promote primitive. The
+        artifact-manifest lock only serializes with recovery's final gate.
         ``superseded`` (#853) collects the key the row pointed at before.
         """
         with write_transaction(self._dsn) as conn:
+            lock_artifact_manifest_jobs(conn, [job_id])
             key_row = {"job_id": job_id, "node_key": node_key, "name": name}
             collect_superseded_tx(conn, [{**key_row, "storage_key": storage_key}], superseded)
             return upsert_artifact_row_tx(

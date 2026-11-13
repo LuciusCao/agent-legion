@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.hydration_defer_board import defer_scope
@@ -164,17 +164,16 @@ def _rerun_scope(
     }
 
 
-def job_entries(job: dict[str, Any]) -> list[dict[str, Any]]:
-    definition, definition_info = resolve_definition(job)
+def job_state_projection(job: dict[str, Any]) -> dict[str, Any]:
+    """Raw/effective node state and the exact live-probe basis for one job."""
+    definition, _ = resolve_definition(job)
     raw_statuses = {str(node["node_key"]): str(node["status"]) for node in job["nodes"]}
     statuses = dict(raw_statuses)
-    live_names: frozenset[str] = frozenset()
     if definition is not None:
         running = running_shard_nodes(definition, raw_statuses)
         pending = set(job["pending_shard_nodes"]) & set(running)
         statuses = shard_effective_statuses(raw_statuses, pending)
-        live_names = live_probe_names(definition, statuses, _EMPTY_JOB_DIR)
-    job_state = {
+    return {
         "status": str(job["status"]),
         "execution_generation": int(job["execution_generation"]),
         "execution_mode": str(job.get("execution_mode") or "full"),
@@ -184,6 +183,14 @@ def job_entries(job: dict[str, Any]) -> list[dict[str, Any]]:
         "effective_node_statuses": dict(sorted(statuses.items())),
         "pending_shard_nodes": sorted(str(key) for key in job["pending_shard_nodes"]),
     }
+
+
+def job_entries(job: dict[str, Any]) -> list[dict[str, Any]]:
+    definition, definition_info = resolve_definition(job)
+    statuses = dict(job_state_projection(job)["effective_node_statuses"])
+    live_names: frozenset[str] = frozenset()
+    if definition is not None:
+        live_names = live_probe_names(definition, statuses, _EMPTY_JOB_DIR)
     groups = latest_manifest_groups(job["artifacts"])
     entries = []
     for name, rows in groups:
@@ -207,7 +214,7 @@ def job_entries(job: dict[str, Any]) -> list[dict[str, Any]]:
                 "job_id": str(job["id"]),
                 "job_status": str(job["status"]),
                 "execution_generation": int(job["execution_generation"]),
-                "job_state": job_state,
+                "job_state": job_state_projection(job),
                 "name": name,
                 "definition": definition_info,
                 "latest_row": latest,
@@ -261,7 +268,7 @@ class RecoveryPlanGuard:
     retired_rows: list[dict[str, Any]] = field(default_factory=list, init=False)
 
     @staticmethod
-    def _stale(detail: str) -> None:
+    def _stale(detail: str) -> NoReturn:
         raise JobMutationConflict("stale_plan", f"Artifact recovery plan is stale: {detail}")
 
     def validate(
@@ -294,7 +301,7 @@ class RecoveryPlanGuard:
         if actual_retire != self.retire_manifest:
             self._stale("complete retire manifest changed")
 
-    def validate_retired_rows(self, rows: list[dict[str, Any]]) -> None:
+    def validate_retired_rows(self, conn: Any, rows: list[dict[str, Any]]) -> None:
         grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
             grouped.setdefault(str(row["name"]), []).append(
@@ -315,4 +322,7 @@ class RecoveryPlanGuard:
         actual = {name: grouped.get(name, []) for name in self.staged_names}
         if set(grouped) - set(self.staged_names) or actual != expected:
             self._stale("rows changed before the retire statement")
+        from server.app.services.job_rerun.recovery_final import validate_final_recovery
+
+        validate_final_recovery(self, conn)
         self.retired_rows = list(rows)

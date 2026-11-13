@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from collections.abc import Iterator
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -67,6 +69,7 @@ def seed_job(
     source_id: str,
     *,
     healthy: bool = False,
+    legacy_definition: bool = False,
 ) -> tuple[dict[str, Any], str, bytes]:
     workflow = definition()
     job = job_db.create_job(
@@ -80,7 +83,9 @@ def seed_job(
         workflow_revision_id="rev-job",
         workflow_version=1,
         workflow_definition_hash="job-hash",
-        workflow_definition_snapshot_json=serialize_definition(workflow),
+        workflow_definition_snapshot_json=""
+        if legacy_definition
+        else serialize_definition(workflow),
     )
     job_id = str(job["id"])
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -420,3 +425,241 @@ def test_head_bucket_failure_at_job_recheck_is_zero_write(
 
     assert report["jobs"][0]["reason_code"] == "health_gate_failed"
     assert db_state(job_db, job_id) == before
+
+
+def _register(store: JobArtifactObjectStore, job_id: str, key: str, node_key: str) -> None:
+    store.record_remote_many(
+        [
+            {
+                "workspace_id": "ws",
+                "job_id": job_id,
+                "node_key": node_key,
+                "name": "result.json",
+                "storage_key": key,
+                "size_bytes": 4,
+                "content_hash": hashlib.sha256(b"new!").hexdigest(),
+            }
+        ]
+    )
+
+
+def _assert_stale_rollback(
+    job_db: JobQueries,
+    candidate: dict[str, Any],
+    settings: Any,
+    before: dict[str, Any],
+    expected: bytes,
+    keys: set[str],
+) -> None:
+    after = db_state(job_db, str(candidate["id"]))
+    assert after["generation"] == before["generation"]
+    assert after["status"] == before["status"]
+    assert after["nodes"] == before["nodes"]
+    assert {row["storage_key"] for row in after["rows"]} == keys
+    assert (resolve_job_dir(candidate, settings.jobs_dir) / "result.json").read_bytes() == expected
+
+
+def test_after_delete_registration_is_rejected_by_final_lock_and_read(
+    job_db: JobQueries, settings: Any, workspace: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage, candidate, key, expected, prepared = _candidate(job_db, settings, "after-delete")
+    job_id = str(candidate["id"])
+    before = db_state(job_db, job_id)
+    store = JobArtifactObjectStore(job_db, storage)
+    new_key = key.replace(".v/attempt", ".v/after-delete")
+    original = RecoveryPlanGuard.validate_retired_rows
+
+    def register_after_delete(self, conn, rows):
+        _register(store, job_id, new_key, "after_delete_writer")
+        return original(self, conn, rows)
+
+    monkeypatch.setattr(RecoveryPlanGuard, "validate_retired_rows", register_after_delete)
+    report = execute_apply(prepared, rerun_service(job_db, settings, storage), storage)
+
+    assert report["jobs"][0]["status"] == "not_applied"
+    assert report["jobs"][0]["reason_code"] == "stale_plan"
+    _assert_stale_rollback(job_db, candidate, settings, before, expected, {key, new_key})
+
+
+def test_after_final_validation_registration_is_rejected(
+    job_db: JobQueries, settings: Any, workspace: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage, candidate, key, expected, prepared = _candidate(job_db, settings, "after-final")
+    job_id = str(candidate["id"])
+    before = db_state(job_db, job_id)
+    store = JobArtifactObjectStore(job_db, storage)
+    new_key = key.replace(".v/attempt", ".v/after-final")
+    original = job_db.try_artifact_recovery_final_locks_in_transaction
+
+    def register_before_final_lock(conn, locked_job_id, workspace_id):
+        _register(store, job_id, new_key, "after_final_writer")
+        return original(conn, locked_job_id, workspace_id)
+
+    monkeypatch.setattr(
+        job_db,
+        "try_artifact_recovery_final_locks_in_transaction",
+        register_before_final_lock,
+    )
+    report = execute_apply(prepared, rerun_service(job_db, settings, storage), storage)
+
+    assert report["jobs"][0]["status"] == "not_applied"
+    assert report["jobs"][0]["reason_code"] == "stale_plan"
+    _assert_stale_rollback(job_db, candidate, settings, before, expected, {key, new_key})
+
+
+def test_validate_then_publish_is_stale_and_never_drives_old_definition(
+    job_db: JobQueries, settings: Any, workspace: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = FakeRecoveryStorage()
+    candidate, key, expected = seed_job(
+        job_db, settings, storage, "legacy-publish", legacy_definition=True
+    )
+    seed_job(job_db, settings, storage, "legacy-publish-control", healthy=True)
+    prepared = prepare(job_db, storage, build_plan(job_db, storage))
+    assert prepared.reviewed_plan["artifacts"][0]["definition"]["source"] == "active_revision"
+    job_id = str(candidate["id"])
+    before = db_state(job_db, job_id)
+    active_before = job_db.get_active_workflow_revision("ws", "ws")
+    original = job_db.try_artifact_recovery_final_locks_in_transaction
+
+    def publish_before_final_lock(conn, locked_job_id, workspace_id):
+        WorkflowRevisionService(job_db).publish_workspace_revision(
+            "ws", replace(definition(), label="changed-after-validate")
+        )
+        return original(conn, locked_job_id, workspace_id)
+
+    monkeypatch.setattr(
+        job_db,
+        "try_artifact_recovery_final_locks_in_transaction",
+        publish_before_final_lock,
+    )
+    report = execute_apply(prepared, rerun_service(job_db, settings, storage), storage)
+
+    assert report["jobs"][0]["status"] == "not_applied"
+    assert report["jobs"][0]["reason_code"] == "stale_plan"
+    active_after = job_db.get_active_workflow_revision("ws", "ws")
+    assert active_after["version"] == active_before["version"] + 1
+    assert active_after["definition_hash"] != active_before["definition_hash"]
+    _assert_stale_rollback(job_db, candidate, settings, before, expected, {key})
+
+
+def test_active_manifest_writer_fails_final_try_lock(
+    job_db: JobQueries, settings: Any, workspace: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage, candidate, key, expected, prepared = _candidate(job_db, settings, "active-writer")
+    job_id = str(candidate["id"])
+    before = db_state(job_db, job_id)
+    store = JobArtifactObjectStore(job_db, storage)
+    new_key = key.replace(".v/attempt", ".v/active-writer")
+    entered = threading.Event()
+    release = threading.Event()
+    original_upsert = __import__(
+        "server.app.services.job_artifact_objects", fromlist=["upsert_artifact_row_tx"]
+    ).upsert_artifact_row_tx
+
+    def blocking_upsert(*args, **kwargs):
+        entered.set()
+        assert release.wait(timeout=10)
+        return original_upsert(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "server.app.services.job_artifact_objects.upsert_artifact_row_tx", blocking_upsert
+    )
+    failures: list[BaseException] = []
+
+    def write() -> None:
+        try:
+            _register(store, job_id, new_key, "active_writer")
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=write)
+    thread.start()
+    assert entered.wait(timeout=10)
+    try:
+        report = execute_apply(prepared, rerun_service(job_db, settings, storage), storage)
+    finally:
+        release.set()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert failures == []
+
+    assert report["jobs"][0]["status"] == "not_applied"
+    assert report["jobs"][0]["reason_code"] == "stale_plan"
+    _assert_stale_rollback(job_db, candidate, settings, before, expected, {key, new_key})
+
+
+def test_active_revision_publisher_fails_final_try_lock(
+    job_db: JobQueries, settings: Any, workspace: None
+) -> None:
+    storage = FakeRecoveryStorage()
+    candidate, key, expected = seed_job(
+        job_db, settings, storage, "active-publisher", legacy_definition=True
+    )
+    seed_job(job_db, settings, storage, "active-publisher-control", healthy=True)
+    prepared = prepare(job_db, storage, build_plan(job_db, storage))
+    job_id = str(candidate["id"])
+    before = db_state(job_db, job_id)
+    entered = threading.Event()
+    release = threading.Event()
+    failures: list[BaseException] = []
+
+    def hold_publish(_conn) -> None:
+        entered.set()
+        assert release.wait(timeout=10)
+
+    def publish() -> None:
+        try:
+            WorkflowRevisionService(job_db).publish_workspace_revision(
+                "ws", replace(definition(), label="active-publisher"), on_commit=hold_publish
+            )
+        except BaseException as exc:
+            failures.append(exc)
+
+    thread = threading.Thread(target=publish)
+    thread.start()
+    assert entered.wait(timeout=10)
+    try:
+        report = execute_apply(prepared, rerun_service(job_db, settings, storage), storage)
+    finally:
+        release.set()
+    thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert failures == []
+
+    assert report["jobs"][0]["status"] == "not_applied"
+    assert report["jobs"][0]["reason_code"] == "stale_plan"
+    assert job_db.get_active_workflow_revision("ws", "ws")["version"] == 2
+    _assert_stale_rollback(job_db, candidate, settings, before, expected, {key})
+
+
+def test_post_commit_legacy_registration_and_upload_keep_default_semantics(
+    job_db: JobQueries, settings: Any, workspace: None
+) -> None:
+    storage, candidate, _, expected, prepared = _candidate(job_db, settings, "post-commit")
+    job_id = str(candidate["id"])
+    store = JobArtifactObjectStore(job_db, storage)
+    report = execute_apply(prepared, rerun_service(job_db, settings, storage), storage)
+    assert report["jobs"][0]["status"] == "applied"
+    assert db_state(job_db, job_id)["rows"] == []
+
+    versioned_key = f"jobs/ws/{job_id}/.v/post-commit/result.json"
+    _register(store, job_id, versioned_key, "post_commit_writer")
+    registered = store.lookup(job_id, "result.json")
+    assert registered["node_key"] == "post_commit_writer"
+    assert registered["storage_key"] == versioned_key
+    assert registered["content_hash"] == hashlib.sha256(b"new!").hexdigest()
+
+    job_dir = resolve_job_dir(candidate, settings.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    (job_dir / "result.json").write_bytes(expected)
+    uploaded = store.upload(
+        workspace_id="ws",
+        job_id=job_id,
+        node_key="producer",
+        name="result.json",
+        local_path=job_dir / "result.json",
+    )
+    assert uploaded["node_key"] == "producer"
+    assert uploaded["content_hash"] == hashlib.sha256(expected).hexdigest()
+    assert storage.objects[uploaded["storage_key"]] == expected

@@ -851,7 +851,8 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
 
   apply 没有 `--force`，也不允许覆盖计划中的扫描、阈值或 hash 上限。它在首次写库前重算计划，要求配置和
   全部健康证据通过且新鲜计划哈希与已审计划完全相同；每批最多 20 个 job，每 job 独立经既有 rerun 事务和
-  锁内逐钉复核。首个 stale-plan、竞态或失败即停止后续 job，报告分别列出 `applied`、`not_applied` 与
+  锁内逐钉复核。COMMIT 前还会 try 获取 per-job manifest 锁和既有 workspace 发布锁，并在两锁内最终重读预期提交后
+  状态；活跃写、清单 phantom 或 active definition 漂移均回滚，最终锁后的登记只能发生在 COMMIT 后。首个 stale-plan、竞态或失败即停止后续 job，报告分别列出 `applied`、`not_applied` 与
   `not_attempted`；此前独立提交不会伪装成批次原子回滚。任何拒绝都应在排除原因后重新 dry-run 审阅，不能
   用旧计划继续硬闯，尤其部分成功后旧计划必然 stale。
 
