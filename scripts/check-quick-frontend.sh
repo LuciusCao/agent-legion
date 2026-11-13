@@ -92,10 +92,9 @@ run_tests() {
   echo "=== Frontend Tests (${test_command}) ==="
   vitest_args=()
   coverage_blob_key="${FRONTEND_TEST_PROJECT:-all}"
-  # Vitest defaults to one worker thread per core, which oversubscribes
-  # machines running multiple worktrees (node at 500%+ CPU). Cap the default;
-  # CI runners (4 vCPU) are unaffected. AGENT_LEGION_FRONTEND_TEST_WORKERS
-  # overrides.
+  # Standalone invocations keep four workers. check-quick.sh injects the
+  # worktree-aware local budget (at least four); CI keeps four. An explicit
+  # AGENT_LEGION_FRONTEND_TEST_WORKERS always wins.
   vitest_args+=(--maxWorkers="${AGENT_LEGION_FRONTEND_TEST_WORKERS:-4}")
   # FRONTEND_TEST_PROJECT selects a single Vitest project (logic/component)
   # so CI can shard the two environments into parallel jobs.

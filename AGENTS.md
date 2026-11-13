@@ -23,7 +23,7 @@
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库并自动建库；tower 子实例用 `agent_legion_test_<父名>_<子名>`，避免跨父撞名。只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
 - 普通 worktree 收尾（用户确认清理后）统一用 `scripts/clean-worktree.sh <worktree名> [--yes]` 一键清理 worktree/本地分支/派生库/派生 bucket；仍有 tower 子 worktree 时拒绝清理父资源。tower 子 worktree 由 tower 自己 teardown；远端分支默认只提示不删（`--delete-remote-branch` 才删）。
 - 只需单独清理派生库时（收尾场景已被 clean-worktree.sh 覆盖，它内部即转调本脚本）走 `scripts/drop-worktree-db.sh <worktree名>`，不要裸 `dropdb`：脚本自带护栏（按 worktree 名派生库名、以非 superuser role 连接，物理上碰不到共享/prod 库），role 设置见 [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
-- 测试并行度由 gate 自动均分：后端 pytest-xdist 与 rust `-j` 按机器级并发 gate 数 N 取 (核数−2)/N、夹 [2, 8]（`scripts/gate-jobs.sh`；`AGENT_LEGION_TEST_WORKERS` / `AGENT_LEGION_RUST_WORKERS` 覆盖），前端 vitest `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）。
+- 测试并行度由 gate 自动均分：后端 pytest-xdist 与 rust `-j` 按机器级并发 gate 数 N 取 (核数−2)/N、夹 [2, 8]（`scripts/gate-jobs.sh`；`AGENT_LEGION_TEST_WORKERS` / `AGENT_LEGION_RUST_WORKERS` 覆盖），前端 vitest 在 quick gate 内按机器预算取 `max(4, (cores−2)/N)`、上限 8，test-rest 与 Rust 共享预算（standalone/CI 默认 4，`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist schema 固定，两个进程并发会互相 TRUNCATE（症状：单跑必过的随机 setup 错误）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
 - 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 与 `make prod-up` / `make prod-down`（velites 二进制过期时的自动重建与恢复路径见 [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md) §5）。所有修复与调试必须在开发 worktree（`.worktrees/develop`，检出 main）进行，经 PR → main → prod pull 到达生产；生产命令只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
@@ -44,7 +44,7 @@
 ## 4. Quality Gates（必须执行）
 
 - 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`（backend 按覆盖逆索引只跑受影响测试、前端 `vitest related`；无索引或选择面太宽时自动回落 unit 全量）。aff 档不是合并凭证：本地提交由 fast hook、推送由 smoke hook 兜底，完整门禁以 PR CI 为准。
-- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线），postgres 集成层交给 CI（backend lane 的 PR 必跑 backend-postgres-a/b/c）。碰数据库的改动内环先跑直接相关的 postgres 测试；CI 不可用或需要离线发布凭证时，才跑 `GATE_TIER=postgres ./scripts/check-quick-backend.sh` 或含 unit + postgres 两层的 `./scripts/check.sh`。
+- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线），postgres 集成层交给 CI（backend lane 的 PR 必跑 backend-postgres-a/b/c/d）。碰数据库的改动内环先跑直接相关的 postgres 测试；CI 不可用或需要离线发布凭证时，才跑 `GATE_TIER=postgres ./scripts/check-quick-backend.sh` 或含 unit + postgres 两层的 `./scripts/check.sh`。
 - **机器级 gate 排队**：quick gate 经 git common dir 的 slot 串行（`scripts/gate-queue.sh`，默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`），后来者打印持有者并等待——排队本身就是正确行为，等待期做读代码/写代码等不占 CPU 的事。机制与实测依据见 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md)。
 - **aff 索引纪律**：每个 worktree 首次用 aff 前必须先跑 `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建索引（依赖或 `tests/conftest.py` 变更后重建）；aff 输出含「aff fallback」时先建索引再继续内环。
 - 合并或发布前确认 GitHub Actions 的稳定聚合 check `quality-gate` 通过；它汇总 `.github/workflows/quality-gate.yml` 的全部适用 lane，未登记 rerun 也会在 PR 当场失败。CI 不可用时本地跑 `./scripts/check.sh` 代替。

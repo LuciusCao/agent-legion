@@ -19,7 +19,10 @@
 | `check-deps-audit.sh` | 依赖漏洞审计（pip-audit + npm audit）；非阻塞，需网络。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
 | `check_coverage_partitions.py` | 按分区（关键模块/目录）报告覆盖率下限，防止关键模块被全局平均掩盖；默认 report 模式，`--enforce` / `AGENT_LEGION_COV_PARTITIONS=enforce` 转阻塞。 |
-| `pytest_gate_shard.py` | pytest 插件：`GATE_SHARD=i/n` 按 md5(nodeid) 对收集结果确定性分片（CI postgres tier 三个 shard 用）。 |
+| `pytest_smoke_selection.py` | 按 smoke manifest + `test_architecture_*` 规则直接生成收集文件集，避免为筛出少量 smoke 用例而导入整棵 tests 树；缺失文件与空选择 fail-fast。 |
+| `pytest_gate_shard_durations.py` | CI postgres 的整文件耗时加权 LPT 分片、未知文件平均成本回退与 shard 预留容量；清单和参数错误 fail-fast。 |
+| `pytest_gate_shard.py` | pytest 插件：`GATE_SHARD=i/n` 对收集结果确定性分片；CI postgres 四路按文件耗时加权，未配置耗时清单时保留 md5(nodeid) 哈希兼容路径。 |
+| `pytest_duration_manifest.py` | 从 CI PostgreSQL JUnit 遥测生成按文件的 total 耗时/测试数清单，供加权分片使用；重复或无法映射的用例会 fail-fast。 |
 | `pytest_telemetry.py` | pytest 插件：把 rerun 尝试记录为 JSON 报告，供 CI 遥测与 flaky 治理。 |
 | `summarize_test_results.py` | 把 JUnit 与 rerun 报告渲染为 Markdown 汇总（写 CI job summary；stdlib-only）。 |
 | `check_reruns.py` | flaky 治理：rerun 命中未登记 nodeid 或登记条目超期时失败（registry 在 `tests/flaky_registry.yaml`；PR backend-coverage 当场阻断，nightly 再查 deadline）。 |

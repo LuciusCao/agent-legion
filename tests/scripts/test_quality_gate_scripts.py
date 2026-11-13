@@ -548,6 +548,10 @@ def _run_smoke_backend_gate(
         '    --junitxml=*) printf "<testsuite tests=\\"0\\"/>\\n" >"${arg#--junitxml=}" ;;\n'
         "  esac\n"
         "done\n"
+        'if [[ " $* " == *" scripts.pytest_smoke_selection "* ]]; then\n'
+        '  printf "tests/test_fake.py\\n"\n'
+        "  exit 0\n"
+        "fi\n"
         'exit "$FAKE_PYTEST_EXIT"\n',
     )
     result = _run(
@@ -588,7 +592,7 @@ def test_smoke_backend_gate_forwards_telemetry_and_preserves_exit_code(
     assert result.returncode == pytest_exit, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8").splitlines()
     assert calls == [
-        "run --frozen pytest -q --ignore=tests/full --ignore=tests/ci "
+        "run --frozen pytest -q tests/test_fake.py "
         "-m smoke -n 2 --dist worksteal --reruns 1 --reruns-delay 2 "
         f"--durations=12 --junitxml={results / 'smoke-junit.xml'} "
         "-p scripts.pytest_telemetry",
@@ -603,7 +607,7 @@ def test_smoke_backend_gate_without_results_dir_keeps_default_invocation(tmp_pat
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert gate_log.read_text(encoding="utf-8").splitlines() == [
-        "run --frozen pytest -q --ignore=tests/full --ignore=tests/ci "
+        "run --frozen pytest -q tests/test_fake.py "
         "-m smoke -n 2 --dist worksteal --reruns 1 --reruns-delay 2",
         "rerun:unset",
     ]
