@@ -34,6 +34,7 @@ _SINGLE_CLAIM_KEYS = {
     "agent_id",
     "kind",
     "execution_generation",
+    "lease_ttl_seconds",
     "manifest",
     "bundle_url",
 }
@@ -209,14 +210,15 @@ def test_batch_response_drops_only_the_broken_item() -> None:
 
     response_module.build_claim_response = flaky
     try:
+        broker = SimpleNamespace(lease_ttl_seconds=90)
         result = response_module.build_batch_claim_response(
-            None, settings, None, {"protocol_version": 5}, [_claim("good"), _claim("bad")]
+            broker, settings, None, {"protocol_version": 5}, [_claim("good"), _claim("bad")]
         )
         assert hasattr(result, "claims"), "partial batch must stay a 200 payload"
         assert [item.execution_id for item in result.claims] == ["good"]
 
         all_dropped = response_module.build_batch_claim_response(
-            None, settings, None, {"protocol_version": 5}, [_claim("bad")]
+            broker, settings, None, {"protocol_version": 5}, [_claim("bad")]
         )
     finally:
         response_module.build_claim_response = original
@@ -263,3 +265,17 @@ def test_claim_response_carries_execution_generation(tmp_path: Path) -> None:
     claim = response.json()["claims"][0]
     assert claim["execution_generation"] == 0
     assert claim["manifest"]["job_id"] == "job-gen"
+
+
+def test_claim_response_carries_actual_host_lease_ttl(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    app.state.agent_broker.lease_ttl_seconds = 42
+    seed_request(app.state.job_db, job_id="job-ttl", limit=2)
+
+    with TestClient(app) as client:
+        authenticate_admin(client)
+        token = register(client)["worker_token"]
+        response = _batch_claim(client, token, {"limit": 1})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["claims"][0]["lease_ttl_seconds"] == 42

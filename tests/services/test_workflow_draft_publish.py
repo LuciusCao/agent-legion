@@ -189,12 +189,12 @@ nodes:
     type: code
     capability: do_thing
     after: [_start]
-    outputs: [result.json]
+    outputs: [output.json]
   gate:
     type: approval
     label: 审批
     after: [do_thing]
-    inputs: [result.json]
+    inputs: [output.json]
 edges:
   - {from: _start, to: do_thing}
   - {from: do_thing, to: gate}

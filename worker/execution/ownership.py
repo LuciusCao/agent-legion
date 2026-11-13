@@ -37,11 +37,11 @@ from worker.upload.constants import PENDING_FILENAME
 # Sibling of upload_pending.json: which lease the execution dir belongs to.
 OWNER_FILENAME = "execution_owner.json"
 
-# Bound on waiting for a busy execution mutex (#564 P2). The Worker does not
-# know the Host's actual lease TTL (the 90s baseline is a Host-side #349
-# constant); 60s leaves two 30s batch-heartbeat beats inside that baseline —
-# enough for the old attempt to receive its 409 and finish its teardown. If
-# even that is not enough the heartbeat plane is still starved and this
+# Bound on waiting for a busy execution mutex (#564 P2). Claim responses now
+# carry the Host's actual lease TTL for transfer-timeout clamping; this separate
+# 60s bound preserves the original two 30s batch-heartbeat beats inside the 90s
+# baseline — enough for the old attempt to receive its 409 and finish teardown.
+# If even that is not enough the heartbeat plane is still starved and this
 # claim's lease is already dead or dying Host-side, so the caller abandons
 # the claim (no prepare, no report, no heartbeat) and leaves the lease to
 # expire for a Host requeue once the Worker recovers.

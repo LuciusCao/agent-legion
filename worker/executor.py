@@ -49,7 +49,8 @@ from worker.runtime import controls as runtime_controls
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
-from worker.state_evidence import configure_evidence_root
+from worker.state_evidence import configure_evidence_root, evidence_root
+from worker.state_evidence_cleanup import sweep_raw_event_copies
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
@@ -98,7 +99,11 @@ def main() -> int:
     except ValueError as exc:
         print(f"Agent Worker 启动预检失败：{exc}", flush=True)
         return 2
-    client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
+    client = Client(
+        str(config["host_url"]),
+        transfer_timeout=transfer.transfer_timeout_seconds,
+        heartbeat_interval=float(config.get("heartbeat_interval_seconds", 15)),
+    )
     stop = threading.Event()
     status = ExecutionStatusReporter.from_env()
     metrics = WorkerMetricsCache.from_env()
@@ -143,6 +148,9 @@ def main() -> int:
     if restored := uploads.restore(work_root):
         print(f"restored {restored} pending result upload(s) from {work_root}", flush=True)
     clean_work_root(work_root)
+    # Only abandoned raw staging is age-reaped; pending restored attempts keep
+    # their evidence, and all processed incident files remain manual-retention.
+    sweep_raw_event_copies(evidence_root(), work_root)
     download_slots = threading.Semaphore(transfer.download_max_concurrency)
     active: set[Future[None]] = set()
     # 双池跟踪（批次 2）：agent/code 各自计数，本地预算防过度 claim（Host

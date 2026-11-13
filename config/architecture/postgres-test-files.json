@@ -279,6 +279,7 @@
     "tests/services/test_workflow_draft_publish_concurrency.py",
     "tests/services/test_workflow_draft_publish_gates.py",
     "tests/services/test_workflow_publish_profile_source.py",
+    "tests/services/test_workflow_reserved_output_publish.py",
     "tests/services/test_workspace_execution_configuration_flow.py",
     "tests/services/test_workspace_execution_queries.py",
     "tests/services/test_workspace_job_control_flow.py",

@@ -19,6 +19,7 @@ from server.app.services.runtime_config import (
 from server.app.services.runtime_config import (
     update_active_revision_runtime_in_place,
 )
+from server.app.services.workflow_output_guard import require_unreserved_workflow_outputs
 from server.app.services.workflow_revision_change import revision_structurally_changed
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 
@@ -44,6 +45,9 @@ def save_revision_runtime_or_publish(
     ``created_by`` is stamped on that version row; callers without an
     operator context (seed paths) leave it empty.
     """
+    # Covers both structural publication and the in-place draft write before
+    # the active-row read; a rejected draft cannot delete or mutate anything.
+    require_unreserved_workflow_outputs(definition)
     active = job_db.get_active_workflow_revision(workspace_id, definition.key)
     if active is None:
         return publish(workspace_id, definition, on_commit)
