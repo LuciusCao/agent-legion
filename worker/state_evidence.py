@@ -44,13 +44,16 @@ state being the more accurate one). Files inside:
   ONE physical line AND parseable JSON (rendering lives in the sister
   module ``worker/state_evidence_lines.py``: #1168 F4 — a JSON line over
   the cap is re-serialized with capped string values, never middle-cut).
-- ``recovered/`` — the upload prepare lane's staging copy of the emergency
-  stream (#1350). Only the current lease's latest attempt, with passing output
-  validation and a normal final end, can replace a run directory cleaned before
-  scanning. Outbound bytes go through the
-  usual redaction and compression pass; this staging copy never proves
-  completion by itself. A cleanup race after the primary scan instead drops
-  the run-dir member without pretending a partial emergency stream is whole.
+- ``recovered/`` — fresh per-preparation staging directories for the emergency
+  stream (#1350). Only the current lease's latest agent attempt, with passing
+  output validation and a normal final end, can replace a run directory cleaned
+  before scanning. A fresh directory prevents a previous lease or agent attempt's
+  stderr anchor from leaking into recovery; direct-upload fallback retains its
+  own selected directory, while restart recovery re-extracts from the original
+  emergency stream. Outbound bytes go through the usual redaction and compression
+  pass; staging never proves completion by itself. A cleanup race after the
+  primary scan instead drops the run-dir member without pretending a partial
+  emergency stream is whole.
 - ``listing.txt`` — what still existed under the execution dir at dump
   time; every entry is span-redacted before persisting (#1168 F3: an
   agent that put a secret literal in a FILENAME must not leak it into
