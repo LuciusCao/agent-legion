@@ -393,3 +393,33 @@ def test_thread_pump_facade_routes_by_env(tmp_path: Path, monkeypatch) -> None:
     finally:
         proc.kill()
     assert _read_events(out) == ['{"type":"agent_start"}']
+
+
+def test_reactor_pump_facade_passes_lease_to_stream(tmp_path: Path, monkeypatch) -> None:
+    from worker.execution import reactor as reactor_module
+
+    proc = _spawn_writer([])
+    captured: list[str] = []
+    handle = object()
+
+    class FakeReactor:
+        def register(
+            self, process, path: str, execution_id: str, node_key: str, lease_id: str
+        ) -> object:
+            assert process is proc
+            captured.extend([path, execution_id, node_key, lease_id])
+            return handle
+
+    monkeypatch.setenv("AGENT_WORKER_EVENT_PUMP", "reactor")
+    monkeypatch.setattr(reactor_module.EventPumpReactor, "get", lambda: FakeReactor())
+    try:
+        with (tmp_path / "facade.jsonl").open("wb") as output:
+            result = reactor_module.spawn_agent_pump(
+                proc, output, "exec-facade", "node_a", lease_id="lease-current"
+            )
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+
+    assert result is handle
+    assert captured == [str(tmp_path / "facade.jsonl"), "exec-facade", "node_a", "lease-current"]

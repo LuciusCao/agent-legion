@@ -22,7 +22,8 @@ from typing import TYPE_CHECKING, Any
 from shared.output_truncation import OutputTruncation
 from shared.pi_events import scan_and_compress_pi_events
 from shared.stderr_tail import AGENT_STDERR_FILENAME
-from worker.state_evidence import dump_prep_evidence, prep_failure_message, recover_completed_run
+from worker.state_evidence import dump_prep_evidence, prep_failure_message
+from worker.upload import result_recovery as recovery
 from worker.upload.degraded_archive import (
     failed_metadata,
     write_agent_archive,
@@ -32,15 +33,17 @@ from worker.upload.degraded_archive import (
 from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS, exit_verdict
 from worker.upload.secret_registry import secret_snapshot
-from worker.upload.stderr_evidence import stderr_tail_for_run, validate_scanned_events
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask
 
 
-def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    """prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
+def prepare_or_failed(
+    task: UploadTask, scanned_result: tuple[dict[str, Any], list[str]] | None = None
+) -> tuple[dict[str, Any], Path, list[str]]:
+    """prepare_result + 失败降级为 failed 上报；直传回落复用同任务首次扫描的
+    verdict/outputs，清空 artifact_uploads 后仅重打包，tar 随之内嵌产物。
+    #959：备妥的归档超 Host 下发
     上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
 
     失败臂（except）的子步序与前置条件模型（#1168 深化；每步独立降级，
@@ -72,7 +75,7 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
     tests/workers/test_worker_upload_archive_safety.py）。
     """
     try:
-        metadata, archive, outputs = prepare_result(task)
+        metadata, archive, outputs = recovery.from_scan(task, scanned_result, prepare_result)
         rejection = declared_ceiling_rejection(task, archive)
     except Exception as exc:
         # #204 broad-except audit: 归档准备的故意降级（prepare_result 的
@@ -119,14 +122,14 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         return prepare_code_result(task)
     job_dir = task.execution_dir / "job"
     run_dir = job_dir / "runs" / task.node_key / "worker"
-    evidence_dir = recover_completed_run(task, job_dir, run_dir)
+    evidence_dir = recovery.recover_completed_run(task, job_dir, run_dir)
     events = evidence_dir / "events.jsonl"
     # Pi exits 0 even when the model call fails (e.g. provider 401); one
     # pass folds the model-error scan into the compression rewrite.
     # #748: the pass persists the non-JSON (merged-stderr) tail to the sink
-    # file at scan time; stderr_tail_for_run reads it back when a re-entry
-    # (direct-upload fallback / worker-restart restore) finds the events
-    # file already compressed — a second scan would yield nothing.
+    # file at scan time; stderr_tail_for_run reads it back when worker-restart
+    # restore finds the events file already compressed — a second scan would
+    # yield nothing. Direct-upload fallback instead repacks the scanned result.
     # The scan redacts before any cut or durable write — the stderr tail AND
     # the kept events' string values (#842: tool output echoing a secret must
     # not ride the compressed events.jsonl to the Host renderer) — through
@@ -147,8 +150,8 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # 失败（EACCES 族），此时绝不让未脱敏字节随 run_dir 进归档——诚实判败
     # 走空归档（#959 语义保持：failed 是可上报的降级，不是丢结果）。
     # original==0 的另外两形态（文件缺失 / 空文件）不触发本守卫。
-    validate_scanned_events(events, scanned_original, evidence_dir != run_dir)
-    stderr_tail = stderr_tail_for_run(evidence_dir, scanned_tail)
+    recovery.validate_scanned_events(events, scanned_original, evidence_dir != run_dir)
+    stderr_tail = recovery.scanned_stderr_tail(task, evidence_dir, scanned_tail, scanned_original)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
     # Host-judged) / "Agent process exited 1" (velites output contract) face;

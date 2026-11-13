@@ -1,10 +1,10 @@
 """#748 crash-evidence plumbing for the agent-stderr tail.
 
 Owns the stderr-tail faces so ``prepare.py`` stays a thin caller: the
-idempotency anchor (read back the scan-time sink file when a re-run of
-prepare finds the events file already compressed — the direct-upload
-fallback and worker-restart restore both re-enter prepare, and a second
-scan of a rewritten file yields nothing) and the error_message summary
+idempotency anchor (read back the scan-time sink file when worker-restart
+restore finds the events file already compressed — a second scan of a
+rewritten file yields nothing; direct-upload fallback instead reuses the
+same task's scanned verdict) and the error_message summary
 (exit code + the tail's LAST line — a crash header ends the stream).
 
 The secret registry the redaction passes ride on lives in
@@ -16,7 +16,6 @@ there is no lookback margin to keep consistent (#844).
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from shared.stderr_tail import AGENT_STDERR_FILENAME, STDERR_TAIL_BYTES
@@ -27,8 +26,8 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
     """The idempotent stderr tail for one prepare pass (#748 review P1).
 
     ``scanned_tail`` is the fresh scan's capture; when it is empty but the
-    scan-time sink file exists (a previous pass already rescued and
-    compressed the events — direct-upload fallback, worker-restart restore),
+    scan-time sink file exists (worker-restart restore finds a previous pass
+    already rescued and compressed the events),
     the file IS the tail: the compression rewrite destroyed the raw lines,
     so nothing else can recover them.
 
@@ -46,35 +45,6 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
         return b""
     redacted = secret_snapshot().redact(tail.decode("utf-8", "replace"))
     return redacted.encode("utf-8")[-STDERR_TAIL_BYTES:]
-
-
-def completed_emergency_events(events: Path) -> bool:
-    """Whether archived emergency bytes prove one fully successful run (#1350)."""
-    started = validated = normal_end = False
-    with events.open(encoding="utf-8", errors="replace") as stream:
-        for line in stream:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(event, dict):
-                continue
-            kind = str(event.get("type") or "")
-            if kind == "agent_start":
-                started = True
-            elif kind == "outputs_validation" and started:
-                validated = event.get("missing") == [] and event.get("violations") == []
-            elif kind == "agent_end":
-                normal_end = validated and not event.get("reason") and not event.get("error")
-    return normal_end
-
-
-def validate_scanned_events(events: Path, original: int, recovered: bool) -> None:
-    """Fail closed on raw survivors or completion proof lost during compression."""
-    if original == 0 and events.is_file() and events.stat().st_size > 0:
-        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
-    if recovered and not completed_emergency_events(events):
-        raise RuntimeError("recovered emergency events lost completion evidence during compression")
 
 
 def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:

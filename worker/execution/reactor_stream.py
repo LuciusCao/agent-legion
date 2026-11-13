@@ -53,6 +53,7 @@ class _Stream:
         "parse_error",
         "execution_id",
         "node_key",
+        "lease_id",
         "evidence",
     )
 
@@ -62,6 +63,7 @@ class _Stream:
         path: str,
         execution_id: str = "",
         node_key: str = "",
+        lease_id: str = "",
     ) -> None:
         if proc.stdout is None:  # spawn contract: PIPE is always set here
             raise ReactorUnavailable("child has no stdout pipe")
@@ -85,6 +87,7 @@ class _Stream:
         self.parse_error: BaseException | None = None
         self.execution_id = execution_id
         self.node_key = node_key
+        self.lease_id = lease_id
         self.evidence: EmergencyEventsSink | None = None
 
     def take_pending(self) -> list[bytes]:

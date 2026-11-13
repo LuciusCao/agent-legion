@@ -346,8 +346,8 @@ class UploadQueue:
                     ref = self._upload_one_artifact(job_dir, name, task, direct)
                 except DirectUploadError as exc:
                     # 直传失败（4xx / 重试耗尽 / 规格畸形）不判 run failed：清掉
-                    # 上传规格重跑 prepare（tar 自动内嵌产物），重启循环走无限
-                    # 重试的 CAS 通道，与无规格任务同一语义。
+                    # 上传规格，复用本任务已扫描的 verdict/outputs 重打包（tar
+                    # 内嵌产物），重启循环走无限重试的 CAS 通道。
                     print(f"direct upload failed for {task.execution_id}: {exc}", flush=True)
                     if self._condemned_before_bulk(task):
                         return "lost"
@@ -366,7 +366,7 @@ class UploadQueue:
                         uploaded = {}
                         break
                     task.artifact_uploads = {}
-                    metadata, archive, outputs = prepare_or_failed(task)
+                    metadata, archive, outputs = prepare_or_failed(task, (metadata, outputs))
                     if self._condemned_before_bulk(task):
                         return "lost"
                     direct, restart = False, True
