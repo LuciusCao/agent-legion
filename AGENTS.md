@@ -44,7 +44,7 @@
 ## 4. Quality Gates（必须执行）
 
 - 修改-验证内环用 `GATE_TIER=aff ./scripts/check-quick.sh`（backend 按覆盖逆索引只跑受影响测试、前端 `vitest related`；无索引或选择面太宽时自动回落 unit 全量）。aff 档不是合并凭证：本地提交由 fast hook、推送由 smoke hook 兜底，完整门禁以 PR CI 为准。
-- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线），postgres 集成层交给 CI（backend lane 的 PR 必跑 backend-postgres-a/b/c/d）。碰数据库的改动内环先跑直接相关的 postgres 测试；CI 不可用或需要离线发布凭证时，才跑 `GATE_TIER=postgres ./scripts/check-quick-backend.sh` 或含 unit + postgres 两层的 `./scripts/check.sh`。
+- **quick gate 的完整档默认只跑 unit 层**（PostgreSQL 离线），postgres 集成层交给 CI（backend lane 的 PR 必跑 backend-postgres-a/b/c/d/e）。碰数据库的改动内环先跑直接相关的 postgres 测试；CI 不可用或需要离线发布凭证时，才跑 `GATE_TIER=postgres ./scripts/check-quick-backend.sh` 或含 unit + postgres 两层的 `./scripts/check.sh`。
 - **机器级 gate 排队**：quick gate 经 git common dir 的 slot 串行（`scripts/gate-queue.sh`，默认 `AGENT_LEGION_MAX_PARALLEL_GATES=1`），后来者打印持有者并等待——排队本身就是正确行为，等待期做读代码/写代码等不占 CPU 的事。机制与实测依据见 [docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md)。
 - **aff 索引纪律**：每个 worktree 首次用 aff 前必须先跑 `GATE_TIER=aff-index ./scripts/check-quick-backend.sh` 建索引（依赖或 `tests/conftest.py` 变更后重建）；aff 输出含「aff fallback」时先建索引再继续内环。
 - 合并或发布前确认 GitHub Actions 的稳定聚合 check `quality-gate` 通过；它汇总 `.github/workflows/quality-gate.yml` 的全部适用 lane，未登记 rerun 也会在 PR 当场失败。CI 不可用时本地跑 `./scripts/check.sh` 代替。

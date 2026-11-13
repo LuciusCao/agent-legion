@@ -143,7 +143,7 @@ jobs:
   # Backend is sharded by database dependency (test architecture plan, Phase
   # 5C): backend-unit runs the static checks and the PostgreSQL-offline unit
   # tier with no service container, while the postgres side (Phase 5C-2/5C-3)
-  # runs as the four-shard backend-postgres matrix job below. backend-coverage
+  # runs as the five-shard backend-postgres matrix job below. backend-coverage
   # merges every shard's coverage artifact and enforces the 85% floor once
   # (issue #193: this used to be the aggregator half of backend-postgres-a,
   # which polled `gh api` for peer artifacts — the needs-DAG makes the merge
@@ -304,7 +304,7 @@ jobs:
         if: needs.changes.outputs.backend == 'true'
         run: node --test worker/ui/app.test.mjs
 
-  # Postgres test tier: four duration-weighted, whole-file shards (#1511)
+  # Postgres test tier: five duration-weighted, whole-file shards (#1511)
   # partition the tier with no overlap. scripts/pytest_gate_shard.py reads the
   # checked-in JUnit timing manifest and reserves shard-b capacity for its
   # additional evidence steps. The matrix shares service/setup declarations;
@@ -314,8 +314,8 @@ jobs:
   # does not cancel its peers' evidence.
   #
   # Branch protection now requires only the stable quality-gate aggregate.
-  # The old per-step condition existed solely to manufacture four successful
-  # contexts for docs-only PRs; job-level skipping avoids booting four idle
+  # The old per-step condition existed solely to manufacture five successful
+  # contexts for docs-only PRs; job-level skipping avoids booting five idle
   # Postgres service containers while the aggregate still receives a result.
   backend-postgres:
     name: backend-postgres-${{ matrix.shard }}
@@ -329,13 +329,15 @@ jobs:
       matrix:
         include:
           - shard: a
-            gate_shard: 1/4
+            gate_shard: 1/5
           - shard: b
-            gate_shard: 2/4
+            gate_shard: 2/5
           - shard: c
-            gate_shard: 3/4
+            gate_shard: 3/5
           - shard: d
-            gate_shard: 4/4
+            gate_shard: 4/5
+          - shard: e
+            gate_shard: 5/5
     services:
       postgres:
         image: postgres:17
@@ -396,7 +398,7 @@ jobs:
           GATE_SHARD: ${{ matrix.gate_shard }}
           GATE_SHARD_DURATIONS: config/architecture/postgres-test-durations.json
           # Reserve shard-b capacity for its sandbox integration + tests/full steps.
-          GATE_SHARD_RESERVED_SECONDS: "0,79,0,0"
+          GATE_SHARD_RESERVED_SECONDS: "0,79,0,0,0"
 
       # Shard b only. Like the tier shards, the full gate writes its own
       # COVERAGE_FILE, so it must not enforce the 85% floor on partial data
@@ -576,6 +578,12 @@ jobs:
           name: backend-postgres-d-coverage
           path: coverage-data
 
+      - name: Download postgres shard E coverage data
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: backend-postgres-e-coverage
+          path: coverage-data
+
       - name: Download full-gate coverage data
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -615,6 +623,13 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: backend-postgres-d-telemetry
+          path: test-results
+
+      - name: Download postgres shard E test telemetry
+        if: always()
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: backend-postgres-e-telemetry
           path: test-results
 
       - name: Download full-gate test telemetry
@@ -667,12 +682,14 @@ jobs:
             --junit test-results/backend-postgres-b-junit.xml \
             --junit test-results/backend-postgres-c-junit.xml \
             --junit test-results/backend-postgres-d-junit.xml \
+            --junit test-results/backend-postgres-e-junit.xml \
             --junit test-results/backend-full-junit.xml \
             --rerun-report test-results/backend-unit-reruns.json \
             --rerun-report test-results/backend-postgres-a-reruns.json \
             --rerun-report test-results/backend-postgres-b-reruns.json \
             --rerun-report test-results/backend-postgres-c-reruns.json \
             --rerun-report test-results/backend-postgres-d-reruns.json \
+            --rerun-report test-results/backend-postgres-e-reruns.json \
             --rerun-report test-results/backend-full-reruns.json \
             --output test-results/backend-summary.md
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
@@ -708,6 +725,7 @@ jobs:
             --rerun-report test-results/backend-postgres-b-reruns.json \
             --rerun-report test-results/backend-postgres-c-reruns.json \
             --rerun-report test-results/backend-postgres-d-reruns.json \
+            --rerun-report test-results/backend-postgres-e-reruns.json \
             --rerun-report test-results/backend-full-reruns.json \
             "${base_args[@]}"
 

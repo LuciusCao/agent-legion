@@ -312,16 +312,22 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-unit" in workflow
     assert "GATE_TIER: unit" in workflow
     assert "backend-unit-junit.xml" in workflow
-    # #1511: four duration-weighted whole-file shards balance wall time rather
+    # #1511: five duration-weighted whole-file shards balance wall time rather
     # than merely test count. Shard b reserves capacity for tests/full.
     assert "name: backend-postgres-${{ matrix.shard }}" in workflow
-    for shard, gate_shard in (("a", "1/4"), ("b", "2/4"), ("c", "3/4"), ("d", "4/4")):
+    for shard, gate_shard in (
+        ("a", "1/5"),
+        ("b", "2/5"),
+        ("c", "3/5"),
+        ("d", "4/5"),
+        ("e", "5/5"),
+    ):
         assert f"- shard: {shard}" in workflow
         assert f"gate_shard: {gate_shard}" in workflow
         assert f"name: backend-postgres-{shard}-coverage" in workflow
         assert f"name: backend-postgres-{shard}-telemetry" in workflow
         assert f"--junit test-results/backend-postgres-{shard}-junit.xml" in workflow
-    assert 'GATE_SHARD_RESERVED_SECONDS: "0,79,0,0"' in workflow
+    assert 'GATE_SHARD_RESERVED_SECONDS: "0,79,0,0,0"' in workflow
     assert "GATE_SHARD_DURATIONS: config/architecture/postgres-test-durations.json" in workflow
     assert "GATE_TIER: postgres" in workflow
     assert "GATE_SHARD: ${{ matrix.gate_shard }}" in workflow

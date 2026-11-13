@@ -279,7 +279,7 @@ layer, selected with `-m "not postgres"` against an
 unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
-runs in the `backend-postgres` matrix job (checks `backend-postgres-a/b/c/d`)
+runs in the `backend-postgres` matrix job (checks `backend-postgres-a/b/c/d/e`)
 described below.
 
 The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
@@ -398,9 +398,9 @@ release-train `HEAD`-only exception.
   node_modules) and the worker UI node:test suite. Its own lightweight job
   (issue #193): it runs on the frontend lane too, so frontend-only PRs no
   longer drag a postgres-test job along just for the contract check.
-- **backend-postgres-a/b/c/d** — the postgres tier's four duration-weighted,
+- **backend-postgres-a/b/c/d/e** — the postgres tier's five duration-weighted,
   whole-file shards as one matrix job (`backend-postgres`, #1511): each leg runs
-  its `GATE_SHARD=i/4` tier slice and uploads coverage data + telemetry as
+  its `GATE_SHARD=i/5` tier slice and uploads coverage data + telemetry as
   1-day artifacts. The deterministic LPT plan reads
   `config/architecture/postgres-test-durations.json`; new files fall back to the
   manifest's average per-test cost, and malformed manifests fail fast. Shard b
@@ -583,12 +583,14 @@ than by silently dropping them.
 gh run download <run-id> \
   --name backend-postgres-a-telemetry --name backend-postgres-b-telemetry \
   --name backend-postgres-c-telemetry --name backend-postgres-d-telemetry \
+  --name backend-postgres-e-telemetry \
   --dir data/analysis/<run-id>
 uv run --frozen python scripts/pytest_duration_manifest.py \
   --junit data/analysis/<run-id>/backend-postgres-a-telemetry/backend-postgres-a-junit.xml \
   --junit data/analysis/<run-id>/backend-postgres-b-telemetry/backend-postgres-b-junit.xml \
   --junit data/analysis/<run-id>/backend-postgres-c-telemetry/backend-postgres-c-junit.xml \
   --junit data/analysis/<run-id>/backend-postgres-d-telemetry/backend-postgres-d-junit.xml \
+  --junit data/analysis/<run-id>/backend-postgres-e-telemetry/backend-postgres-e-junit.xml \
   --source-run <run-id> \
   --output config/architecture/postgres-test-durations.json
 ```
