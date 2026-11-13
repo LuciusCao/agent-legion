@@ -75,8 +75,8 @@ def test_requires_labels_shape_is_validated(labels: Any) -> None:
         )
 
 
-def test_workflow_top_level_runtime_defaults_agent_nodes_only() -> None:
-    definition = workflow_definition_from_mapping(
+def test_stored_workflow_runtime_defaults_agent_nodes_only() -> None:
+    definition = workflow_definition_from_dict(
         _raw(
             {
                 "gen": _agent(),
@@ -86,20 +86,19 @@ def test_workflow_top_level_runtime_defaults_agent_nodes_only() -> None:
             execution={"runtime": "velites", "provider": "p", "model": "m"},
         )
     )
-    assert definition.execution.runtime == "velites"
     assert definition.nodes["gen"].execution.runtime == "velites"
     assert definition.nodes["review"].execution.runtime == "pi"  # node value wins
     assert definition.nodes["pkg"].execution.runtime == ""
     assert not is_self_contained_agent_node(definition.nodes["pkg"])
 
 
-def test_workflow_top_level_runtime_is_validated() -> None:
+def test_stored_workflow_top_level_runtime_is_validated() -> None:
     with pytest.raises(WorkflowDefinitionError, match="Workflow execution.runtime"):
-        workflow_definition_from_mapping(_raw({"gen": _agent()}, execution={"runtime": "nope"}))
+        workflow_definition_from_dict(_raw({"gen": _agent()}, execution={"runtime": "nope"}))
 
 
 def test_profile_fields_round_trip_through_snapshot_and_yaml_echo() -> None:
-    definition = workflow_definition_from_mapping(
+    definition = workflow_definition_from_dict(
         _raw(
             {
                 "gen": _agent(requires_labels={"gpu": "yes"}),
@@ -111,16 +110,13 @@ def test_profile_fields_round_trip_through_snapshot_and_yaml_echo() -> None:
     )
     from_snapshot = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
     assert from_snapshot.nodes == definition.nodes
-    assert from_snapshot.execution == definition.execution
     echoed = yaml.safe_load(definition_to_yaml(definition))
-    assert echoed["execution"]["runtime"] == "velites"
-    # The baked default is subtracted back out; the node override survives.
-    assert "runtime" not in echoed["nodes"]["gen"].get("execution", {})
+    assert "execution" not in echoed
+    assert echoed["nodes"]["gen"]["execution"]["runtime"] == "velites"
     assert echoed["nodes"]["review"]["execution"]["runtime"] == "pi"
     assert echoed["nodes"]["gen"]["requires_labels"] == {"gpu": "yes"}
     reloaded = workflow_definition_from_mapping(echoed)
     assert reloaded.nodes == definition.nodes
-    assert reloaded.execution == definition.execution
 
 
 def test_legacy_workflow_echo_and_payload_stay_unchanged() -> None:

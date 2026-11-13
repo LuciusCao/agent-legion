@@ -66,11 +66,18 @@ _CANDIDATE = WorkflowNodeExecution(runtime="pi", provider="p2", model="m2")
 
 
 class _Env:
-    def __init__(self, job_db, snapshot_def: WorkflowDefinition) -> None:
+    def __init__(
+        self, job_db, snapshot_def: WorkflowDefinition, *, legacy_execution: dict | None = None
+    ) -> None:
         self.job_db = job_db
         ws = job_db.create_workspace(name="Profile replay WS")
         self.workspace_id = str(ws["id"])
-        snapshot = serialize_definition(snapshot_def)
+        snapshot_payload = json.loads(serialize_definition(snapshot_def))
+        if legacy_execution is not None:
+            snapshot_payload["execution"] = legacy_execution
+        snapshot = json.dumps(
+            snapshot_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
         self.job = job_db.create_job(
             workflow_key="test",
             source_type="question",
@@ -106,9 +113,19 @@ class _Env:
                 (run["id"], self.job["id"]),
             )
 
-    def add_revision(self, version: int, definition: WorkflowDefinition, status: str) -> str:
+    def add_revision(
+        self,
+        version: int,
+        definition: WorkflowDefinition,
+        status: str,
+        *,
+        legacy_execution: dict | None = None,
+    ) -> str:
         revision_id = f"{self.workspace_id}:v{version}"
-        text = serialize_definition(definition)
+        payload = json.loads(serialize_definition(definition))
+        if legacy_execution is not None:
+            payload["execution"] = legacy_execution
+        text = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         with write_transaction(TEST_DATABASE_URL) as conn:
             conn.execute(
                 "insert into workflow_revisions(id, workspace_id, version, status,"
@@ -196,6 +213,47 @@ def test_legacy_snapshot_node_replays_with_an_inlined_revision(job_db) -> None:
     assert _copy_node(copy_job).execution.runtime == "pi"
     assert pins["agent_versions"] == {}
     assert pins["node_profiles"]["generate"]["revision_id"] == revision_id
+
+
+def test_archived_legacy_defaults_replay_with_materialized_mixed_profile(job_db) -> None:
+    env = _Env(job_db, _definition(_ORIGINAL))
+    revision_id = env.add_revision(
+        2,
+        _definition(WorkflowNodeExecution(provider="node-provider")),
+        "archived",
+        legacy_execution={
+            "runtime": "velites",
+            "provider": "top-provider",
+            "model": "top-model",
+            "thinking": "low",
+        },
+    )
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", revision_id=revision_id)
+
+    copy_job, _pins = env.copy(replay)
+    execution = _copy_node(copy_job).execution
+    assert execution.runtime == "velites"
+    assert execution.provider == "node-provider"
+    assert execution.model == "top-model"
+    assert execution.thinking == "low"
+
+
+def test_frozen_legacy_job_snapshot_remains_replayable(job_db) -> None:
+    env = _Env(
+        job_db,
+        _definition(None),
+        legacy_execution={"runtime": "velites", "provider": "top-provider", "model": "top-model"},
+    )
+
+    replay = env.service().create_replay(env.workspace_id, "item-1")
+
+    copy_job, _pins = env.copy(replay)
+    execution = _copy_node(copy_job).execution
+    assert execution.runtime == "velites"
+    assert execution.provider == "top-provider"
+    assert execution.model == "top-model"
+    assert copy_job["workflow_definition_hash"] == env.job["workflow_definition_hash"]
 
 
 def test_draft_choice_freezes_the_draft_profile(job_db) -> None:

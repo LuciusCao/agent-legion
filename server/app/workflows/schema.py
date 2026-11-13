@@ -49,13 +49,11 @@ class WorkflowNodeExecution:
     # string = append (the YAML default, kept unpersisted like ``prompt``).
     prompt_mode: str = ""
     # Self-contained agent execution profile (#933, EXEC-AGENT-PROFILE-001):
-    # an ``agent`` node declaring a runtime (one of ``AGENT_RUNTIMES``; the
-    # workflow top-level ``execution.runtime`` is the default) dispatches
-    # from its own profile; publish requires it since #935 (#440 P3). Empty
-    # = legacy path (capability → the one published Agent), reachable only
-    # from pre-v93 snapshots / un-inlined active nodes. Manifest builders
-    # drop the empty key (``node_execution_payload``) so legacy manifests
-    # stay byte-identical.
+    # an ``agent`` node declares its own runtime (one of ``AGENT_RUNTIMES``)
+    # and dispatches from its own profile; publish requires it since #935.
+    # Empty = legacy path (capability → the one published Agent), reachable
+    # only from stored snapshots that never declared a runtime. Manifest
+    # builders drop the empty key so legacy manifests stay byte-identical.
     runtime: str = ""
 
 
@@ -156,12 +154,6 @@ class WorkflowDefinition:
     nodes: dict[str, WorkflowNode]
     edges: list[WorkflowEdge] = field(default_factory=list)
     schema_version: int = 1
-    # Optional top-level execution defaults (provider/model/thinking only —
-    # prompt stays node-level). The loader merges them into every non-start
-    # node's execution (node value wins), so consumers always read the
-    # effective per-node value. Workspace-level Agent defaults were retired
-    # at schema v64; this block is their workflow-scoped replacement.
-    execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
 
     def __post_init__(self) -> None:
         if self.schema_version == 1 and not self.edges:

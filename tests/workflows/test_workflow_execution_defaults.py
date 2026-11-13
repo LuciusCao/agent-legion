@@ -1,216 +1,184 @@
-"""Workflow 顶层 execution 默认：加载校验与向节点的合并（schema v64）。
-
-workspace 级 Agent 默认（default_agent_*）退役后，顶层 ``execution`` 块是
-workflow 作用域的默认来源：loader 把它合并进每个非 start 节点的 execution
-（节点值优先），dispatch 读到的节点值即有效值，dispatch 本身不变。
-"""
+"""Authoring and stored legacy execution-default materialization (#805)."""
 
 from __future__ import annotations
 
+import copy
+import json
+from pathlib import Path
+
 import pytest
+import yaml
 
 from server.app.workflows.loader import (
+    load_workflow_definition,
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
-from server.app.workflows.schema import WorkflowDefinitionError
+from server.app.workflows.revision_format import definition_to_yaml, serialize_definition
+from server.app.workflows.schema import WorkflowDefinitionError, WorkflowNodeExecution
 
 pytestmark = pytest.mark.no_db
 
-_RAW = {
+_STORED = {
     "key": "wf",
     "label": "WF",
-    "execution": {"provider": "top-provider", "model": "top-model", "thinking": "low"},
+    "execution": {
+        "provider": "top-provider",
+        "model": "top-model",
+        "thinking": "low",
+        "runtime": "velites",
+    },
     "nodes": {
         "agent_node": {
+            "node_type": "agent",
             "capability": "review",
-            "execution": {"provider": "node-provider", "prompt": "extra"},
+            "execution": {"provider": "node-provider", "runtime": "pi", "prompt": "extra"},
         },
-        "empty_node": {"capability": "generate"},
+        "empty_agent": {"node_type": "agent", "capability": "generate"},
+        "legacy_alias": {"node_type": "node", "capability": "legacy"},
+        "raw_code": {"node_type": "code", "capability": "package"},
+        "raw_code_with_dead_values": {
+            "node_type": "code",
+            "capability": "package",
+            "execution": {"provider": "dead-code-provider"},
+        },
     },
 }
 
 
-def _load(raw: dict | None = None):
-    return workflow_definition_from_mapping(raw if raw is not None else _RAW)
+def _stored(raw: dict | None = None):
+    return workflow_definition_from_dict(copy.deepcopy(raw if raw is not None else _STORED))
 
 
-def test_top_level_execution_merges_into_nodes_node_wins() -> None:
-    definition = _load()
+def _authoring(raw: dict | None = None) -> dict:
+    payload = copy.deepcopy(raw if raw is not None else _STORED)
+    for node in payload["nodes"].values():
+        if "node_type" in node:
+            node["type"] = node.pop("node_type")
+    return payload
+
+
+def _mapping(raw: dict | None = None):
+    return workflow_definition_from_mapping(_authoring(raw))
+
+
+def test_mapping_authoring_remains_compatible_before_m201_write_rejection() -> None:
+    definition = _mapping()
+
+    assert definition.nodes["empty_agent"].execution.runtime == "velites"
+    assert definition.nodes["empty_agent"].execution.provider == "top-provider"
+    assert not hasattr(definition, "execution")
+
+
+def test_yaml_file_authoring_uses_the_same_compatibility_path(tmp_path: Path) -> None:
+    path = tmp_path / "workflow.yaml"
+    path.write_text(yaml.safe_dump(_authoring()), encoding="utf-8")
+
+    definition = load_workflow_definition(path)
+
+    assert definition.nodes["agent_node"].execution.provider == "node-provider"
+    assert definition.nodes["empty_agent"].execution.model == "top-model"
+
+
+def test_stored_legacy_materializes_agent_nodes_and_preserves_mixed_overrides() -> None:
+    definition = _stored()
 
     agent = definition.nodes["agent_node"]
-    assert agent.execution.provider == "node-provider"  # 节点值优先
-    assert agent.execution.model == "top-model"  # 空字段用顶层补
+    assert agent.execution.provider == "node-provider"
+    assert agent.execution.model == "top-model"
     assert agent.execution.thinking == "low"
-    assert agent.execution.prompt == "extra"  # prompt 不被顶层触碰
+    assert agent.execution.runtime == "pi"
+    assert agent.execution.prompt == "extra"
 
-    empty = definition.nodes["empty_node"]
-    assert empty.execution.provider == "top-provider"
-    assert empty.execution.model == "top-model"
-
-
-def test_top_level_execution_does_not_touch_start_node() -> None:
-    definition = _load()
-
-    start = definition.start_node
-    assert start is not None
-    assert start.execution.provider == ""
-    assert start.execution.model == ""
+    empty = definition.nodes["empty_agent"].execution
+    assert empty.provider == "top-provider"
+    assert empty.model == "top-model"
+    assert empty.thinking == "low"
+    assert empty.runtime == "velites"
 
 
-def test_definition_retains_top_level_execution() -> None:
-    definition = _load()
-
-    assert definition.execution.provider == "top-provider"
-    assert definition.execution.model == "top-model"
-    assert definition.execution.thinking == "low"
-
-
-def test_no_top_level_execution_keeps_nodes_untouched() -> None:
-    raw = {
-        "key": "wf",
-        "label": "WF",
-        "nodes": {"n": {"capability": "x"}},
-    }
-    definition = _load(raw)
-
-    assert definition.execution.provider == ""
-    assert definition.nodes["n"].execution.provider == ""
+def test_stored_legacy_alias_keeps_historical_non_runtime_defaults() -> None:
+    execution = _stored().nodes["legacy_alias"].execution
+    assert execution.provider == "top-provider"
+    assert execution.model == "top-model"
+    assert execution.thinking == "low"
+    assert execution.runtime == ""
 
 
-def test_top_level_execution_must_be_a_mapping() -> None:
-    raw = {**_RAW, "execution": "nope"}
-    with pytest.raises(WorkflowDefinitionError, match="Workflow execution must be a mapping"):
-        _load(raw)
+def test_stored_legacy_does_not_touch_non_agent_raw_nodes() -> None:
+    definition = _stored()
+    assert definition.nodes["raw_code"].execution == WorkflowNodeExecution()
+    assert definition.nodes["raw_code_with_dead_values"].execution.provider == "dead-code-provider"
+    assert definition.start_node is not None
+    assert definition.start_node.execution == WorkflowNodeExecution()
 
 
-def test_top_level_execution_fields_must_be_strings() -> None:
-    raw = {**_RAW, "execution": {"provider": 42}}
-    with pytest.raises(WorkflowDefinitionError, match="execution.provider must be a string"):
-        _load(raw)
+def test_stored_legacy_without_runtime_does_not_invent_one() -> None:
+    raw = copy.deepcopy(_STORED)
+    del raw["execution"]["runtime"]
+    definition = _stored(raw)
+    assert definition.nodes["empty_agent"].execution.runtime == ""
+    assert definition.nodes["empty_agent"].execution.provider == "top-provider"
 
 
-def test_top_level_execution_rejects_prompt() -> None:
-    raw = {**_RAW, "execution": {"prompt": "global"}}
-    with pytest.raises(WorkflowDefinitionError, match="execution.prompt is not allowed"):
-        _load(raw)
+def test_new_definition_and_serialization_have_no_top_level_execution() -> None:
+    definition = _stored()
+    assert not hasattr(definition, "execution")
+    assert "execution" not in json.loads(serialize_definition(definition))
 
 
-def test_snapshot_round_trip_is_idempotent() -> None:
-    # 真实快照路径：serialize_definition（asdict + json）→ from_dict。
-    import json
+@pytest.mark.parametrize(
+    ("execution", "message"),
+    [
+        ("nope", "Workflow execution must be a mapping"),
+        ({"provider": 42}, "execution.provider must be a string"),
+        ({"runtime": "unknown"}, "Workflow execution.runtime"),
+        ({"prompt": "global"}, "execution.prompt is not allowed"),
+        ({"prompt_mode": "append"}, "execution.prompt_mode is not allowed"),
+    ],
+)
+def test_stored_legacy_shape_is_still_validated(execution, message: str) -> None:
+    raw = copy.deepcopy(_STORED)
+    raw["execution"] = execution
+    with pytest.raises(WorkflowDefinitionError, match=message):
+        _stored(raw)
 
-    from server.app.services.workflow_revision_format import serialize_definition
 
-    definition = _load()
+def test_stored_snapshot_round_trip_preserves_effective_node_profiles() -> None:
+    definition = _stored()
     reloaded = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
-
-    assert reloaded.execution == definition.execution
-    assert reloaded.nodes["agent_node"].execution == definition.nodes["agent_node"].execution
-    assert reloaded.nodes["empty_node"].execution == definition.nodes["empty_node"].execution
+    assert reloaded.nodes == definition.nodes
+    assert "execution" not in json.loads(serialize_definition(reloaded))
 
 
-def _dump(definition) -> str:
-    import yaml
+def test_echo_has_no_top_level_block_and_mapping_round_trip_is_lossless() -> None:
+    definition = _stored()
+    echoed = yaml.safe_load(definition_to_yaml(definition))
 
-    from server.app.services.workflow_revision_format import definition_to_yaml
-
-    return yaml.safe_load(definition_to_yaml(definition))
-
-
-def test_echo_yaml_subtracts_baked_defaults_from_nodes() -> None:
-    """回显（Studio 草稿与 chat agent 共用 definition_to_yaml）不能把 loader
-    烘焙进节点的顶层默认再吐成节点级显式覆盖——否则用户之后改顶层默认
-    再发布会被节点烘焙值静默压过。"""
-    dumped = _dump(_load())
-
-    # 顶层默认照常在 execution: 块（位于 nodes: 之前）。
-    assert dumped["execution"] == {
+    assert "execution" not in echoed
+    assert echoed["nodes"]["agent_node"]["execution"] == {
+        "provider": "node-provider",
+        "model": "top-model",
+        "thinking": "low",
+        "prompt": "extra",
+        "runtime": "pi",
+    }
+    assert echoed["nodes"]["empty_agent"]["execution"] == {
         "provider": "top-provider",
         "model": "top-model",
         "thinking": "low",
+        "runtime": "velites",
     }
-    assert list(dumped).index("execution") < list(dumped).index("nodes")
-    # agent_node 只保留真实覆盖（provider 与顶层不同）与 prompt；与顶层一致
-    # 的 model/thinking 不输出。
-    assert dumped["nodes"]["agent_node"]["execution"] == {
-        "provider": "node-provider",
-        "prompt": "extra",
-    }
-    # empty_node 的全部 execution 值都来自顶层 → 不输出 execution 块。
-    assert "execution" not in dumped["nodes"]["empty_node"]
+    assert "execution" not in echoed["nodes"]["raw_code"]
+    assert _mapping(echoed).nodes == definition.nodes
 
 
-def test_echo_yaml_round_trip_preserves_effective_execution() -> None:
-    definition = _load()
-    reloaded = workflow_definition_from_mapping(_dump(definition))
-
-    assert reloaded.execution == definition.execution
-    for key, node in definition.nodes.items():
-        assert reloaded.nodes[key].execution == node.execution
-
-
-def test_top_level_edit_after_echo_round_trip_takes_effect() -> None:
-    """yaml → load → dump → 只改顶层 → load：顶层修改必须生效（回归：
-    烘焙回显曾让节点显式值永久压过顶层修改）。"""
-    dumped = _dump(_load())
-    dumped["execution"]["model"] = "new-model"
-
-    reloaded = workflow_definition_from_mapping(dumped)
-
-    # 没有节点级覆盖的节点吃到新顶层值。
-    assert reloaded.nodes["empty_node"].execution.model == "new-model"
-    # 节点真实覆盖（provider）不受顶层改动影响；其继承来的 model 跟随顶层。
-    assert reloaded.nodes["agent_node"].execution.provider == "node-provider"
-    assert reloaded.nodes["agent_node"].execution.model == "new-model"
-
-
-def test_top_level_execution_does_not_bake_into_approval_node() -> None:
-    """回归（本地发布版实测踩坑）：顶层默认烘焙进 approval 节点后，
-    asdict 快照带上非空 execution，下次 from_dict 加载被
-    must-not-declare-execution 规则拒绝——发布成功、读取 500。"""
+def test_poisoned_approval_snapshot_still_heals_on_stored_read() -> None:
     raw = {
         "key": "wf",
         "label": "WF",
         "schema_version": 2,
         "execution": {"provider": "top-provider", "model": "top-model"},
-        "nodes": {
-            "entry": {"type": "start", "label": "入口"},
-            "write": {"label": "写稿", "capability": "write_script", "outputs": ["script.md"]},
-            "gate": {"type": "approval", "label": "审批", "inputs": ["script.md"]},
-        },
-        "edges": [
-            {"from": "entry", "to": "write"},
-            {"from": "write", "to": "gate"},
-        ],
-    }
-    definition = workflow_definition_from_mapping(raw)
-
-    gate = definition.nodes["gate"]
-    assert gate.execution.provider == ""
-    assert gate.execution.model == ""
-    # 非 approval 节点照常吃默认。
-    assert definition.nodes["write"].execution.provider == "top-provider"
-
-    # 快照必须能原样重载——正是踩坑的读路径（发布存库 → active 读取）。
-    # 走与存库一致的序列化链路（asdict + JSON），而非裸 asdict（tuple 形态）。
-    import json
-
-    from server.app.workflows.revision_format import serialize_definition
-
-    reloaded = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
-    assert reloaded.nodes["gate"].execution.provider == ""
-
-
-def test_poisoned_approval_snapshot_heals_on_load() -> None:
-    """存量兼容：修复前发布的 revision 快照里 approval 节点带着烘焙进去的
-    非空 execution。读路径必须静默剥离（approval 永不 dispatch，这些值是死数据），
-    而不是继续 500——否则升级后 active/stats 依旧打不开，得手工改库。"""
-    poisoned = {
-        "key": "wf",
-        "label": "WF",
-        "schema_version": 2,
-        "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
         "nodes": {
             "entry": {"node_type": "start", "label": "入口"},
             "write": {
@@ -218,14 +186,12 @@ def test_poisoned_approval_snapshot_heals_on_load() -> None:
                 "label": "写稿",
                 "capability": "write_script",
                 "outputs": ["script.md"],
-                "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
             },
             "gate": {
                 "node_type": "approval",
                 "label": "审批",
                 "inputs": ["script.md"],
-                # 修复前 merge_execution_defaults 烘焙进来的值。
-                "execution": {"provider": "top-provider", "model": "top-model", "thinking": ""},
+                "execution": {"provider": "dead-value"},
             },
         },
         "edges": [
@@ -233,31 +199,22 @@ def test_poisoned_approval_snapshot_heals_on_load() -> None:
             {"source": "write", "target": "gate"},
         ],
     }
-    definition = workflow_definition_from_dict(poisoned)
-
-    assert definition.nodes["gate"].execution.provider == ""
-    assert definition.nodes["gate"].execution.model == ""
-    # 非 approval 节点的值不受影响。
+    definition = _stored(raw)
+    assert definition.nodes["gate"].execution == WorkflowNodeExecution()
     assert definition.nodes["write"].execution.provider == "top-provider"
 
 
-def test_mapping_path_still_rejects_execution_on_approval() -> None:
-    """剥离只发生在快照读路径；手写 yaml 给 approval 声明 execution 仍然拒绝。"""
+def test_authoring_still_rejects_execution_on_approval() -> None:
     raw = {
         "key": "wf",
         "label": "WF",
-        "schema_version": 2,
         "nodes": {
-            "entry": {"type": "start", "label": "入口"},
-            "write": {"label": "写稿", "capability": "write_script", "outputs": ["script.md"]},
             "gate": {
                 "type": "approval",
                 "label": "审批",
-                "inputs": ["script.md"],
-                "execution": {"provider": "top-provider"},
-            },
+                "execution": {"provider": "node-provider"},
+            }
         },
-        "edges": [{"from": "entry", "to": "write"}, {"from": "write", "to": "gate"}],
     }
     with pytest.raises(WorkflowDefinitionError, match="must not declare execution"):
         workflow_definition_from_mapping(raw)

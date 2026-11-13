@@ -45,8 +45,8 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("outputs")
     if base.execution != draft.execution:
         fields.append("execution")
-    # #1114：effective runtime（loader 已把顶层默认并入节点）属结构字段，
-    # 单独标出，供界面区分「原地应用」与「需发布新版本」。
+    # #1114：effective runtime 属结构字段，单独标出，供界面区分
+    # 「原地应用」与「需发布新版本」。stored legacy 默认已由 from_dict 物化。
     if base.execution.runtime != draft.execution.runtime:
         fields.append("runtime")
     if base.skill != draft.skill:

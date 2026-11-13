@@ -45,12 +45,6 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             }
         },
     }
-    # prompt 不是顶层默认键（loader 拒绝），asdict 带出的空 prompt 过滤掉。
-    top_execution = {k: v for k, v in asdict(definition.execution).items() if k != "prompt" and v}
-    # Top-level defaults precede ``nodes:`` so the echo reads as defaults,
-    # not as another per-node block.
-    if top_execution:
-        payload["execution"] = top_execution
     payload["nodes"] = {}
     payload["edges"] = []
     for key, node in definition.nodes.items():
@@ -77,17 +71,10 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         apply_shard_echo(raw_node, node)
         if node.reduce is not None:
             raw_node["reduce"] = {"from": node.reduce.from_node}
-        # The loader bakes the top-level defaults into every non-start node;
-        # subtract them back out key by key so the echo only carries genuine
-        # node-level overrides — otherwise a later edit of the top-level
-        # defaults would silently lose to the baked per-node values.
-        # prompt/prompt_mode 是节点级专属键（顶层块 loader 拒绝），非空即
-        # 节点自身声明，随 echo 保留。
-        execution = {
-            key: value
-            for key, value in asdict(node.execution).items()
-            if value and (key in ("prompt", "prompt_mode") or value != top_execution.get(key))
-        }
+        # Legacy defaults are materialized before this point; echo the complete
+        # effective node profile so mapping re-loading preserves it without a
+        # top-level block.
+        execution = {key: value for key, value in asdict(node.execution).items() if value}
         if execution:
             raw_node["execution"] = execution
         if node.config:
