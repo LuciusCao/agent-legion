@@ -235,6 +235,25 @@ def _control(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _first_two_distinct_controls(
+    healthy_controls: Sequence[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """First global control and first from another job, with one bounded scan."""
+    if not healthy_controls:
+        return None, None
+    first = healthy_controls[0]
+    first_job_id = first["job_id"]
+    alternate = next(
+        (
+            control
+            for index, control in enumerate(healthy_controls)
+            if index and control["job_id"] != first_job_id
+        ),
+        None,
+    )
+    return first, alternate
+
+
 def _control_ref(control: dict[str, Any]) -> dict[str, str]:
     return {
         "workspace_id": control["workspace_id"],
@@ -326,16 +345,17 @@ def build_artifact_dangling_plan(
         ),
         key=lambda entry: (entry["workspace_id"], entry["job_id"], entry["name"]),
     )
+    first_control, alternate_control = _first_two_distinct_controls(healthy_controls)
     used_controls: dict[tuple[str, str, str], dict[str, Any]] = {}
     for entry in entries:
-        controls = [
-            _control(control)
-            for control in healthy_controls
-            if control["job_id"] != entry["job_id"]
-        ][:1]
-        entry["positive_controls"] = [_control_ref(control) for control in controls]
-        if entry["probe"]["outcome"] in DANGLING_CANDIDATE_OUTCOMES and controls:
-            control = controls[0]
+        selected = (
+            first_control
+            if first_control is not None and entry["job_id"] != first_control["job_id"]
+            else alternate_control
+        )
+        control = _control(selected) if selected is not None else None
+        entry["positive_controls"] = [_control_ref(control)] if control is not None else []
+        if entry["probe"]["outcome"] in DANGLING_CANDIDATE_OUTCOMES and control is not None:
             key = (control["workspace_id"], control["job_id"], control["name"])
             used_controls[key] = control
 

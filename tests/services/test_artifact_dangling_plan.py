@@ -224,6 +224,106 @@ def _plan(jobs: list[dict[str, Any]], storage: FakeStorage, **overrides: Any) ->
     return build_artifact_dangling_plan(FakeQueries(jobs), storage, **options)
 
 
+def test_control_selection_short_circuits_and_preserves_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import server.app.services.artifact_dangling_plan as plan_module
+
+    candidate = _job("job-a", [_artifact("producer", "jobs/ws/job-a/result.json", b"x")])
+    healthy = [_healthy_job(f"job-{letter}") for letter in "bcd"]
+    jobs = [candidate, *(job for job, _, _ in healthy)]
+    objects = {key: content for _, key, content in healthy}
+    original_control = plan_module._control
+    calls: list[str] = []
+
+    def counting_control(entry: dict[str, Any]) -> dict[str, Any]:
+        calls.append(str(entry["job_id"]))
+        return original_control(entry)
+
+    monkeypatch.setattr(plan_module, "_control", counting_control)
+
+    plan = _plan(jobs, FakeStorage(objects))
+
+    assert calls == ["job-b", "job-c", "job-b", "job-b"]
+    assert plan["plan_sha256"] == "abe91b16bafc951cf62a2712dc1853320207174040877c3652f7ece1285583b1"
+    assert plan["artifacts"][0]["positive_controls"] == [
+        {
+            "workspace_id": "ws",
+            "job_id": "job-b",
+            "name": "result.json",
+            "storage_key": "jobs/ws/job-b/.v/attempt/result.json",
+            "content_sha256": "87695fdac81728b9d7f2d4a1335c2632bb5e6ba1bed21d2dff0254fba31c7d5b",
+        }
+    ]
+    assert [(control["job_id"], control["name"]) for control in plan["positive_controls"]] == [
+        ("job-b", "result.json")
+    ]
+
+
+def test_first_two_distinct_controls_stops_after_first_match() -> None:
+    from server.app.services.artifact_dangling_plan import _first_two_distinct_controls
+
+    class CountingJobDict(dict):
+        def __init__(self, job_id: str) -> None:
+            super().__init__(job_id=job_id)
+            self.job_id_reads = 0
+
+        def __getitem__(self, key: str) -> Any:
+            if key == "job_id":
+                self.job_id_reads += 1
+            return super().__getitem__(key)
+
+    first = CountingJobDict("job-a")
+    second = CountingJobDict("job-b")
+    third = CountingJobDict("job-c")
+
+    assert _first_two_distinct_controls([first, second, third]) == (first, second)
+    assert (first.job_id_reads, second.job_id_reads, third.job_id_reads) == (1, 1, 0)
+
+    same_job = [CountingJobDict("job-a") for _ in range(3)]
+    first_same, alternate = _first_two_distinct_controls(same_job)
+    assert first_same is same_job[0]
+    assert alternate is None
+    assert [entry.job_id_reads for entry in same_job] == [1, 1, 1]
+    assert _first_two_distinct_controls([]) == (None, None)
+
+
+def test_no_valid_control_preserves_plan_without_materializing_controls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import server.app.services.artifact_dangling_plan as plan_module
+
+    job = _job(
+        "job-same",
+        [
+            _artifact(
+                "producer", f"jobs/ws/job-same/{name}.json", name.encode(), name=f"{name}.json"
+            )
+            for name in ("a", "b", "c")
+        ],
+    )
+    objects = {
+        row["storage_key"]: name.encode()
+        for row, name in zip(job["artifacts"], ("a", "b", "c"), strict=True)
+    }
+    calls: list[str] = []
+    original_control = plan_module._control
+
+    def counting_control(entry: dict[str, Any]) -> dict[str, Any]:
+        calls.append(str(entry["job_id"]))
+        return original_control(entry)
+
+    monkeypatch.setattr(plan_module, "_control", counting_control)
+
+    plan = _plan([job], FakeStorage(objects))
+
+    assert calls == []
+    assert plan["plan_sha256"] == "d82a6366dde26ee95bd60259c4251f6054b7d0f9ccb2d98e59305907530962f0"
+    assert plan["summary"]["candidate_count"] == 0
+    assert plan["positive_controls"] == []
+    assert plan["artifacts"] == []
+
+
 def test_latest_tie_complete_row_set_actionable_scope_and_stable_hash() -> None:
     older_key = "jobs/ws/job-a/.v/old/result.json"
     latest_key = "jobs/ws/job-a/.v/latest/result.json"
