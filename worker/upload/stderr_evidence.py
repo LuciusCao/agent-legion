@@ -16,6 +16,7 @@ there is no lookback margin to keep consistent (#844).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from shared.stderr_tail import AGENT_STDERR_FILENAME, STDERR_TAIL_BYTES
@@ -45,6 +46,35 @@ def stderr_tail_for_run(run_dir: Path, scanned_tail: bytes) -> bytes:
         return b""
     redacted = secret_snapshot().redact(tail.decode("utf-8", "replace"))
     return redacted.encode("utf-8")[-STDERR_TAIL_BYTES:]
+
+
+def completed_emergency_events(events: Path) -> bool:
+    """Whether archived emergency bytes prove one fully successful run (#1350)."""
+    started = validated = normal_end = False
+    with events.open(encoding="utf-8", errors="replace") as stream:
+        for line in stream:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind = str(event.get("type") or "")
+            if kind == "agent_start":
+                started = True
+            elif kind == "outputs_validation" and started:
+                validated = event.get("missing") == [] and event.get("violations") == []
+            elif kind == "agent_end":
+                normal_end = validated and not event.get("reason") and not event.get("error")
+    return normal_end
+
+
+def validate_scanned_events(events: Path, original: int, recovered: bool) -> None:
+    """Fail closed on raw survivors or completion proof lost during compression."""
+    if original == 0 and events.is_file() and events.stat().st_size > 0:
+        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
+    if recovered and not completed_emergency_events(events):
+        raise RuntimeError("recovered emergency events lost completion evidence during compression")
 
 
 def stderr_error_message(exit_code: int, stderr_tail: bytes) -> str:
