@@ -26,9 +26,8 @@ _NOT_VERSIONED_ENTITY_PUBLISH = {
     "/api/workspaces/{workspace_id}/workflow-drafts/publish",
 }
 
-# versioned_entities publish routes (agent / node_code / preview_panel).
+# Retained versioned_entities publish routes (node_code / preview_panel).
 _CAS_PUBLISH_ROUTES = {
-    "/api/agent-definitions/{agent_id}/publish",
     "/api/workspaces/{workspace_id}/nodes/{node_key}/code/publish",
     "/api/workspaces/{workspace_id}/preview-panel/publish",
 }

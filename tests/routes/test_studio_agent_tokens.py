@@ -103,8 +103,13 @@ def test_minted_token_calls_tool_surface(client) -> None:
 
     tools = bearer.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active")
     assert tools.status_code == 200, tools.text
-    # The scoped token stays refused on effecting (publish-side) endpoints.
-    assert bearer.post("/api/agent-definitions/some-agent/publish").status_code == 403
+    # The scoped token stays refused on a retained effecting endpoint.
+    denied = bearer.post(
+        f"/api/workspaces/{workspace_id}/nodes/some-node/code/publish",
+        json={"expected_hash": "stale"},
+    )
+    assert denied.status_code == 403, denied.text
+    assert "Studio agent scope" in denied.json()["detail"]
 
     client.delete(f"/api/studio-agent-tokens/{minted['id']}")
     assert (

@@ -137,8 +137,16 @@ terms:
       QualityReplay 响应的 agent_id/agent_version 身份列保留
   - pattern: '`create_agent_definition\(\.\.\.\)`|`save_agent_definition_draft\(\.\.\.\)`'
     retired_in: '#936（#440 P4：Studio/MCP 写面删除）'
-    note: 只匹配 MCP 调用形态；人类 REST 路由的同名处理函数由后续切片处置。
+    note: 只匹配 MCP 调用形态；人类 REST 写路由见下方人类写端点条目。
       执行配置写在 workflow 节点并经 save_workflow_draft 保存
+  - pattern: 'POST (?:/api)?/agent-definitions(?:\s|$)|PUT (?:/api)?/agent-definitions/\{agent_id\}/draft|POST (?:/api)?/agent-definitions/\{agent_id\}/(?:publish|rollback|copy)|DELETE (?:/api)?/agent-definitions/\{agent_id\}(?:\s|$)'
+    retired_in: '#936（#440 P4：人类 Agent 写端点删除）'
+    note: create/draft/publish/rollback/copy/archive 六个人类写端点与内部写兼容层
+      均已删除；list/get/versions GET、历史行和旧 job/replay resolver 保留
+  - pattern: '\bAgent(?:DefinitionPayload|CreateRequest|CopyRequest|PublishRequest|RollbackRequest|ArchiveResponse)\b'
+    retired_in: '#936（#440 P4：人类 Agent 写契约删除）'
+    note: 写请求/响应模型已随写端点删除；AgentDefinitionResponse 与
+      AgentVersionResponse 等只读契约保留
   - pattern: 'studio-agent/tools/workspaces/\{workspace_id\}/agent-definitions/\{agent_id\}/draft'
     retired_in: '#936（#440 P4：Studio scoped 写端点删除）'
     note: scoped AgentDefinition draft PUT 已删除；历史定义 GET 与旧 job/replay

@@ -107,14 +107,8 @@ server/app/
 | 方法 | 路径 | 处理函数 | 文件 |
 |------|------|----------|------|
 | GET | `/agent-definitions` | `list_agent_definitions` | routes/agent_definitions.py |
-| POST | `/agent-definitions` | `create_agent_definition` | routes/agent_definitions.py |
 | GET | `/agent-definitions/{agent_id}` | `get_agent_definition` | routes/agent_definitions.py |
 | GET | `/agent-definitions/{agent_id}/versions` | `list_agent_definition_versions` | routes/agent_definitions.py |
-| PUT | `/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/agent_definitions.py |
-| POST | `/agent-definitions/{agent_id}/publish` | `publish_agent_definition` | routes/agent_definitions.py |
-| POST | `/agent-definitions/{agent_id}/rollback` | `rollback_agent_definition` | routes/agent_definitions.py |
-| POST | `/agent-definitions/{agent_id}/copy` | `copy_agent_definition` | routes/agent_definitions.py |
-| DELETE | `/agent-definitions/{agent_id}` | `archive_agent_definition` | routes/agent_definitions.py |
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_register_tokens.py |
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_register_tokens.py |
 | DELETE | `/agent-register-tokens/{token_id}` | `delete_register_token` | routes/agent_register_tokens.py |
@@ -362,17 +356,12 @@ server/app/
 | EtagRebindCas | TypedDict | expected_etag: str, new_etag: str, storage_key: str, upload_generation: int, ... | app/jobs/queries/material_etag_identity.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'velites'], capability: str, skill: str, tool... | app/routes/agent_catalog_contracts.py |
 | AgentCatalogResponse | BaseModel | agents: list[AgentDefinitionResponse] | app/routes/agent_catalog_contracts.py |
-| AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'velites'], skill: str, tools: list[s... | app/routes/agent_definition_contracts.py |
-| AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
-| AgentRollbackRequest | BaseModel | version: int | app/routes/agent_definition_contracts.py |
-| AgentPublishRequest | BaseModel | expected_hash: str | app/routes/agent_definition_contracts.py |
 | AgentVersionResponse | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
 | AgentVersionSummary | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
 | AgentListItem | BaseModel | agent_id: str, capability: str, runtime: str, skill: str, version: int, statu... | app/routes/agent_definition_contracts.py |
 | AgentListResponse | BaseModel | agents: list[AgentListItem] | app/routes/agent_definition_contracts.py |
 | AgentDetailResponse | BaseModel | agent_id: str, latest: AgentVersionResponse | None, published: AgentVersionRe... | app/routes/agent_definition_contracts.py |
 | AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
-| AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
 | RuntimeToolEntry | BaseModel | name: str, tier: str, description: str, parameters: dict[str, Any], activatio... | app/routes/agent_runtimes_contracts.py |
 | RuntimeTools | BaseModel | tools: list[RuntimeToolEntry] | app/routes/agent_runtimes_contracts.py |
 | AgentRuntimesResponse | BaseModel | runtimes: dict[str, RuntimeTools] | app/routes/agent_runtimes_contracts.py |
@@ -1039,7 +1028,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码、work
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
-Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），曾经 `/api/agent-definitions`（`workspace_id` 查询参数）做 draft → publish → archive 生命周期管理，#935 起写端点已 deprecated（响应带 `Deprecation` 头）、读端点保留，#1079 起设置页只剩只读的「历史 Agent 定义」列表、Studio 不再有 Agent 定义编辑入口；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。agent 节点的执行档案（runtime / tools / `requires_labels` / config_schema / 节点 skill 绑定）自 #440 P3（#935）起以节点为准（EXEC-AGENT-PROFILE-001），一律经 `server/app/services/agent_node_profile.py` 的 `resolve_agent_node_profile` 解析：节点有效 `execution.runtime`（节点值或 workflow 顶层 `execution.runtime` 默认）发布必填，档案取节点自身字段，不要求 published Agent、revision 发布不物化路由，dispatch 把 runtime / labels 冻结进请求行（`profile_source='node'`，schema v92）；schema v93 已把存量 legacy agent 节点回填为自含档案，上述 AgentDefinition 目录转为只读历史（写 API/MCP 已 deprecated），按 capability 解析 published AgentDefinition 的 legacy 路径（`resolve_agent_node_profile` 对未声明有效 runtime 的节点回落 capability 唯一的已发布 Agent）仍服务两类节点：回填前冻结的 job 快照里的 legacy 节点，以及 active revision 里 v93 未能内联、尚未补 runtime 的节点——后者的新 job 照旧按 capability 解析，直到该节点补齐 runtime 并发布新 revision（发布门禁拒绝无 runtime 的 agent 节点）。只填 `requires_labels` 不填 runtime 发布即报错。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。生产与 E2E seed 不再写 AgentDefinition：fresh demo 与 main-flow E2E 只发布自含 revision，通用 importer 的旧 `agents[]` 只作为内联输入，verify 校验 active revision 的节点档案；历史 `versioned_entities` 行与旧 job/replay resolver 保留。legacy/replay/只读目录测试的历史行统一由 `tests/helpers` 经通用 `VersionedEntityStore` 构造：draft 使用 `AgentDefinition.model_dump()` 与 `definition_hash()`，publish 携带 expected hash CAS 并显式 reset published cache，归档保留不可变版本；夹具不复制人类写 API 的 id/capability 业务校验或 override prune，自含执行测试不再播种无效历史行。
+Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（schema v46 起 workspace 作用域，解析严格限定本 workspace、零全局兜底），`/api/agent-definitions`（`workspace_id` 查询参数）仅保留 list/get/versions 三个 GET 只读端点；六个人类写端点、`AgentService` 写方法与失效写契约已随 #936 删除，#1079 起设置页只剩只读的「历史 Agent 定义」列表、Studio 不再有 Agent 定义编辑入口；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。agent 节点的执行档案（runtime / tools / `requires_labels` / config_schema / 节点 skill 绑定）自 #440 P3（#935）起以节点为准（EXEC-AGENT-PROFILE-001），一律经 `server/app/services/agent_node_profile.py` 的 `resolve_agent_node_profile` 解析：节点有效 `execution.runtime`（节点值或 workflow 顶层 `execution.runtime` 默认）发布必填，档案取节点自身字段，不要求 published Agent、revision 发布不物化路由，dispatch 把 runtime / labels 冻结进请求行（`profile_source='node'`，schema v92）；schema v93 已把存量 legacy agent 节点回填为自含档案，上述 AgentDefinition 目录转为只读历史（Studio/MCP 与人类写 API 已随 #936 删除），按 capability 解析 published AgentDefinition 的 legacy 路径（`resolve_agent_node_profile` 对未声明有效 runtime 的节点回落 capability 唯一的已发布 Agent）仍服务两类节点：回填前冻结的 job 快照里的 legacy 节点，以及 active revision 里 v93 未能内联、尚未补 runtime 的节点——后者的新 job 照旧按 capability 解析，直到该节点补齐 runtime 并发布新 revision（发布门禁拒绝无 runtime 的 agent 节点）。只填 `requires_labels` 不填 runtime 发布即报错。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 加载时合并进每个非 start 节点）→ 报错（workspace `default_agent_*` 已随 schema v64 退役，无全局兜底）；thinking 可空（空 = runtime 决定）。生产与 E2E seed 不再写 AgentDefinition：fresh demo 与 main-flow E2E 只发布自含 revision，通用 importer 的旧 `agents[]` 只作为内联输入，verify 校验 active revision 的节点档案；历史 `versioned_entities` 行与旧 job/replay resolver 保留。legacy/replay/只读目录测试的历史行统一由 `tests/helpers` 经通用 `VersionedEntityStore` 构造：draft 使用 `AgentDefinition.model_dump()` 与 `definition_hash()`，publish 携带 expected hash CAS 并显式 reset published cache，归档保留不可变版本；夹具不复制人类写 API 的 id/capability 业务校验或 override prune，自含执行测试不再播种无效历史行。
 
 其他配置文件：
 

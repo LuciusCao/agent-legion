@@ -2,11 +2,10 @@
 
 A scoped token minted for a studio chat run authenticates as the initiating
 user through the Bearer channel, but every effecting endpoint — workflow
-publish; node code publish/rollback/archive; agent and executor definition
-publish/rollback/archive; job lifecycle and execution triggers (delete,
-rerun, run-to, continue, batch intake, workflow upgrade, replay, batch-op
-archive); workspace,
-secret, package, member and settings writes; worker pause/resume — mounts
+publish; node code publish/rollback/archive; job lifecycle and execution
+triggers (delete, rerun, run-to, continue, batch intake, workflow upgrade,
+replay, batch-op archive); workspace, secret, package, member and settings
+writes; worker pause/resume — mounts
 reject_studio_agent_scope and must refuse it with 403, and require_admin
 refuses scoped identities outright. Studio chat effecting endpoints (session
 create/close, message send/cancel, permission answers) are likewise guarded:
@@ -74,13 +73,6 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # drafts via the tool surface; taking effect stays human-only.
     ("POST", "/api/workspaces/{workspace_id}/preview-panel/publish", None),
     ("POST", "/api/workspaces/{workspace_id}/preview-panel/archive", None),
-    ("POST", "/api/agent-definitions/{agent_id}/publish?workspace_id={workspace_id}", None),
-    (
-        "POST",
-        "/api/agent-definitions/{agent_id}/rollback?workspace_id={workspace_id}",
-        {"version": 1},
-    ),
-    ("DELETE", "/api/agent-definitions/{agent_id}?workspace_id={workspace_id}", None),
     # Job lifecycle and execution triggers (P0-1/P1-1).
     ("DELETE", "/api/jobs/{job_id}", None),
     ("DELETE", "/api/workspaces/{workspace_id}/jobs/batch", None),
@@ -251,9 +243,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/compare"): "read-only compare",
     ("PUT", f"{_NODE_CODE}"): "node code draft write",
-    ("POST", "/api/agent-definitions"): "creates a draft",
-    ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
-    ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
     # batch-rerun/preview is NOT exempt (red-team R8 P2-2 on #745): it mounts
     # reject_studio_agent_scope like every other POST under job_group, so the
@@ -445,13 +434,6 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
         json={"code": "def run(job, job_dir, runtime):\n    pass\n"},
     )
     assert node_draft.status_code not in (401, 403) and node_draft.status_code < 500
-
-    agent_draft = scoped.put(
-        "/api/agent-definitions/agent-x/draft",
-        params={"workspace_id": workspace_id},
-        json={},
-    )
-    assert agent_draft.status_code not in (401, 403) and agent_draft.status_code < 500
 
 
 def test_unknown_scope_type_is_also_rejected_on_effecting_endpoints(client, job_db) -> None:

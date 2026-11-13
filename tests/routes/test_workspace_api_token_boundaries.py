@@ -403,12 +403,9 @@ def test_api_token_read_surface_is_the_intake_allowlist_only(client) -> None:
 
 
 def test_api_token_cannot_write_drafts(client) -> None:
-    """Review P1 pin: the manifest's exempt draft/validate routes (PUT node
-    code, POST/PUT agent definitions, draft validate/compare) are reachable
-    for studio-agent scoped tokens by design — but the api machine identity
-    has no user row, and before the allowlist these routes either wrote
-    drafts attributed via a KeyError 500 or let the token write workspace
-    content. All of them must 404 it."""
+    """Review P1 pin: the manifest's retained draft/validate routes are
+    reachable for studio-agent scoped tokens by design — but the api machine
+    identity has no user row and must never write workspace content."""
     _create_workspace(client, WORKSPACE)
     issued = _issue(client, WORKSPACE, label="cms")
     api = _bearer_client(client, issued["api_token"])
@@ -425,23 +422,13 @@ def test_api_token_cannot_write_drafts(client) -> None:
         ),
         (
             "PUT",
-            f"/api/workspaces/{WORKSPACE}/nodes/n1/code",
-            {"code": "def run(job, job_dir, runtime):\n    pass\n"},
-        ),
-        (
-            "POST",
-            f"/api/agent-definitions?workspace_id={WORKSPACE}",
-            {"capability": "cap", "runtime": "pi"},
+            f"/api/workspaces/{WORKSPACE}/workflow-draft",
+            {"definition_yaml": "key: k\nlabel: l\nnodes: {}"},
         ),
         (
             "PUT",
-            f"/api/agent-definitions/a1/draft?workspace_id={WORKSPACE}",
-            {"capability": "cap", "runtime": "pi"},
-        ),
-        (
-            "POST",
-            f"/api/agent-definitions/a1/copy?workspace_id={WORKSPACE}",
-            {"new_agent_id": "a2"},
+            f"/api/workspaces/{WORKSPACE}/nodes/n1/code",
+            {"code": "def run(job, job_dir, runtime):\n    pass\n"},
         ),
     ]
     for method, url, payload in probes:

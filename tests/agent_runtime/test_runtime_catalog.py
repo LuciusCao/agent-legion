@@ -1,8 +1,8 @@
 """Runtime catalog 一致性（issue #75 阶段 1，纯静态）。
 
 AGENT_RUNTIMES 是 Host 侧 runtime 全集的单一事实来源；本文件钉住它与各
-消费方全等：AgentDefinition.runtime 三处 Literal（OpenAPI/前端类型来源，
-保持字面写法）、Worker 注册白名单（agent_control/registry.py）、Worker 侧
+消费方全等：AgentDefinition 与只读 AgentDefinitionResponse 的 runtime Literal
+（OpenAPI/前端类型来源，保持字面写法）、Worker 注册白名单（agent_control/registry.py）、Worker 侧
 runtime 目录（worker/runtime/catalog.py）与 workerctl choices
 （worker/cli_args.py）。
 """
@@ -18,7 +18,6 @@ from server.app.agent_catalog.definition import AgentDefinition
 from server.app.agent_control import registry as worker_registry
 from server.app.agent_runtime.catalog import AGENT_RUNTIMES, get_adapter
 from server.app.routes.agent_catalog_contracts import AgentDefinitionResponse
-from server.app.routes.agent_definition_contracts import AgentDefinitionPayload
 from worker.cli_args import build_parser
 from worker.runtime.catalog import SUPPORTED_RUNTIMES
 
@@ -44,7 +43,6 @@ def _disable_runtime_choices() -> set[str]:
 def test_catalog_matches_runtime_literals() -> None:
     assert set(AGENT_RUNTIMES) == {"pi", "velites"}
     assert _literal_values(AgentDefinition, "runtime") == set(AGENT_RUNTIMES)
-    assert _literal_values(AgentDefinitionPayload, "runtime") == set(AGENT_RUNTIMES)
     assert _literal_values(AgentDefinitionResponse, "runtime") == set(AGENT_RUNTIMES)
 
 

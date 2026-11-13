@@ -1,27 +1,16 @@
-from typing import Annotated, Any
+from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from pydantic import ValidationError
+from fastapi import APIRouter, HTTPException, Query
 
-from server.app.agent_catalog import AgentDefinition
-from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
 from server.app.routes.agent_definition_contracts import (
-    AgentArchiveResponse,
-    AgentCopyRequest,
-    AgentCreateRequest,
-    AgentDefinitionPayload,
     AgentDetailResponse,
     AgentListItem,
     AgentListResponse,
-    AgentPublishRequest,
-    AgentRollbackRequest,
     AgentVersionResponse,
     AgentVersionsResponse,
     AgentVersionSummary,
 )
-from server.app.routes.agent_definition_deprecation import DEPRECATED_WRITE
-from server.app.services.agent_definition_create import create_agent_draft
 from server.app.services.agent_service import AgentService
 from server.app.services.versioned_entities import VersionedEntity
 
@@ -29,8 +18,6 @@ from server.app.services.versioned_entities import VersionedEntity
 # required workspace_id query parameter, which the router-level
 # workspace-access dependency also uses for membership enforcement.
 WorkspaceId = Annotated[str, Query()]
-UserDep = Annotated[dict[str, Any], Depends(require_user)]
-ScopeGuard = Annotated[None, Depends(reject_studio_agent_scope)]
 
 
 def _version_response(entity: VersionedEntity) -> AgentVersionResponse:
@@ -60,24 +47,8 @@ def _version_summary(entity: VersionedEntity) -> AgentVersionSummary:
     )
 
 
-def _parse_definition(payload: AgentDefinitionPayload) -> AgentDefinition:
-    try:
-        # AgentCreateRequest carries agent_id, which is not a definition field.
-        return AgentDefinition.model_validate(
-            payload.model_dump(include=set(AgentDefinitionPayload.model_fields))
-        )
-    except ValidationError as exc:
-        # ctx carries the raw exception objects — not JSON serializable.
-        detail = [{k: v for k, v in error.items() if k != "ctx"} for error in exc.errors()]
-        raise HTTPException(status_code=422, detail=detail) from exc
-
-
 def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
-    """DB-backed Agent catalog: draft → publish lifecycle (v26).
-
-    Mounted through ``secured()``: workspace members manage Agent definitions;
-    execution config resolves per node with workspace defaults.
-    """
+    """Read-only historical Agent definitions, bound to one workspace."""
     router = APIRouter()
 
     def _service(workspace_id: str) -> AgentService:
@@ -110,18 +81,6 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
             )
         return AgentListResponse(agents=items)
 
-    @router.post("/agent-definitions", response_model=AgentVersionResponse, **DEPRECATED_WRITE)
-    def create_agent_definition(
-        request: AgentCreateRequest, workspace_id: WorkspaceId, user: UserDep
-    ) -> AgentVersionResponse:
-        definition = _parse_definition(request)
-        # #407：agent_id 省略时按 capability 生成，同 capability 已有
-        # Agent 则 409 引导直接编辑（create-entry policy 见 service 层）。
-        entity = create_agent_draft(
-            _service(workspace_id), request.agent_id, definition, f"user:{user['id']}"
-        )
-        return _version_response(entity)
-
     @router.get("/agent-definitions/{agent_id}", response_model=AgentDetailResponse)
     def get_agent_definition(agent_id: str, workspace_id: WorkspaceId) -> AgentDetailResponse:
         versions = _service(workspace_id).list_versions(agent_id)
@@ -143,66 +102,5 @@ def create_agent_definitions_router(job_db: JobQueries) -> APIRouter:
         if not versions:
             raise HTTPException(status_code=404, detail=f"Unknown Agent: {agent_id}")
         return AgentVersionsResponse(versions=[_version_summary(v) for v in versions])
-
-    @router.put(
-        "/agent-definitions/{agent_id}/draft",
-        response_model=AgentVersionResponse,
-        **DEPRECATED_WRITE,
-    )
-    def save_agent_definition_draft(
-        agent_id: str, request: AgentDefinitionPayload, workspace_id: WorkspaceId, user: UserDep
-    ) -> AgentVersionResponse:
-        definition = _parse_definition(request)
-        entity = _service(workspace_id).save_draft(agent_id, definition, f"user:{user['id']}")
-        return _version_response(entity)
-
-    @router.post(
-        "/agent-definitions/{agent_id}/publish",
-        response_model=AgentVersionResponse,
-        **DEPRECATED_WRITE,
-    )
-    def publish_agent_definition(
-        agent_id: str,
-        workspace_id: WorkspaceId,
-        request: Annotated[AgentPublishRequest, Body()],
-        _guard: ScopeGuard = None,
-    ) -> AgentVersionResponse:
-        entity = _service(workspace_id).publish(agent_id, request.expected_hash)
-        return _version_response(entity)
-
-    @router.post(
-        "/agent-definitions/{agent_id}/rollback",
-        response_model=AgentVersionResponse,
-        **DEPRECATED_WRITE,
-    )
-    def rollback_agent_definition(
-        agent_id: str,
-        request: AgentRollbackRequest,
-        workspace_id: WorkspaceId,
-        user: UserDep,
-        _guard: ScopeGuard = None,
-    ) -> AgentVersionResponse:
-        entity = _service(workspace_id).rollback(agent_id, request.version, f"user:{user['id']}")
-        return _version_response(entity)
-
-    @router.post(
-        "/agent-definitions/{agent_id}/copy",
-        response_model=AgentVersionResponse,
-        **DEPRECATED_WRITE,
-    )
-    def copy_agent_definition(
-        agent_id: str, request: AgentCopyRequest, workspace_id: WorkspaceId, user: UserDep
-    ) -> AgentVersionResponse:
-        entity = _service(workspace_id).copy(agent_id, request.new_agent_id, f"user:{user['id']}")
-        return _version_response(entity)
-
-    @router.delete(
-        "/agent-definitions/{agent_id}", response_model=AgentArchiveResponse, **DEPRECATED_WRITE
-    )
-    def archive_agent_definition(
-        agent_id: str, workspace_id: WorkspaceId, _guard: ScopeGuard = None
-    ) -> AgentArchiveResponse:
-        archived = _service(workspace_id).archive_all(agent_id)
-        return AgentArchiveResponse(archived=archived)
 
     return router

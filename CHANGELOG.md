@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Removed
 
+- **Breaking（Refs #936，#440 P4 人类写面收尾，不关闭 #936/#440）**：删除 `POST /api/agent-definitions`、`PUT .../{agent_id}/draft`、`POST .../{agent_id}/publish|rollback|copy` 与 `DELETE .../{agent_id}` 六个人类写端点，连同 `AgentService` 写方法、创建/发布 prune 服务、deprecation marker 及写请求/响应模型；不保留内部写兼容层。`GET` list/detail/versions、历史 `versioned_entities` 行、旧 job/replay resolver、MCP/Studio 只读能力与通用 `VersionedEntityStore` / node_code / preview_panel 生命周期保持不变；旧写请求不可达且零写库，前端 `AgentRuntime` 改从保留的 `AgentDefinitionResponse.runtime` 生成读契约派生。capability、routes DDL 与历史目录视觉 UI 留待后续切片。
+
 - **Refs #936，#440 P4 调用者迁移第一阶段（不关闭 #936/#440）**：main-flow E2E 与自含执行测试不再创建无效 AgentDefinition 历史行，demo test seed、legacy replay/resolver、只读 catalog 及相关直接写测试统一改经通用 `VersionedEntityStore` 构造 draft/published/archived 历史；夹具保留 AgentDefinition dump/hash、expected-hash CAS、精确 version/hash 读取与显式缓存重置，不复制人类写 API 的 id/capability 校验或 override prune。本阶段不删除人类写 API 或 AgentService 写方法，生产执行、旧 replay 和只读目录行为不变。
 
 - **Breaking（Refs #936，#440 P4 第三片，不关闭 #936/#440）**：内置 demo 与通用 seed importer 不再创建或发布 AgentDefinition；fresh demo seed 的 published Agent 数从 4 降为 0，四个 agent 节点逐一显式声明 `execution.runtime: velites` 并保留节点 skill/tools/requires_labels/config_schema 执行语义；顶层 velites 默认仅作为 #805 前 runtime-only 通道的兼容回退。通用 importer 的旧 `agents[]` 仅作为首版 revision 的内联输入，verify 改验 active revision 的规范化节点档案；既有历史行、旧 job/replay resolver 与测试 helper 保持兼容，后续切片再迁移测试夹具。
