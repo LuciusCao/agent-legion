@@ -39,8 +39,9 @@ def require_unreserved_output_names(manifest: Mapping[str, Any]) -> None:
     命中 ``result.json`` / ``node.log`` / ``result-output-artifacts.json``
     的产物名会在归档与提升面与协议成员碰撞（v2 元数据换写吞掉真产物、
     node.log 与捕获日志双写互覆）——入队即节点失败并点名冲突名，同
-    require_routable_execution 的 #13 fail-fast 形态（跑时守卫；发布侧
-    前移留待 follow-up）。
+    require_routable_execution 的 #13 fail-fast 形态。发布侧经
+    require_unreserved_workflow_outputs 复用本守卫；存量 revision 的入队
+    fail-closed 仍保留。
 
     命名空间契约（一句话模型）：expected output 的**落盘路径**——
     ``PurePosixPath(name).as_posix()`` 归一化后的形态——不得等于任一

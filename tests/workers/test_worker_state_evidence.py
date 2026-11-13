@@ -97,6 +97,7 @@ def test_prep_failure_dumps_redacted_events_and_stderr(
     )
     incident = evidence_root / "exec-1__node_a"
     dumped_events = (incident / "events.jsonl").read_text(encoding="utf-8")
+    assert not (incident / "events.jsonl.raw").exists()
     assert SECRET not in dumped_events
     kept = [json.loads(line) for line in dumped_events.splitlines()]
     assert [event["type"] for event in kept] == ["tool_execution_end", "agent_end"]
@@ -218,13 +219,15 @@ def test_prep_failure_scan_failure_discards_raw_copy(
         + "\n",
         encoding="utf-8",
     )
+    incident = evidence_root / "exec-1__node_a"
+    incident.mkdir(parents=True)
+    (incident / "events.jsonl").write_text("stale prior-attempt evidence\n", encoding="utf-8")
 
     client = QueueFakeClient()
     queue = _queue(client)
     queue.submit(_task(work_root, exit_code=0))
     queue.shutdown()
 
-    incident = evidence_root / "exec-1__node_a"
     record = json.loads((incident / "incident.json").read_text(encoding="utf-8"))
     assert record["events"].startswith("scan failed")
     assert "raw copy discarded" in record["events"]
@@ -240,8 +243,8 @@ def test_events_copy_unlink_failure_does_not_escape(
     OSError（同进程相邻 syscall 双 EACCES 的理论形态）——修复前该异常逃出
     ``_dump_events_copy``、把 dump_prep_evidence 的 broad except 整臂炸掉
     （其余取证 arm 全不落盘）；修复后 unlink 各自 suppress：状态照常返回
-    ``scan failed``（incident.json 照常落盘），raw 副本如实滞留（无 TTL
-    证据目录的人工清理路径），error_message 不受影响。"""
+    ``scan failed``（incident.json 照常落盘），raw 副本以显式 .raw 名滞留，
+    等待启动年龄 + 归属清扫，error_message 不受影响。"""
     monkeypatch.setattr("worker.upload.prepare.prepare_result", _boom)
     monkeypatch.setattr(
         "worker.state_evidence.scan_and_compress_pi_events",
@@ -251,7 +254,7 @@ def test_events_copy_unlink_failure_does_not_escape(
 
     def failing_unlink(self: Path, missing_ok: bool = False):
         # 只对 state 目录里的 raw 副本失败（源 run 目录的清理不受影响）。
-        if "evidence" in self.parts and self.name == "events.jsonl":
+        if "evidence" in self.parts and self.name == "events.jsonl.raw":
             raise OSError(13, "Permission denied")
         return real_unlink(self, missing_ok=missing_ok)
 
@@ -277,8 +280,9 @@ def test_events_copy_unlink_failure_does_not_escape(
     record = json.loads((incident / "incident.json").read_text(encoding="utf-8"))
     assert record["events"].startswith("scan failed")  # 状态如实（非 unreadable）
     assert (incident / "listing.txt").is_file()  # 其余 arm 未被连坐
-    raw_copy = incident / "events.jsonl"  # raw 副本滞留（防御语义，如实记录）
+    raw_copy = incident / "events.jsonl.raw"  # 显式 raw 名，等待启动有界清扫
     assert raw_copy.is_file()
+    assert not (incident / "events.jsonl").exists()
     report = client.reports[0]
     assert report["status"] == "failed"  # 结果仍可上报（不受取证臂影响）
 

@@ -24,6 +24,7 @@ from server.app.services.agent_node_profile_types import (
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import workflow_node_config_schemas
 from server.app.services.node_config_secret_guard import secret_gate_errors
+from server.app.services.workflow_output_guard import require_unreserved_workflow_outputs
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 from server.app.workflows.workflow_node_skill import node_skill_publish_error
@@ -52,9 +53,15 @@ def validate_workflow_for_publish(
     worker parks them for a human decision (EXEC-APPROVAL-001) — so both
     skip the checks; the #76 skill gate lives in ``node_skill_publish_error``.
     #432: secret field values under a node's ``config:`` fail here too
-    (``secret_gate_errors``) — the YAML editor has no vault channel.
+    (``secret_gate_errors``) — the YAML editor has no vault channel. Result
+    archive reserved output names share the enqueue guard and fail before any
+    revision write; start/approval nodes do not produce execution manifests.
     """
     errors: list[str] = []
+    try:
+        require_unreserved_workflow_outputs(definition)
+    except ValueError as exc:
+        errors.append(str(exc))
     agents = legacy_agent_catalog(job_db, workspace_id)
     schemas = workflow_node_config_schemas(definition, agents)
     errors.extend(secret_gate_errors(schemas, definition))

@@ -8,6 +8,7 @@ from typing import Any
 
 from shared.concurrency_limits import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.controls import load_config
+from worker.transfer_lease_controls import validate_transfer_timeout
 
 
 @dataclass(frozen=True)
@@ -55,9 +56,7 @@ def load_transfer_controls(path: Path) -> TransferControls:
             f"upload_backlog_limit 必须是 1 到 {backlog_cap} 的整数"
             "（relay 分片准入覆盖面：2×并发上限；抬高须同步扩 relay_thread_limiter）"
         )
-    timeout = float(config.get("transfer_timeout_seconds", 120))
-    if timeout <= 0:
-        raise ValueError("transfer_timeout_seconds 必须是正数")
+    timeout = validate_transfer_timeout(config.get("transfer_timeout_seconds", 120))
     return TransferControls(
         upload_max_concurrency=_bounded_int(
             config, "upload_max_concurrency", 4, MAX_DYNAMIC_CONCURRENCY

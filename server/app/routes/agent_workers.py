@@ -22,7 +22,10 @@ from server.app.routes.agent_worker_claims import create_agent_worker_claim_rout
 from server.app.routes.agent_worker_listing import VisibleWorkspaces, narrow_workers_to_visible
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_presence import register_presence_route
-from server.app.routes.agent_worker_result_shapes import prespool_metadata, read_member
+from server.app.routes.agent_worker_result_logging import (
+    prespool_metadata_logged,
+    read_member_logged,
+)
 from server.app.routes.agent_workers_contracts import (
     AgentWorkerConsoleResponse,
     AgentWorkerDeleteResponse,
@@ -276,7 +279,7 @@ def create_agent_workers_router(
         # contract); v2 = X-Agent-Result-Format: 2, metadata rides the archive
         # member result.json and is parsed post-spool (a stub record feeds the
         # precheck audit until then).
-        metadata_v2, outcome, record = prespool_metadata(request)
+        metadata_v2, outcome, record = prespool_metadata_logged(execution_id, request)
         # Size gate: reject on the declared length before spooling the body.
         declared = request.headers.get("content-length")
         if declared is not None and declared.isdigit() and int(declared) > config.max_archive_bytes:
@@ -304,7 +307,7 @@ def create_agent_workers_router(
                     # v2 contract breach (missing member / bad JSON / invalid
                     # fields) is a 400 here; the finally reclaims the staged
                     # file, so no orphan lands on disk.
-                    outcome, record = await read_member(staged)
+                    outcome, record = await read_member_logged(execution_id, staged)
                 # The blocking commit runs in the threadpool (holding the
                 # loop would stall heartbeat/claim); the #521 gate
                 # (result_gate.py) bounds how many share it. Spooling

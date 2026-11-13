@@ -3860,6 +3860,11 @@ export interface components {
       kind: string
       /** Lease Id */
       lease_id: string
+      /**
+       * Lease Ttl Seconds
+       * @default 90
+       */
+      lease_ttl_seconds: number
       /** Manifest */
       manifest: {
         [key: string]: unknown

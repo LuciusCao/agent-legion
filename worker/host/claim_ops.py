@@ -15,6 +15,8 @@ import json
 from typing import Any
 
 from worker.host.errors import HostResponseError, WorkerAuthError
+from worker.host.transfer_lease import apply_lease_ttl
+from worker.transfer_lease_controls import transfer_timeout_cap
 
 _CLAIM_PATH = "/api/agent-executions/claim"
 
@@ -87,6 +89,14 @@ class ClaimOperations:
         # events.execution_base 硬读这两个键），否则在 executor 内 KeyError。
         if not isinstance(claims, list) or not all(_is_claim(item) for item in claims):
             raise HostResponseError(f"Agent claim failed: off-contract body: {body[:300]!r}")
+        lease_ttls = [item["lease_ttl_seconds"] for item in claims if "lease_ttl_seconds" in item]
+        if lease_ttls:
+            try:
+                for ttl in lease_ttls:
+                    transfer_timeout_cap(ttl, self.heartbeat_interval)  # type: ignore[attr-defined]
+                apply_lease_ttl(self, min(float(ttl) for ttl in lease_ttls))
+            except (TypeError, ValueError) as exc:
+                raise HostResponseError("Agent claim failed: invalid lease_ttl_seconds") from exc
         return [dict(item) for item in claims]
 
 

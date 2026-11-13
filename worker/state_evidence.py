@@ -32,7 +32,9 @@ state being the more accurate one). Files inside:
   gone is recorded absent; an unreadable one (EACCES family — the agent
   chmod'd its own run dir) records an ``unreadable`` note; a scan failure
   deletes the raw copy (fail-closed — an unprocessed copy never stays
-  behind).
+  behind). Staging is explicitly named ``events.jsonl.raw`` and renamed to
+  ``events.jsonl`` only after successful redaction/compression; an unlink
+  failure can therefore never make a raw survivor look like processed evidence.
 - ``agent-stderr.log`` — the rescued stderr tail (already redacted), same
   rescue and bound as the delivery path (``stderr_tail_for_run``).
 - ``events-emergency.jsonl`` — the pump's diverted stream, redacted per
@@ -60,9 +62,12 @@ state being the more accurate one). Files inside:
   as the stranded archive.
 
 Retention: these incidents are rare by construction (an agent must destroy
-its own working tree, or the events write path must fail); there is no TTL
-sweeper for them — clean up manually after the post-mortem. The evidence
-root is ``<state_dir>/evidence``; the executor derives the state dir from
+its own working tree, or the events write path must fail); processed evidence
+has no TTL sweeper — clean it up manually after the post-mortem. The sole
+exception is an abandoned ``events.jsonl.raw`` staging file: startup examines
+a bounded number of direct incident children and removes only raw regular
+files at least 24h old whose execution has no upload-pending ownership marker.
+The evidence root is ``<state_dir>/evidence``; the executor derives it from
 ``--config``'s parent (the same source as ``WorkerConfigStore`` /
 registration), so no extra wiring exists. Tests configure it via
 ``configure_evidence_root`` / ``reset_evidence_root``.
@@ -256,27 +261,37 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
     unlink 再抛（同进程相邻 syscall 双 EACCES 的理论形态）时降级为「raw
     副本滞留 + 状态照常返回」，而不是逃出到 dump_prep_evidence 的 broad
     except 炸掉其余取证 arm。滞留副本的残留面：``_dump_incident_record``
-    照常落盘（其 error/incident 字段已脱敏），滞留文件本身按无 TTL 证据
-    人工清理路径处置（与 state 目录其余滞留物同一运维语义）。"""
+    照常落盘（其 error/incident 字段已脱敏）；滞留文件有显式 .raw 名，
+    由启动时年龄 + upload-pending 归属双重门槛的有界清扫回收。"""
     try:
         present = events.is_file()
     except OSError as probe_exc:
         return f"unreadable: {probe_exc}", b""
     if not present:
         return "absent", b""
+    from worker.state_evidence_cleanup import RAW_EVENTS_FILENAME
+
+    raw_copy = target / RAW_EVENTS_FILENAME
     copy = target / "events.jsonl"
     try:
-        shutil.copyfile(events, copy)
-        size = copy.stat().st_size
-        _, original, _, tail = scan_and_compress_pi_events(copy, redactor=redactor)
+        copy.unlink(missing_ok=True)
+        shutil.copyfile(events, raw_copy)
+        size = raw_copy.stat().st_size
+        _, original, _, tail = scan_and_compress_pi_events(raw_copy, redactor=redactor)
     except OSError as copy_exc:
         with suppress(OSError):
-            copy.unlink(missing_ok=True)
+            raw_copy.unlink(missing_ok=True)
         return f"unreadable: {copy_exc}", b""
     if size > 0 and original == 0:
         with suppress(OSError):
-            copy.unlink(missing_ok=True)
+            raw_copy.unlink(missing_ok=True)
         return f"scan failed (source was {size} bytes; raw copy discarded)", b""
+    try:
+        raw_copy.replace(copy)
+    except OSError as rename_exc:
+        with suppress(OSError):
+            raw_copy.unlink(missing_ok=True)
+        return f"unreadable: {rename_exc}", b""
     return "dumped", tail
 
 

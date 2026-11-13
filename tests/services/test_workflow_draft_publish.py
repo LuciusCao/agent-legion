@@ -210,12 +210,12 @@ nodes:
     type: code
     capability: do_thing
     after: [_start]
-    outputs: [result.json]
+    outputs: [output.json]
   gate:
     type: approval
     label: 审批
     after: [do_thing]
-    inputs: [result.json]
+    inputs: [output.json]
 edges:
   - {from: _start, to: do_thing}
   - {from: do_thing, to: gate}
@@ -814,7 +814,7 @@ def test_runtime_only_publish_aborts_when_active_revision_moves(
         # The interleave: after the runtime path's lock-free pre-read of v1,
         # a concurrent structural publish archives v1 and creates v2.
         structural = workflow_definition_from_yaml_string(
-            _DRAFT_YAML + "    outputs: [result.json]\n"
+            _DRAFT_YAML + "    outputs: [output.json]\n"
         )
         service.publish_workspace_revision(ws_id, structural)
         real_lock(conn, ws_id)

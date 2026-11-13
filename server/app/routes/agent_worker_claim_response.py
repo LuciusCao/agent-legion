@@ -99,6 +99,7 @@ def build_claim_response(
         agent_id=claimed.agent_id,
         kind=claimed.kind,
         execution_generation=claimed.execution_generation,
+        lease_ttl_seconds=broker.lease_ttl_seconds,
         manifest=manifest,
         bundle_url=f"/api/agent-executions/{claimed.execution_id}/bundle",
     )

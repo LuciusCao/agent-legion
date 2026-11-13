@@ -59,6 +59,9 @@ class AgentClaimResponse(BaseModel):
     # CAS-verified against jobs.execution_generation at claim time. Workers
     # may log it; the Host remains the only enforcer.
     execution_generation: int = 0
+    # Actual Host lease lifetime for this claim; the Worker cross-clamps its
+    # existing transfer timeout against it. Absent on pre-#1170 Hosts.
+    lease_ttl_seconds: int = Field(default=90, gt=0)
     manifest: dict[str, Any]
     bundle_url: str
 

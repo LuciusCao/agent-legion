@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import tarfile
 from pathlib import Path
 
@@ -402,12 +403,13 @@ def test_v2_non_dict_member_is_400(tmp_path: Path) -> None:
     assert _bundle_dir_clean(app)
 
 
-def test_v2_invalid_metadata_field_is_400(tmp_path: Path) -> None:
-    """成员 JSON 合法但字段非法（status 越界）：同一 parse 链拒收 → 400。"""
+def test_v2_invalid_metadata_field_is_400(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """成员 JSON 合法但字段非法（status 越界）：同一 parse 链拒收 → 400，
+    Host 日志带安全、可定位的 detail，而不只留 Worker 侧 HTTP 400。"""
     metadata = {"status": "exploded", "exit_code": 1, "command": [], "output_artifacts": {}}
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-v2-badfield", limit=2)
-    with TestClient(app) as client:
+    with TestClient(app) as client, caplog.at_level(logging.WARNING):
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
         response = _report(
@@ -419,6 +421,12 @@ def test_v2_invalid_metadata_field_is_400(tmp_path: Path) -> None:
         )
         assert response.status_code == 400, response.text
     assert _bundle_dir_clean(app)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        claimed["execution_id"] in message
+        and "detail=invalid Agent result metadata: invalid status" in message
+        for message in messages
+    )
 
 
 def test_v2_large_metadata_over_header_budget_passes(tmp_path: Path) -> None:
