@@ -4,7 +4,7 @@ from pathlib import Path
 
 from server.app.routes.job_artifact_raw import raw_media_type
 from tests.fakes.storage import FakeObjectStorage
-from tests.helpers import publish_legacy_intake_revision, seed_workspace_agent_definitions
+from tests.helpers import publish_legacy_intake_revision
 from tests.routes.jobs.external_artifact_testlib import _register_object_artifact
 
 
@@ -12,7 +12,6 @@ def _create_job(c) -> tuple[str, Path]:
     workspace_id = c.post("/api/workspaces", json={"id": "test", "name": "default"}).json()[
         "workspace"
     ]["id"]
-    seed_workspace_agent_definitions(workspace_id)
     publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
     created = c.post(
         f"/api/workspaces/{workspace_id}/job-batches",

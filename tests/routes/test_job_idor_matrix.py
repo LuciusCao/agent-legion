@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers import publish_legacy_intake_revision, seed_workspace_agent_definitions
+from tests.helpers import publish_legacy_intake_revision
 
 CSRF = {"x-agent-legion-request": "1"}
 
@@ -40,7 +40,6 @@ def _member_client(client, username: str, password: str):
 
 
 def _make_job(client, workspace_id: str) -> str:
-    seed_workspace_agent_definitions(workspace_id)
     publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",

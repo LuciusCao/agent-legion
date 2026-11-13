@@ -12,11 +12,11 @@ from server.app.agent_catalog import AgentDefinition
 from server.app.agent_catalog.builtin import BUILTIN_AGENT_DEFINITIONS
 from server.app.db.transaction import read_connection
 from server.app.services.agent_node_profile import resolve_agent_node_profile
-from server.app.services.agent_service import AgentService
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.skill_lock_store import SkillLockStore
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
 from server.app.workflows.definition import workflow_definition_from_dict
+from tests.helpers import publish_agent_definition, save_agent_definition_draft
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 IMPORT_SKILLS = REPO_ROOT / "scripts" / "import-demo.sh"
@@ -121,13 +121,15 @@ def test_seed_demo_reuses_existing_bound_workspace(
     settings, job_db, tmp_path: Path, demo_skills_home: Path
 ) -> None:
     existing = job_db.create_workspace("Existing Demo", workspace_id=DEMO_WORKFLOW_KEY)
-    service = AgentService(settings.database_url, existing["id"])
-    saved = service.save_draft(
+    saved = save_agent_definition_draft(
+        settings.database_url,
+        existing["id"],
         "legacy-history",
         AgentDefinition(capability="legacy_history", runtime="pi", tools=("read",)),
-        created_by="test",
     )
-    service.publish("legacy-history", saved.definition_hash)
+    publish_agent_definition(
+        settings.database_url, existing["id"], "legacy-history", saved.definition_hash
+    )
     history_before = _agent_rows(settings, existing["id"])
 
     result = seed_demo(settings)

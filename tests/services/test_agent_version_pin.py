@@ -19,14 +19,17 @@ from server.app.services.agent_node_profile_catalog import (
     fresh_legacy_agent_catalog,
     resolve_dispatch_agent_profile,
 )
-from server.app.services.agent_service import AgentService
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_profile_pins import agent_version_pin
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
-from tests.helpers import replace_agent_catalog
+from tests.helpers import (
+    publish_agent_definition,
+    replace_agent_catalog,
+    save_agent_definition_draft,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 _AGENT = "generator-v1"
@@ -47,14 +50,10 @@ def _v2() -> AgentDefinition:
     )
 
 
-def _service() -> AgentService:
-    return AgentService(TEST_DATABASE_URL, _WORKSPACE)
-
-
 def _seed_catalog() -> None:
     """v1 published, v2 draft (workspace-scoped catalog, schema v46)."""
     replace_agent_catalog(_WORKSPACE, {_AGENT: _v1()})
-    _service().save_draft(_AGENT, _v2(), created_by="test")
+    save_agent_definition_draft(TEST_DATABASE_URL, _WORKSPACE, _AGENT, _v2())
 
 
 def _insert_job_rows(job_db, job_id: str) -> None:
@@ -279,7 +278,7 @@ def test_unclaimable_sweeper_judges_the_pinned_runtime(job_db) -> None:
     pinned_definition = AgentDefinition(
         capability="generate", runtime="velites", skill="question/generate"
     )
-    _service().save_draft(_AGENT, pinned_definition, created_by="test")
+    save_agent_definition_draft(TEST_DATABASE_URL, _WORKSPACE, _AGENT, pinned_definition)
     _insert_job_rows(job_db, "job-unpinned")
     _insert_job_rows(job_db, "job-pinned")
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
@@ -315,7 +314,7 @@ def test_stale_definition_sweeper_respects_pin(job_db) -> None:
 
     # Publishing v2 archives v1: the unpinned request goes stale, the pinned
     # archived version stays valid because its immutable row still exists.
-    _service().publish(_AGENT)
+    publish_agent_definition(TEST_DATABASE_URL, _WORKSPACE, _AGENT, _v2().definition_hash())
     failed = fail_stale_definition_requests(broker)
 
     assert failed == [unpinned_id]

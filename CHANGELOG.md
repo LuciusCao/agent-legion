@@ -17,6 +17,8 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Removed
 
+- **Refs #936，#440 P4 调用者迁移第一阶段（不关闭 #936/#440）**：main-flow E2E 与自含执行测试不再创建无效 AgentDefinition 历史行，demo test seed、legacy replay/resolver、只读 catalog 及相关直接写测试统一改经通用 `VersionedEntityStore` 构造 draft/published/archived 历史；夹具保留 AgentDefinition dump/hash、expected-hash CAS、精确 version/hash 读取与显式缓存重置，不复制人类写 API 的 id/capability 校验或 override prune。本阶段不删除人类写 API 或 AgentService 写方法，生产执行、旧 replay 和只读目录行为不变。
+
 - **Breaking（Refs #936，#440 P4 第三片，不关闭 #936/#440）**：内置 demo 与通用 seed importer 不再创建或发布 AgentDefinition；fresh demo seed 的 published Agent 数从 4 降为 0，四个 agent 节点逐一显式声明 `execution.runtime: velites` 并保留节点 skill/tools/requires_labels/config_schema 执行语义；顶层 velites 默认仅作为 #805 前 runtime-only 通道的兼容回退。通用 importer 的旧 `agents[]` 仅作为首版 revision 的内联输入，verify 改验 active revision 的规范化节点档案；既有历史行、旧 job/replay resolver 与测试 helper 保持兼容，后续切片再迁移测试夹具。
 - **Breaking（Refs #936，#440 P4 第二片，不关闭 #936/#440）**：停止新建 legacy Agent-version quality replay；`POST .../quality/sample-items/{item_id}/replays` 的请求字段 `agent_version` 已删除，旧客户端发送任意值（含 `null`）均收到带 `revision_id` / `use_draft` 迁移指引的 422，legacy 快照未选择自含 revision/draft 也在任何 replay/run/job/request 写入前返回 400。历史 replay 的 `agent_id` / `agent_version` 响应身份、请求行/hash 镜像和既有 run 的 `agent_versions` pin 不删除，仍按原不可变 version/hash 完成 enqueue、claim、stale/unclaimable sweep 与 Worker 失联重排；只读 reader/resolver 内迁 `node_profile_pins`，旧 `agent_version_pins` 模块及新写入口删除。新 `node_profiles` replay、pre-v93 rerun/upgrade、versioned_entities 归档行与只读 catalog 不变。
 

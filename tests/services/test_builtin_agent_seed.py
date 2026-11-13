@@ -1,10 +1,8 @@
-"""Built-in demo agent seed: workspace-scoped seed-if-absent semantics (v46).
+"""Legacy demo Agent history fixture: workspace-scoped seed-if-absent semantics.
 
-Mirrors the executor seed contract
-(``executor_definition_service.seed_builtin_executor_definitions``): the four
-demo workflow agents are published into a workspace when absent, never
-overwrite an admin-evolved definition, and never resurrect an archived agent.
-Nothing is seeded globally — each workspace gets its own copy.
+The four demo definitions are published through VersionedEntityStore only when
+absent, never overwrite an evolved definition, and never resurrect an archived
+Agent. Nothing is seeded globally — each workspace gets its own copy.
 """
 
 from __future__ import annotations
@@ -12,15 +10,17 @@ from __future__ import annotations
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_catalog.builtin import (
-    BUILTIN_AGENT_DEFINITIONS,
-    seed_demo_workspace_agent_definitions,
-)
-from server.app.services.agent_service import AgentService
+from server.app.agent_catalog.builtin import BUILTIN_AGENT_DEFINITIONS
+from server.app.services.agent_service import AgentService, reset_published_agent_cache
+from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.workflow_node_skill import node_skill_publish_error
-from tests.postgres_support import TEST_DATABASE_URL
+from tests.helpers import (
+    publish_agent_definition,
+    save_agent_definition_draft,
+    seed_workspace_agent_definitions,
+)
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def test_seed_publishes_demo_agents_into_the_workspace(service, workspace_id) ->
         "example-generate-questions-v1",
         "example-review-questions-v1",
     }
-    seeded = seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
+    seeded = seed_workspace_agent_definitions(workspace_id)
     assert set(seeded) == set(BUILTIN_AGENT_DEFINITIONS)
     for agent_id, expected in BUILTIN_AGENT_DEFINITIONS.items():
         published = service.get_published_definition(agent_id)
@@ -73,40 +73,50 @@ def test_demo_dag_nodes_carry_the_skill_binding() -> None:
 
 def test_seed_leaves_other_workspaces_empty(job_db, workspace_id) -> None:
     other = job_db.create_workspace("Other WS")["id"]
-    seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
+    seed_workspace_agent_definitions(workspace_id)
     assert AgentService(job_db.dsn_identity, other).list_latest() == []
 
 
 def test_seed_is_idempotent(service, workspace_id) -> None:
-    seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
-    assert seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id) == []
+    seed_workspace_agent_definitions(workspace_id)
+    assert seed_workspace_agent_definitions(workspace_id) == []
     versions_before = {
         agent_id: service.get_published(agent_id).version for agent_id in BUILTIN_AGENT_DEFINITIONS
     }
-    assert seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id) == []
+    assert seed_workspace_agent_definitions(workspace_id) == []
     for agent_id, version in versions_before.items():
         assert service.get_published(agent_id).version == version
 
 
-def test_seed_does_not_overwrite_admin_evolution(service, workspace_id) -> None:
-    seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
+def test_seed_does_not_overwrite_admin_evolution(job_db, service, workspace_id) -> None:
+    seed_workspace_agent_definitions(workspace_id)
     evolved = AgentDefinition(
         capability="write_script",
         runtime="velites",
         skill="education-video-problems-generation/write-script",
         tools=("read",),
     )
-    service.save_draft("example-write-script-v1", evolved, created_by="admin")
-    service.publish("example-write-script-v1")
+    saved = save_agent_definition_draft(
+        job_db.dsn_identity,
+        workspace_id,
+        "example-write-script-v1",
+        evolved,
+        created_by="admin",
+    )
+    publish_agent_definition(
+        job_db.dsn_identity, workspace_id, "example-write-script-v1", saved.definition_hash
+    )
 
-    assert seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id) == []
+    assert seed_workspace_agent_definitions(workspace_id) == []
     assert service.get_published_definition("example-write-script-v1") == evolved
 
 
-def test_seed_does_not_resurrect_archived_agent(service, workspace_id) -> None:
-    seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
-    assert service.archive_all("example-review-questions-v1") > 0
+def test_seed_does_not_resurrect_archived_agent(job_db, service, workspace_id) -> None:
+    seed_workspace_agent_definitions(workspace_id)
+    store = VersionedEntityStore(job_db.dsn_identity, "agent")
+    assert store.archive_all("example-review-questions-v1", workspace_id) > 0
+    reset_published_agent_cache()
     assert service.get_published("example-review-questions-v1") is None
 
-    assert seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id) == []
+    assert seed_workspace_agent_definitions(workspace_id) == []
     assert service.get_published("example-review-questions-v1") is None

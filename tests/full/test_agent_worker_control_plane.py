@@ -136,9 +136,9 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
     publish."""
     workspace = job_db.create_workspace("Route Check")
     workspace_id = workspace["id"]
-    # Agent definitions are workspace-scoped (schema v46): the demo seed
-    # instantiates the factory templates into this workspace (the same seed
-    # ensure_active_revision applies when binding the demo workflow).
+    # Agent definitions are workspace-scoped (schema v46): this legacy-route
+    # test constructs the historical demo rows explicitly; production binding
+    # and self-contained revisions do not seed them.
     seed_workspace_agent_definitions(workspace_id)
     expected_agents = set(published_agent_definitions(TEST_DATABASE_URL, workspace_id))
     assert expected_agents, "test requires a non-empty published Agent catalog"

@@ -23,10 +23,10 @@ from server.app.services.agent_backfill_report import (
     build_agent_backfill_report,
     render_report_json,
 )
-from server.app.services.agent_service import AgentService, reset_published_agent_cache
+from server.app.services.agent_service import reset_published_agent_cache
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.helpers import replace_agent_catalog
+from tests.helpers import replace_agent_catalog, save_agent_definition_draft
 from tests.postgres_support import TEST_DATABASE_URL
 
 _TONE = {"type": "object", "properties": {"tone": {"type": "string", "default": "calm"}}}
@@ -112,7 +112,7 @@ def fixture_db(tmp_path: Path) -> JobQueries:
             "reviewer": _agent("review"),
         },
     )
-    AgentService(TEST_DATABASE_URL, "ws_bf").save_draft("drafty", _agent("drafted"), "test")
+    save_agent_definition_draft(TEST_DATABASE_URL, "ws_bf", "drafty", _agent("drafted"))
     WorkflowRevisionService(queries).publish_workspace_revision(
         "ws_bf", workflow_definition_from_yaml_string(_ACTIVE_YAML)
     )
