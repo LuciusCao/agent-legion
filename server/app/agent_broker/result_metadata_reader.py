@@ -29,7 +29,9 @@ from __future__ import annotations
 
 import json
 import tarfile
+from contextlib import closing
 from pathlib import Path
+from typing import Any
 
 from shared.code_contract import RESULT_METADATA_MEMBER
 
@@ -41,6 +43,21 @@ _MAX_RESULT_METADATA_BYTES = 1024 * 1024
 # 默认压缩包上限 64 MiB 的 8 倍：允许末尾元数据前的合法产物扫描，同时
 # 把单个请求在 threadpool 中的 gzip 解压工作限定在宽松硬上限内。
 _MAX_RESULT_ARCHIVE_SCAN_BYTES = 512 * 1024 * 1024
+
+
+class _ScanLimitedDecompressor:
+    def __init__(self, decompressor: Any, remaining: int) -> None:
+        self._decompressor = decompressor
+        self._remaining, self._pending = remaining, b""
+
+    def decompress(self, data: bytes) -> bytes:
+        compressed = self._pending + data
+        payload: bytes = self._decompressor.decompress(compressed, self._remaining + 1)
+        self._pending = self._decompressor.unconsumed_tail
+        self._remaining -= len(payload)
+        if self._remaining < 0:
+            raise ValueError("result archive scan exceeds decompressed-byte limit")
+        return payload
 
 
 def read_archived_result_metadata(archive: Path) -> str:
@@ -58,26 +75,13 @@ def read_archived_result_metadata(archive: Path) -> str:
     的 Host 侧故障，不是 Worker 的契约违约。
     """
     try:
-        with tarfile.open(archive, "r|gz") as tar:
-            remaining = _MAX_RESULT_ARCHIVE_SCAN_BYTES
-            read = tar.fileobj.read
-
-            def limited_read(size: int = -1) -> bytes:
-                nonlocal remaining
-                if size == 0:
-                    return b""
-                if remaining == 0:
-                    if read(1):
-                        raise ValueError("result archive scan exceeds decompressed-byte limit")
-                    return b""
-                payload = read(min(size, remaining + 1) if size >= 0 else remaining + 1)
-                remaining -= len(payload)
-                if remaining < 0:
-                    raise ValueError("result archive scan exceeds decompressed-byte limit")
-                return payload
-
-            # _Stream.seek also uses this read path when skipping prior members.
-            tar.fileobj.read = limited_read  # type: ignore[method-assign]
+        with closing(
+            tarfile._Stream(str(archive), "r", "gz", None, tarfile.RECORDSIZE, 9)  # type: ignore[attr-defined]
+        ) as stream:
+            # _Stream.read can buffer much more than it returns; bound zlib output itself.
+            # Install before TarFile parses its first member, including PAX/GNU headers.
+            stream.cmp = _ScanLimitedDecompressor(stream.cmp, _MAX_RESULT_ARCHIVE_SCAN_BYTES)
+            tar = tarfile.TarFile(str(archive), "r", stream)
             for member in tar:
                 if member.name != RESULT_METADATA_MEMBER:
                     continue
