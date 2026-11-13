@@ -42,6 +42,12 @@ state being the more accurate one). Files inside:
   ONE physical line AND parseable JSON (rendering lives in the sister
   module ``worker/state_evidence_lines.py``: #1168 F4 — a JSON line over
   the cap is re-serialized with capped string values, never middle-cut).
+- ``recovered/`` — the upload prepare lane's staging copy of the emergency
+  stream (#1350). Only a complete successful stream can replace a run
+  directory that was cleaned before scanning. Outbound bytes go through the
+  usual redaction and compression pass; this staging copy never proves
+  completion by itself. A cleanup race after the primary scan instead drops
+  the run-dir member without pretending a partial emergency stream is whole.
 - ``listing.txt`` — what still existed under the execution dir at dump
   time; every entry is span-redacted before persisting (#1168 F3: an
   agent that put a secret literal in a FILENAME must not leak it into
@@ -84,7 +90,7 @@ import re
 import shutil
 import time
 from contextlib import suppress
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from shared.pi_events import scan_and_compress_pi_events
@@ -92,7 +98,7 @@ from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker._atomic import atomic_write
 from worker.state_evidence_lines import render_line
 from worker.upload.secret_registry import secret_snapshot
-from worker.upload.stderr_evidence import stderr_tail_for_run
+from worker.upload.stderr_evidence import completed_emergency_events, stderr_tail_for_run
 
 if TYPE_CHECKING:
     from shared.redaction import SecretRedactor
@@ -158,6 +164,29 @@ def incident_dir(execution_id: str, node_key: str, fallback: str = "") -> Path |
         _evidence_root
         / f"{_safe_segment(identity, 'execution')}__{_safe_segment(node_key, 'node')}"
     )
+
+
+def recover_completed_run(task: UploadTask, job_dir: Path, run_dir: Path) -> Path:
+    """Return the primary run dir or a gated emergency-events staging dir."""
+    if run_dir.is_dir() or task.exit_code != 0:
+        return run_dir
+    if any(not (job_dir / PurePosixPath(name)).is_file() for name in task.expected_outputs):
+        return run_dir
+    return copy_completed_emergency_events(task) or run_dir
+
+
+def copy_completed_emergency_events(task: UploadTask) -> Path | None:
+    """Stage a complete successful emergency stream for result delivery (#1350)."""
+    incident = incident_dir(task.execution_id, task.node_key)
+    if incident is None:
+        return None
+    source = incident / EMERGENCY_EVENTS_FILENAME
+    if not source.is_file() or not completed_emergency_events(source):
+        return None
+    target = incident / "recovered"
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, target / "events.jsonl")
+    return target
 
 
 def prep_failure_message(task: UploadTask, exc: BaseException, evidence: Path | None) -> str:
