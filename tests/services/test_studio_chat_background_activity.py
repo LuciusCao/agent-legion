@@ -38,7 +38,7 @@ def emit(activity, snapshots, now):
     return events
 
 
-def test_running_quiet_recovery_and_terminal_with_description_duration_summary():
+def test_agent_output_silence_does_not_emit_quiet_or_running_recovery():
     activity = BackgroundActivity()
     running = task()
     started = emit(activity, {"agent-1": running}, 1000)
@@ -47,18 +47,84 @@ def test_running_quiet_recovery_and_terminal_with_description_duration_summary()
     assert "开始" in started[0]["detail"]
     assert emit(activity, {"agent-1": running}, 1001) == []
     alive = replace(running, heartbeat_at=1121)
-    quiet = emit(activity, {"agent-1": alive}, 1121)
-    assert quiet[0]["status"] == "quiet"
-    assert quiet[0]["task_status"] == "running"
+    assert emit(activity, {"agent-1": alive}, 1121) == []
     assert emit(activity, {"agent-1": alive}, 1122) == []
     active = replace(alive, output_changed_at=1123)
-    assert emit(activity, {"agent-1": active}, 1123)[0]["status"] == "running"
+    assert emit(activity, {"agent-1": active}, 1123) == []
     done = replace(active, status="completed", finished_at=1150, summary="All checks passed")
     finished = emit(activity, {"agent-1": done}, 1200)[0]
     assert finished["event"] == "background_task_finished"
     assert finished["elapsed_seconds"] == 150
     assert "All checks passed" in finished["detail"]
     assert not activity.tasks
+
+
+def test_bash_quiet_recovery_is_unchanged_and_isolated_from_agent():
+    activity = BackgroundActivity()
+    agent = task()
+    shell = task(task_id="bash-1", kind="bash", description="Run checks")
+    started = emit(activity, {"agent-1": agent, "bash-1": shell}, 1000)
+    assert {(event["task_id"], event["status"]) for event in started} == {
+        ("agent-1", "running"),
+        ("bash-1", "running"),
+    }
+
+    silent = {
+        "agent-1": replace(agent, heartbeat_at=1121),
+        "bash-1": replace(shell, heartbeat_at=1121),
+    }
+    quiet = emit(activity, silent, 1121)
+    assert [(event["task_id"], event["status"], event["task_status"]) for event in quiet] == [
+        ("bash-1", "quiet", "running")
+    ]
+    assert emit(activity, silent, 1122) == []
+
+    active = {
+        task_id: replace(snapshot, output_changed_at=1123) for task_id, snapshot in silent.items()
+    }
+    recovered = emit(activity, active, 1123)
+    assert [(event["task_id"], event["status"]) for event in recovered] == [("bash-1", "running")]
+
+
+def test_agent_sparse_output_for_one_hour_emits_only_initial_and_terminal_events():
+    activity = BackgroundActivity()
+    running = task()
+    timeline = emit(activity, {"agent-1": running}, 1000)
+    output_changed_at = 1000
+    output_intervals = (60, 120, 180)
+    next_output = 1060
+    interval_index = 0
+
+    for now in range(1060, 4601, 60):
+        if now == next_output:
+            output_changed_at = now
+            interval_index += 1
+            next_output = now + output_intervals[interval_index % len(output_intervals)]
+        current = replace(running, heartbeat_at=now, output_changed_at=output_changed_at)
+        timeline.extend(emit(activity, {"agent-1": current}, now))
+
+    done = replace(current, status="completed", finished_at=4600, summary="Review completed")
+    timeline.extend(emit(activity, {"agent-1": done}, 4600))
+    assert [(event["event"], event["status"]) for event in timeline] == [
+        ("background_task_status", "running"),
+        ("background_task_finished", "completed"),
+    ]
+    assert timeline[-1]["elapsed_seconds"] == 3600
+
+
+@pytest.mark.parametrize("terminal_status", ["completed", "failed", "killed", "lost", "timed_out"])
+def test_agent_terminal_state_after_output_silence_is_preserved(terminal_status):
+    activity = BackgroundActivity()
+    running = task()
+    emit(activity, {"agent-1": running}, 1000)
+    silent = replace(running, heartbeat_at=1121)
+    assert emit(activity, {"agent-1": silent}, 1121) == []
+
+    done = replace(silent, status=terminal_status, finished_at=1300)
+    finished = emit(activity, {"agent-1": done}, 1300)
+    assert [(event["event"], event["status"], event["task_status"]) for event in finished] == [
+        ("background_task_finished", terminal_status, terminal_status)
+    ]
 
 
 def test_missing_or_stale_metadata_warns_without_claiming_failure():
