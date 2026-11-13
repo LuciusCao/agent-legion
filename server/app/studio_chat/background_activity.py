@@ -50,8 +50,10 @@ class BackgroundActivity:
                 elif task.heartbeat_at and now - task.heartbeat_at >= QUIET_SECONDS:
                     status = "stale"
                 elif (
-                    now - (task.output_changed_at or task.started_at or first_seen) >= QUIET_SECONDS
+                    task.kind == "bash"
                     and task.status == "running"
+                    and now - (task.output_changed_at or task.started_at or first_seen)
+                    >= QUIET_SECONDS
                 ):
                     status = "quiet"
             if self.reported.get(task_id) == status:

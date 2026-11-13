@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
+- Studio 后台 agent 长任务时间线去噪（Refs #1152）：running agent 不再仅因 120 秒无输出产生 quiet 及后续重复 running 状态消息；Bash 的 quiet 预警保持不变，agent 创建、等待审批、心跳过期、状态不可读与 completed/failed/killed/lost/timed_out 终态回执照常记录，持久化成功后才 recorded 的去重/重试语义不变。
 - 悬挂产物 dry-run 的流式 hash 资源上限（issue #1507）：新增单对象累计 stored bytes、raw/gzip 解压后 content bytes 与协作式 deadline 限制及 CLI 配置，持续长流和 gzip 膨胀不再无限消耗 CPU/网络；任何超限均丢弃部分摘要、归类 `unknown` 并使健康门失败，apply 复用同一上限且不得覆盖计划值。
 - Provider 鉴权失败导致 velites 因声明产物缺失返回 exit 1 时，Worker 结果准备不再丢弃结构化事件中的真实错误并上报裸 `Agent process exited 1`（issue #1502）：对 HTTP 401、HTTP 200 错误体内的 `code=401`，以及 API key disabled / invalid / revoked 等明确签名保留 Provider 原始错误，Host 既有分类随之记录为 `technical/provider_request`，可通过现有技术错误筛选与 `rerun-by-failure` 在修复凭据后手动重跑；普通非鉴权模型错误与其他非零退出仍保持原归因，不新增自动重试。
 - 发布钉点漂移与 standalone 默认镜像过旧（issues #504/#1112）：新增离线、幂等、fail-closed 的 `scripts/check_release_pins.py` 并接入 backend 静态轮与 governance 兜底，以隔离、超时的真实只读 `--help` 与 first-mkdir 命令桩分别校验展示默认值和普通入口最终 effective/COMPOSE_REF，以 PyYAML 节点树校验 Compose 结构与重复键，强制 `install-worker.sh` 默认 Worker/velites 版本及两份 Compose 的 `image` 与 `AGENT_WORKER_IMAGE_VERSION` 跟随 `pyproject.toml` 和 `velites/Cargo.toml`；安装器 usage 从同一默认值派生，保留显式版本覆盖、Compose 插值和 Worker 镜像 `-rN` 重发兼容，当前四处 Compose 钉点同步至 0.8.6，standalone 不再回落到低于最低受支持版本的 0.6.0。

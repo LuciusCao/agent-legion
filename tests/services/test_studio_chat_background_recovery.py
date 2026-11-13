@@ -49,9 +49,12 @@ def recovered_chat(tmp_path, monkeypatch):
 
     service.store.append_message.side_effect = append
     monkeypatch.setattr(wake, "task_root", lambda *_: tmp_path)
-    # Execute a bounded watcher synchronously: no test threads or sleeps.
+    # Execute a bounded watcher synchronously without patching stdlib threading:
+    # teardown may import concurrent.futures.process while this fixture is active.
     monkeypatch.setattr(
-        wake.threading, "Thread", lambda *, target, **kw: SimpleNamespace(start=target)
+        wake,
+        "threading",
+        SimpleNamespace(Thread=lambda *, target, **kw: SimpleNamespace(start=target)),
     )
 
     def run():
