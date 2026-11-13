@@ -25,12 +25,8 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "key": DEMO_WORKFLOW_KEY,
     "label": "教学视频脚本与题目生成（示例）",
     "schema_version": 2,
-    # #935 (#440 P3): every agent node carries its own execution profile — the
-    # publish gate rejects one without execution.runtime. The workflow-level
-    # default gives all four demo agent nodes the runtime the demo Agent
-    # templates declared (velites, default tools, no labels/schema), so the
-    # profile is exactly what the legacy definitions ran (v93 rule).
-    "execution": {"runtime": "velites"},
+    # #805: every Agent node owns its execution profile; there is no workflow
+    # default block. The runtime matches the legacy demo Agent definitions.
     # No legacy intake modes (retired in #154): the demo's only path is
     # material/ref items — the user uploads (or picks the seeded sample)
     # knowledge-point markdown and each material becomes one job; the intake
@@ -50,6 +46,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "write_script": {
             "label": "撰写教学视频脚本",
             "type": "agent",
+            "execution": {"runtime": "velites"},
             "capability": "write_script",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/write-script", "ref": "v1.0.0"},
             "after": ["intake_knowledge_points"],
@@ -59,6 +56,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "review_script": {
             "label": "评审脚本",
             "type": "agent",
+            "execution": {"runtime": "velites"},
             "capability": "review_script",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/review-script", "ref": "v1.0.0"},
             "after": ["write_script"],
@@ -68,6 +66,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "generate_questions": {
             "label": "生成练习题",
             "type": "agent",
+            "execution": {"runtime": "velites"},
             "capability": "generate_questions",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/generate-questions", "ref": "v1.0.0"},
             "after": ["intake_knowledge_points"],
@@ -77,6 +76,7 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
         "review_questions": {
             "label": "评审练习题",
             "type": "agent",
+            "execution": {"runtime": "velites"},
             "capability": "review_questions",
             "skill": {"key": f"{_DEMO_SKILL_GROUP}/review-questions", "ref": "v1.0.0"},
             "after": ["generate_questions"],

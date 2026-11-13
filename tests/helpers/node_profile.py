@@ -36,12 +36,10 @@ def legacy_profile_variant(definition: WorkflowDefinition) -> WorkflowDefinition
     """*definition* with every execution.runtime cleared (legacy agent nodes).
 
     For tests of the transitional legacy path (Agent-definition source, route
-    materialization) now that the built-in demo ships self-contained nodes:
-    clears the workflow top-level default and the value the loader merged
-    into each node.
+    materialization) now that the built-in demo ships self-contained nodes.
     """
     nodes = {
         key: replace(node, execution=replace(node.execution, runtime=""))
         for key, node in definition.nodes.items()
     }
-    return replace(definition, execution=replace(definition.execution, runtime=""), nodes=nodes)
+    return replace(definition, nodes=nodes)

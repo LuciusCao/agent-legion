@@ -24,11 +24,10 @@ from tests.postgres_support import TEST_DATABASE_URL
 _SKILL = "education-video-problems-generation/review-questions"
 
 
-def _yaml(node_extra: str, top: str = "") -> str:
+def _yaml(node_extra: str) -> str:
     return f"""
 key: profile_flow
 label: Profile Flow
-{top}
 nodes:
   draft:
     type: agent
@@ -41,8 +40,7 @@ nodes:
 
 
 _SELF_CONTAINED = _yaml(
-    "    requires_labels: {gpu: 'yes'}\n",
-    top="execution:\n  runtime: velites\n  provider: p\n  model: m",
+    "    requires_labels: {gpu: 'yes'}\n    execution: {runtime: velites, provider: p, model: m}\n"
 )
 
 
@@ -247,10 +245,10 @@ def test_runtime_change_publishes_a_new_revision_but_model_edits_stay_in_place(
     workspace_id = _workspace(queries)
     service = WorkflowRevisionService(queries, True)
 
-    def _save(top_execution: dict) -> dict:
+    def _save(node_execution: dict) -> dict:
         raw = yaml.safe_load(_SELF_CONTAINED)
         raw["key"] = workspace_id
-        raw["execution"] = top_execution
+        raw["nodes"]["draft"]["execution"] = node_execution
         raw["nodes"]["draft"].pop("requires_labels")
         return service.save_workspace_revision(workspace_id, workflow_definition_from_mapping(raw))
 

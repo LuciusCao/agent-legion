@@ -22,7 +22,8 @@ def _draft_yaml(**node_execution: str) -> str:
     definition = load_builtin_definition(_WORKSPACE)
     raw = yaml.safe_load(definition_to_yaml(definition))
     if node_execution:
-        raw["nodes"]["write_script"]["execution"] = dict(node_execution)
+        node = raw["nodes"]["write_script"]
+        node["execution"] = {**node.get("execution", {}), **node_execution}
     return yaml.safe_dump(raw, allow_unicode=True)
 
 

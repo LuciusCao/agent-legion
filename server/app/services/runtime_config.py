@@ -2,8 +2,7 @@
 
 Studio 分离改造的后端地基：结构性改动（DAG、节点类型、config/config_schema、
 skill、execution.runtime 换引擎等）仍走草稿 + 发布产生新 revision；runtime
-字段（节点级 provider/model/thinking/prompt/prompt_mode/tools/requires_labels
-与 workflow 顶层 ``execution`` 默认块的同类键——顶层不接受 prompt/prompt_mode，
+字段（节点级 provider/model/thinking/prompt/prompt_mode/tools/requires_labels；
 runtime 键属结构）走本通道：原地更新 active revision（revision id/version 不变，
 ``save_revision_runtime_or_publish`` 的既有机制）并追加一条不可变版本行
 （``workflow_runtime_config_versions``，schema v102）——每版本即审计行，
@@ -48,13 +47,19 @@ from server.app.workflows.definition import WorkflowDefinition, workflow_definit
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
-# Node-level runtime keys (``execution.runtime`` excluded: it selects the
-# execution-profile source and stays structural, #933); the top-level block
-# accepts the same family minus prompt/prompt_mode (the loader rejects them
-# there). ``tools`` / ``requires_labels`` ride the node payload, not
-# ``execution``.
+# ``execution.runtime`` selects the execution-profile source and stays
+# structural (#933). ``tools`` / ``requires_labels`` ride the node payload.
 _NODE_EXECUTION_KEYS = ("provider", "model", "thinking", "prompt", "prompt_mode")
-_TOP_LEVEL_EXECUTION_KEYS = ("provider", "model", "thinking")
+
+
+def _runtime_config_nodes(config: dict[str, Any]) -> dict[str, Any]:
+    """Read new and historical runtime rows through one nodes-only adapter.
+
+    Pre-#805 rows also contain top-level execution defaults. Their node slice
+    already records every effective value, so rollback deliberately ignores
+    only the retired duplicate rather than rewriting or reapplying history.
+    """
+    return config.get("nodes") or {}
 
 
 def embed_node_code_pins(definition_json: str, pins: dict) -> str:
@@ -74,15 +79,8 @@ def embed_node_code_pins(definition_json: str, pins: dict) -> str:
 
 
 def extract_runtime_config(definition: WorkflowDefinition) -> dict[str, Any]:
-    """The runtime slice of a definition, fully normalized (empties included).
-
-    Every node appears with the complete key set so a rollback knows what to
-    CLEAR, not just what to set; serialization is canonical (sort_keys) so
-    versions diff byte-identically.
-    """
-    top = definition.execution
+    """The nodes-only runtime slice, with empty values included for rollback."""
     return {
-        "execution": {key: getattr(top, key) for key in _TOP_LEVEL_EXECUTION_KEYS},
         "nodes": {
             key: {
                 **{field: getattr(node.execution, field) for field in _NODE_EXECUTION_KEYS},
@@ -90,7 +88,7 @@ def extract_runtime_config(definition: WorkflowDefinition) -> dict[str, Any]:
                 "requires_labels": dict(node.requires_labels),
             }
             for key, node in definition.nodes.items()
-        },
+        }
     }
 
 
@@ -104,12 +102,7 @@ def apply_runtime_config(
     added since); ``execution.runtime`` is never touched — it is structural
     and a runtime channel payload never carries it.
     """
-    top = config.get("execution") or {}
-    execution = dc_replace(
-        definition.execution,
-        **{key: str(top.get(key, "")) for key in _TOP_LEVEL_EXECUTION_KEYS},
-    )
-    node_configs = config.get("nodes") or {}
+    node_configs = _runtime_config_nodes(config)
     nodes = {}
     for key, node in definition.nodes.items():
         node_config = node_configs.get(key)
@@ -128,7 +121,7 @@ def apply_runtime_config(
                 for label, value in (node_config.get("requires_labels") or {}).items()
             },
         )
-    return dc_replace(definition, execution=execution, nodes=nodes)
+    return dc_replace(definition, nodes=nodes)
 
 
 def _flatten_runtime_config(config: dict[str, Any], prefix: str = "") -> dict[str, Any]:
