@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import os
@@ -73,6 +74,25 @@ def decompressed_outputs(monkeypatch: pytest.MonkeyPatch) -> list[int]:
 
     monkeypatch.setattr(zlib, "decompressobj", CountingDecompressor)
     return total
+
+
+@_parse_only
+def test_python_311_stream_constructor_reads_valid_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = tarfile._Stream
+    options = (
+        {"compresslevel": 9} if "compresslevel" in inspect.signature(original).parameters else {}
+    )
+
+    def python_311_stream(name, mode, comptype, fileobj, bufsize):
+        return original(name, mode, comptype, fileobj, bufsize, **options)
+
+    monkeypatch.setattr(tarfile, "_Stream", python_311_stream)
+    archive = tmp_path / "python-311.tar.gz"
+    archive.write_bytes(_archive([(RESULT_METADATA_MEMBER, _metadata())]))
+
+    assert json.loads(reader.read_archived_result_metadata(archive))["status"] == "completed"
 
 
 @_parse_only

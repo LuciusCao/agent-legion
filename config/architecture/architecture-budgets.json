@@ -1200,6 +1200,7 @@
     "server/app/agent_broker/remote_artifact_promote.py": 86,
     "server/app/agent_broker/remote_artifact_support.py": 147,
     "server/app/agent_broker/remote_artifacts.py": 108,
+    "server/app/agent_broker/result_archive_stream.py": 25,
     "server/app/agent_broker/result_commit_batcher.py": 164,
     "server/app/agent_broker/result_commit_plane.py": 40,
     "server/app/agent_broker/result_gate.py": 29,

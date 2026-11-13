@@ -31,8 +31,8 @@ import json
 import tarfile
 from contextlib import closing
 from pathlib import Path
-from typing import Any
 
+from server.app.agent_broker.result_archive_stream import open_result_archive_stream
 from shared.code_contract import RESULT_METADATA_MEMBER
 
 # result.json 成员的读取上限：元数据的理论构成是 command 段数、stderr
@@ -43,21 +43,6 @@ _MAX_RESULT_METADATA_BYTES = 1024 * 1024
 # 默认压缩包上限 64 MiB 的 8 倍：允许末尾元数据前的合法产物扫描，同时
 # 把单个请求在 threadpool 中的 gzip 解压工作限定在宽松硬上限内。
 _MAX_RESULT_ARCHIVE_SCAN_BYTES = 512 * 1024 * 1024
-
-
-class _ScanLimitedDecompressor:
-    def __init__(self, decompressor: Any, remaining: int) -> None:
-        self._decompressor = decompressor
-        self._remaining, self._pending = remaining, b""
-
-    def decompress(self, data: bytes) -> bytes:
-        compressed = self._pending + data
-        payload: bytes = self._decompressor.decompress(compressed, self._remaining + 1)
-        self._pending = self._decompressor.unconsumed_tail
-        self._remaining -= len(payload)
-        if self._remaining < 0:
-            raise ValueError("result archive scan exceeds decompressed-byte limit")
-        return payload
 
 
 def read_archived_result_metadata(archive: Path) -> str:
@@ -75,12 +60,7 @@ def read_archived_result_metadata(archive: Path) -> str:
     的 Host 侧故障，不是 Worker 的契约违约。
     """
     try:
-        with closing(
-            tarfile._Stream(str(archive), "r", "gz", None, tarfile.RECORDSIZE, 9)  # type: ignore[attr-defined]
-        ) as stream:
-            # _Stream.read can buffer much more than it returns; bound zlib output itself.
-            # Install before TarFile parses its first member, including PAX/GNU headers.
-            stream.cmp = _ScanLimitedDecompressor(stream.cmp, _MAX_RESULT_ARCHIVE_SCAN_BYTES)
+        with closing(open_result_archive_stream(archive, _MAX_RESULT_ARCHIVE_SCAN_BYTES)) as stream:
             tar = tarfile.TarFile(str(archive), "r", stream)
             for member in tar:
                 if member.name != RESULT_METADATA_MEMBER:
