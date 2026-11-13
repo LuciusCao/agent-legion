@@ -12,13 +12,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from scripts.seed_dump_projection import project_copy_blocks  # noqa: E402
 from scripts.seed_from_prod import (  # noqa: E402
     SeedError,
-    artifact_blob_relpath,
-    build_copy_in_sql,
     build_copy_out_sql,
     build_sample_sql,
     compose_base_cmd,
-    guard_target_dsn,
+    ensure_target_schema,
+    run,
+)
+from scripts.seed_from_prod_db import build_copy_in_sql  # noqa: E402
+from scripts.seed_from_prod_files import (  # noqa: E402
+    artifact_blob_relpath,
     job_storage_relpath,
+)
+from scripts.seed_from_prod_guard import (  # noqa: E402
+    guard_target_dsn,
+    guard_target_repo,
     read_env_file_database_url,
     resolve_target_dsn,
 )
@@ -99,12 +106,13 @@ class TestCopySql:
         sql = build_copy_out_sql("jobs", ["id", "workspace_id"], "id IN (SELECT 1)")
         assert sql.startswith('COPY (SELECT "id", "workspace_id" FROM public."jobs"')
         assert "WHERE id IN (SELECT 1)" in sql
-        assert "TO STDOUT WITH (FORMAT csv, HEADER true)" in sql
+        assert "TO STDOUT WITH (FORMAT csv, HEADER true, NULL '\\N')" in sql
 
     def test_copy_in_matches_column_list(self):
         sql = build_copy_in_sql("jobs", ["id", "workspace_id"])
         assert sql == (
-            'COPY public."jobs" ("id", "workspace_id") FROM STDIN WITH (FORMAT csv, HEADER true)'
+            'COPY public."jobs" ("id", "workspace_id") FROM STDIN '
+            "WITH (FORMAT csv, HEADER true, NULL '\\N')"
         )
 
 
@@ -140,6 +148,46 @@ class TestJobStorageRelpath:
             job_storage_relpath("/etc/passwd", "wf", "j")
         with pytest.raises(SeedError):
             job_storage_relpath("jobs/../../secrets", "wf", "j")
+
+
+class TestSecretRedaction:
+    def test_invalid_dsn_is_not_echoed(self):
+        with pytest.raises(SeedError) as caught:
+            guard_target_dsn("mysql://user:do-not-print@127.0.0.1/db")
+        assert "do-not-print" not in str(caught.value)
+
+    def test_failed_psql_command_redacts_dsn(self, monkeypatch: pytest.MonkeyPatch):
+        import subprocess
+
+        monkeypatch.setattr(
+            "scripts.seed_from_prod.subprocess.run",
+            lambda *_a, **_k: subprocess.CompletedProcess([], 1, stderr=b"failed"),
+        )
+        with pytest.raises(SeedError) as caught:
+            run(["psql", "postgresql://user:do-not-print@127.0.0.1/dev"])
+        assert "do-not-print" not in str(caught.value)
+        assert "<redacted-database-url>" in str(caught.value)
+
+
+class TestTargetRepoGuard:
+    def test_tower_child_uses_parent_derived_resources(self, tmp_path: Path):
+        root = tmp_path / "develop" / ".tower" / "worktrees" / "wt-207"
+        assert guard_target_repo("postgresql://127.0.0.1/agent_legion_develop", root) == (
+            "agent_legion_develop",
+            "agent-legion-develop",
+        )
+
+    def test_rejects_other_derived_database(self, tmp_path: Path):
+        root = tmp_path / ".worktrees" / "feature-a"
+        with pytest.raises(SeedError, match="agent_legion_feature_a"):
+            guard_target_repo("postgresql://127.0.0.1/agent_legion_other", root)
+
+
+class TestDryRunSchema:
+    def test_empty_target_is_not_initialized(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setattr("scripts.seed_from_prod.target_psql", lambda *_args, **_kwargs: "\n")
+        with pytest.raises(SeedError, match="dry-run 不会初始化"):
+            ensure_target_schema("psql", "postgresql://127.0.0.1/dev", dry_run=True)
 
 
 class TestComposeBaseCmd:
