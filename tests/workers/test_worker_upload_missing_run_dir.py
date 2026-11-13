@@ -46,11 +46,16 @@ def _successful_events() -> list[dict[str, Any]]:
     ]
 
 
-def _write_emergency(evidence_root: Path, events: list[dict[str, Any]]) -> Path:
+def _write_emergency(
+    evidence_root: Path, events: list[dict[str, Any]], lease_id: str | None = "lease-1"
+) -> Path:
     incident = evidence_root / "exec-1__node_a"
     incident.mkdir(parents=True, exist_ok=True)
     dump = incident / state_evidence.EMERGENCY_EVENTS_FILENAME
-    dump.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+    attempt = [] if lease_id is None else [{"type": "worker_attempt_start", "lease_id": lease_id}]
+    dump.write_text(
+        "".join(json.dumps(event) + "\n" for event in [*attempt, *events]), encoding="utf-8"
+    )
     return dump
 
 
@@ -84,6 +89,51 @@ def test_cleaned_run_recovers_from_complete_emergency_events(
         "outputs_validation",
         "agent_end",
     ]
+
+
+def test_cleaned_run_rejects_complete_events_from_another_lease(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _write_emergency(evidence_root, _successful_events(), lease_id="lease-old")
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    assert client.reports[0]["status"] == "failed"
+    assert client.reports[0]["error_message"].startswith("[work-dir-missing]")
+    assert client.uploads == {}
+
+
+def test_cleaned_run_rejects_old_success_plus_incomplete_current_attempt(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    old_attempt = [
+        {"type": "worker_attempt_start", "lease_id": "lease-old"},
+        *_successful_events(),
+    ]
+    current_attempt = [
+        {"type": "worker_attempt_start", "lease_id": "lease-1"},
+        {"type": "agent_start"},
+        {"type": "outputs_validation", "missing": ["output.json"], "violations": []},
+    ]
+    _write_emergency(evidence_root, [*old_attempt, *current_attempt], lease_id=None)
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["error_message"].startswith("[work-dir-missing]")
+    assert report["output_artifacts"] == {}
+    assert client.uploads == {}
 
 
 def test_recovered_emergency_events_use_outbound_redaction(
@@ -150,6 +200,36 @@ def test_cleaned_run_with_incomplete_success_evidence_still_fails(
     assert report["error_message"].startswith("[work-dir-missing]")
     assert report["output_artifacts"] == {}
     assert client.uploads == {}
+
+
+@pytest.mark.parametrize(
+    "tail",
+    [
+        [{"type": "agent_start"}],
+        [{"type": "outputs_validation", "missing": ["output.json"], "violations": []}],
+        [{"type": "message_end", "message": {"role": "assistant", "stopReason": "error"}}],
+        [{"type": "agent_start"}, {"type": "outputs_validation", "missing": [], "violations": []}],
+    ],
+    ids=["new-start", "failed-validation", "error-after-end", "new-attempt-without-end"],
+)
+def test_emergency_completion_requires_a_normal_final_end(
+    evidence_root: Path, tail: list[dict[str, Any]]
+) -> None:
+    from worker.upload.result_recovery import completed_emergency_events
+
+    events = _write_emergency(evidence_root, [*_successful_events(), *tail])
+
+    assert not completed_emergency_events(events)
+
+
+def test_emergency_completion_rejects_malformed_tail(evidence_root: Path) -> None:
+    from worker.upload.result_recovery import completed_emergency_events
+
+    events = _write_emergency(evidence_root, _successful_events())
+    with events.open("a", encoding="utf-8") as stream:
+        stream.write('{"type":"agent_end"')
+
+    assert not completed_emergency_events(events)
 
 
 def test_cleaned_run_with_missing_declared_output_still_fails(
@@ -240,6 +320,145 @@ def test_cleanup_between_scan_and_archive_preserves_scanned_verdict(
     assert set(report["output_artifacts"]) == {"output.json"}
     with tarfile.open(fileobj=io.BytesIO(client.archives[0])) as tar:
         assert "runs/node_a/worker/events.jsonl" not in tar.getnames()
+
+
+@pytest.mark.parametrize("race", ["is_file_to_stat", "stat_to_read_bytes"])
+@pytest.mark.parametrize(
+    ("exit_code", "status", "error"),
+    [(0, "completed", ""), (7, "failed", "Agent process exited 7")],
+)
+def test_stderr_anchor_cleanup_races_preserve_scanned_verdict(
+    tmp_path: Path,
+    evidence_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    race: str,
+    exit_code: int,
+    status: str,
+    error: str,
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    sink = run_dir / "agent-stderr.log"
+    sink.write_text("previous stderr", encoding="utf-8")
+    deleted = False
+
+    if race == "is_file_to_stat":
+        original_probe = Path.is_file
+
+        def delete_after_probe(path: Path) -> bool:
+            nonlocal deleted
+            present = original_probe(path)
+            if path == sink and present and not deleted:
+                deleted = True
+                shutil.rmtree(run_dir)
+            return present
+
+        monkeypatch.setattr(Path, "is_file", delete_after_probe)
+    else:
+        original_read = Path.read_bytes
+
+        def delete_before_read(path: Path) -> bytes:
+            nonlocal deleted
+            if path == sink and not deleted:
+                deleted = True
+                shutil.rmtree(run_dir)
+            return original_read(path)
+
+        monkeypatch.setattr(Path, "read_bytes", delete_before_read)
+
+    client = _ArchiveClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=exit_code))
+    queue.shutdown()
+
+    assert deleted
+    report = client.reports[0]
+    assert report["status"] == status
+    assert report["exit_code"] == exit_code
+    assert report["error_message"] == error
+    assert set(report["output_artifacts"]) == {"output.json"}
+
+
+def test_stderr_anchor_permission_error_still_fails(
+    tmp_path: Path, evidence_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    sink = run_dir / "agent-stderr.log"
+    sink.write_text("previous stderr", encoding="utf-8")
+    original_read = Path.read_bytes
+
+    def deny_anchor(path: Path) -> bytes:
+        if path == sink:
+            raise PermissionError(13, "anchor denied", str(path))
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", deny_anchor)
+    client = QueueFakeClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 1
+    assert "anchor denied" in report["error_message"]
+    assert not report["error_message"].startswith("[work-dir-missing]")
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "status", "error"),
+    [(0, "completed", ""), (7, "failed", "Agent process exited 7")],
+)
+def test_direct_fallback_after_cleanup_reuses_scanned_verdict(
+    tmp_path: Path,
+    evidence_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exit_code: int,
+    status: str,
+    error: str,
+) -> None:
+    from worker.artifact.upload import DirectUploadError
+    from worker.upload import queue as upload_queue
+
+    def failing_direct(_path: Path, _spec: object, **_kwargs: object) -> str:
+        raise DirectUploadError("presigned PUT rejected")
+
+    monkeypatch.setattr(upload_queue, "upload_artifact_direct", failing_direct)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
+    (run_dir / "events.jsonl").write_text(
+        "".join(json.dumps(event) + "\n" for event in _successful_events()), encoding="utf-8"
+    )
+    original_add = tarfile.TarFile.add
+    deleted = False
+
+    def delete_before_run_add(self: tarfile.TarFile, name: Any, *args: Any, **kwargs: Any):
+        nonlocal deleted
+        if Path(name) == run_dir and not deleted:
+            deleted = True
+            shutil.rmtree(run_dir)
+            _write_emergency(evidence_root, [{"type": "agent_end"}])
+        return original_add(self, name, *args, **kwargs)
+
+    monkeypatch.setattr(tarfile.TarFile, "add", delete_before_run_add)
+    task = _task(work_root, exit_code=exit_code)
+    task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
+    client = _ArchiveClient()
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+
+    assert deleted
+    report = client.reports[0]
+    assert report["status"] == status
+    assert report["exit_code"] == exit_code
+    assert report["error_message"] == error
+    assert set(report["output_artifacts"]) == {"output.json"}
+    assert list(client.uploads.values()) == [b"{}"]
 
 
 def test_recovered_run_still_fails_when_artifact_upload_is_rejected(
