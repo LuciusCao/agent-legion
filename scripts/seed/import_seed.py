@@ -13,16 +13,14 @@ Steps:
      workspaces already bound to a seed workflow are picked up automatically;
      new workspaces are created blank — schema v50 retired workflow
      registration: a workflow is just the DAG published into a workspace)
-  2. Agent publish (workspace-scoped since schema v46: each Agent is
-     published into every workspace bound to a workflow that references its
-     capability; identical published definitions are skipped)
-  3. first workflow revision publish for bound workspaces that have none
+  2. first workflow revision publish for bound workspaces that have none
      (legacy agent nodes get the seed's Agent definitions inlined first —
-     the publish gate requires self-contained agent nodes since #935)
-  4. node code publish (per bound workspace x node_codes[] entry; identical
+     those definitions are never created or published on the target)
+  3. node code publish (per bound workspace x node_codes[] entry; identical
      published code texts are skipped)
-  5. skill source upsert + relock (skipped when ref and locked commit match)
-  6. verification report (non-zero exit on any FAIL)
+  4. skill pin report (advisory; the target resolves its own in-place repos)
+  5. verification report, including normalized agent node profiles
+     (non-zero exit on any FAIL)
 
 A legacy ``executors`` section in the seed is ignored: the executor concept
 was retired in schema v47 (P-0.5); non-Agent-routed nodes run on the
@@ -30,7 +28,7 @@ implicit code pool.
 
 Known platform gap (fresh deployments): publishing a workflow's FIRST
 revision requires every code node to have published node code, while the
-node-code API requires an active revision — so step 3 cannot bootstrap a
+node-code API requires an active revision — so step 2 cannot bootstrap a
 brand-new workspace whose workflow has custom-code-only nodes. Instances
 that already have an active revision (the prod -> develop migration case)
 are unaffected.
@@ -53,14 +51,10 @@ import requests
 import yaml
 
 from scripts.seed.seed_agent_inline import inline_agent_profiles
-from scripts.seed.seed_common import (
-    canonical_json,
-    content_equal,
-    load_seed,
-    lock_entry_refs,
-    workflow_capabilities,
-)
+from scripts.seed.seed_common import canonical_json, load_seed, lock_entry_refs
+from server.app.services.agent_node_profile import node_profile_fields
 from server.app.services.node_codes import DEFAULT_MAX_CODE_BYTES
+from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 
 CSRF_HEADERS = {"x-agent-legion-request": "1"}
 
@@ -166,6 +160,23 @@ def _api_workflow_signature(payload: dict[str, Any]) -> dict[str, Any]:
     return {"nodes": nodes, "edges": edges}
 
 
+def _agent_profile_signatures(definition: Any) -> dict[str, Any]:
+    """Normalized node-authoritative profiles, including config_schema.
+
+    The active-revision API exposes config_schema through definition_yaml;
+    parsing both seed and target through the platform loader also applies any
+    workflow-level execution defaults and normalizes sparse skill/tool forms.
+    """
+    if not isinstance(definition, dict):
+        raise WorkflowDefinitionError("Workflow definition must be a mapping")
+    parsed = workflow_definition_from_dict(definition)
+    return {
+        key: node_profile_fields(node)
+        for key, node in parsed.nodes.items()
+        if node.node_type == "agent"
+    }
+
+
 # ---------------------------------------------------------------------------
 # steps
 # ---------------------------------------------------------------------------
@@ -202,8 +213,8 @@ def step1_workspaces(
             for workspace_id in bound[workflow_key]:
                 print(f"  {workflow_key}: workspace {workspace_id} already bound, skip create")
             continue
-        # Blank creation: nothing seeds — the seed's own definition is
-        # published as revision v1 in step 3 (and its agents in step 2).
+        # Blank creation: nothing seeds — the seed's own definition, with any
+        # legacy Agent profiles inlined, is published as revision v1 in step 2.
         body: dict[str, Any] = {"id": workflow_key, "name": name}
         if entity is not None:
             body["default_entity"] = entity
@@ -229,76 +240,6 @@ def step1_workspaces(
     return bound
 
 
-def _agent_target_workspaces(
-    seed: dict[str, Any], bound: dict[str, list[str]], capability: str
-) -> list[str]:
-    targets: list[str] = []
-    for workflow in seed["workflows"]:
-        definition = workflow.get("definition") or {}
-        if capability in workflow_capabilities(definition):
-            targets.extend(bound.get(workflow["key"]) or [])
-    return sorted(set(targets))
-
-
-def step2_agents(
-    client: Client, seed: dict[str, Any], bound: dict[str, list[str]], failures: list[str]
-) -> None:
-    print("== step 2: Agent publish ==")
-    for agent in seed.get("agents") or []:
-        agent_id = agent["agent_id"]
-        capability = str(agent["definition"].get("capability"))
-        targets = _agent_target_workspaces(seed, bound, capability)
-        if not targets:
-            failures.append(f"agent {agent_id}: no bound workspace for capability {capability}")
-            continue
-        for workspace_id in targets:
-            if workspace_id.startswith("<new:"):
-                client.actions.append(
-                    f"WOULD publish agent {agent_id} on new workspace of {workspace_id[5:-1]}"
-                )
-                continue
-            label = f"{workspace_id}/{agent_id}"
-            params = {"workspace_id": workspace_id}
-            detail = client.get(f"/api/agent-definitions/{agent_id}", allow_404=True, params=params)
-            desired = agent["definition"]
-            if detail is None:
-                created = client.mutate(
-                    "POST",
-                    "/api/agent-definitions",
-                    {"agent_id": agent_id, **desired},
-                    params=params,
-                    dry_note=f"create agent {label} ({capability}) as draft",
-                )
-                result = client.mutate(
-                    "POST",
-                    f"/api/agent-definitions/{agent_id}/publish",
-                    _cas_body(created, "definition_hash"),
-                    params=params,
-                    dry_note=f"publish agent {label}",
-                )
-                print(f"  {label}: absent -> create + publish (v{(result or {}).get('version')})")
-                continue
-            published = detail.get("published")
-            if published is not None and content_equal(published.get("definition"), desired):
-                print(f"  {label}: skip (published v{published.get('version')} identical)")
-                continue
-            saved = client.mutate(
-                "PUT",
-                f"/api/agent-definitions/{agent_id}/draft",
-                desired,
-                params=params,
-                dry_note=f"save draft for {label}",
-            )
-            result = client.mutate(
-                "POST",
-                f"/api/agent-definitions/{agent_id}/publish",
-                _cas_body(saved, "definition_hash"),
-                params=params,
-                dry_note=f"publish {label}",
-            )
-            print(f"  {label}: definition drift -> published v{(result or {}).get('version')}")
-
-
 def _cas_body(saved: Any, hash_field: str) -> dict[str, Any] | None:
     """#841: publish asserts the draft this import just saved (expected_hash
     is required — the platform has no hash-less publish). Dry-run saves
@@ -306,10 +247,10 @@ def _cas_body(saved: Any, hash_field: str) -> dict[str, Any] | None:
     return {"expected_hash": saved[hash_field]} if saved else None
 
 
-def step3_first_revisions(
+def step2_first_revisions(
     client: Client, seed: dict[str, Any], bound: dict[str, list[str]], failures: list[str]
 ) -> None:
-    print("== step 3: first workflow revision ==")
+    print("== step 2: first workflow revision ==")
     workflow_defs = {w["key"]: w["definition"] for w in seed["workflows"]}
     for workflow_key, workspace_ids in bound.items():
         for workspace_id in workspace_ids:
@@ -359,10 +300,10 @@ def step3_first_revisions(
                 )
 
 
-def step4_node_codes(
+def step3_node_codes(
     client: Client, seed: dict[str, Any], bound: dict[str, list[str]], failures: list[str]
 ) -> None:
-    print("== step 4: node code publish ==")
+    print("== step 3: node code publish ==")
     for entry in seed.get("node_codes") or []:
         workflow_key = entry["workflow_key"]
         node_key = entry["node_key"]
@@ -412,8 +353,8 @@ def step4_node_codes(
             )
 
 
-def step5_skills(client: Client, seed: dict[str, Any], failures: list[str]) -> None:
-    print("== step 5: skill pins (advisory) ==")
+def step4_skills(client: Client, seed: dict[str, Any], failures: list[str]) -> None:
+    print("== step 4: skill pins (advisory) ==")
     skills = seed.get("skills") or {}
     desired_lock = (skills.get("lock") or {}).get("skills") or {}
     if not desired_lock:
@@ -439,7 +380,7 @@ def step5_skills(client: Client, seed: dict[str, Any], failures: list[str]) -> N
 
 
 def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) -> list[str]:
-    print("== step 6: verification ==")
+    print("== step 5: verification ==")
     failures: list[str] = []
 
     def check(ok: bool, label: str, detail: str) -> None:
@@ -453,6 +394,15 @@ def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) ->
         if not workspace_ids:
             check(False, f"workflow {key}", "no bound workspace on target")
             continue
+        expected_definition, untouched = inline_agent_profiles(
+            workflow["definition"], seed.get("agents") or []
+        )
+        expected_profiles = _agent_profile_signatures(expected_definition)
+        incomplete = sorted(
+            node_key
+            for node_key, profile in expected_profiles.items()
+            if not (profile.get("execution") or {}).get("runtime") or not profile.get("skill")
+        )
         for workspace_id in workspace_ids:
             label = f"workflow {key} @ {workspace_id}"
             active = client.get(
@@ -466,25 +416,19 @@ def verify(client: Client, seed: dict[str, Any], bound: dict[str, list[str]]) ->
                 workflow["definition"]
             )
             check(sig_ok, label, f"active revision, definition matches={sig_ok}")
-
-    for agent in seed.get("agents") or []:
-        agent_id = agent["agent_id"]
-        capability = str(agent["definition"].get("capability"))
-        for workspace_id in _agent_target_workspaces(seed, bound, capability):
-            if workspace_id.startswith("<new:"):
+            try:
+                actual_definition = yaml.safe_load(active.get("definition_yaml") or "")
+                actual_profiles = _agent_profile_signatures(actual_definition)
+            except (WorkflowDefinitionError, yaml.YAMLError) as exc:
+                check(False, f"agent profiles {label}", f"invalid active definition: {exc}")
                 continue
-            label = f"agent {workspace_id}/{agent_id}"
-            detail = client.get(
-                f"/api/agent-definitions/{agent_id}",
-                allow_404=True,
-                params={"workspace_id": workspace_id},
+            matches = actual_profiles == expected_profiles
+            profiles_ok = matches and not untouched and not incomplete
+            check(
+                profiles_ok,
+                f"agent profiles {label}",
+                f"matches={matches} not_inlined={untouched} incomplete={incomplete}",
             )
-            published = (detail or {}).get("published")
-            if published is None:
-                check(False, label, "no published version")
-                continue
-            same = content_equal(published.get("definition"), agent["definition"])
-            check(same, f"{label} v{published.get('version')}", f"matches={same}")
 
     for entry in seed.get("node_codes") or []:
         workflow_key, node_key = entry["workflow_key"], entry["node_key"]
@@ -554,10 +498,9 @@ def main() -> int:
 
     failures: list[str] = []
     bound = step1_workspaces(client, seed, args.workspace, failures)
-    step2_agents(client, seed, bound, failures)
-    step3_first_revisions(client, seed, bound, failures)
-    step4_node_codes(client, seed, bound, failures)
-    step5_skills(client, seed, failures)
+    step2_first_revisions(client, seed, bound, failures)
+    step3_node_codes(client, seed, bound, failures)
+    step4_skills(client, seed, failures)
     failures += verify(client, seed, bound)
 
     if client.actions:

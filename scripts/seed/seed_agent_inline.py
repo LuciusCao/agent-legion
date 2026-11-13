@@ -1,7 +1,8 @@
 """Inline seed Agent definitions into legacy agent nodes (#935, #440 P3).
 
-Split from ``seed_common`` (file budget). Used by ``import_seed`` step 3
-before publishing a workflow's first revision.
+Split from ``seed_common`` (file budget). Used by ``import_seed`` step 2
+before publishing a workflow's first revision. The seed's Agent definitions
+are transformation input only; the importer never publishes them.
 """
 
 from __future__ import annotations
