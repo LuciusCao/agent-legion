@@ -56,6 +56,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         node_keys: list[str],
         workspace_id: str,
         revision: dict[str, Any],
+        needs_capacity_by_node: Mapping[str, bool] | None = None,
         frozen_config: Mapping[str, Any] | None = None,
     ) -> list[str]:
         """Insert one job per candidate of a run, in chunked transactions.
@@ -202,7 +203,11 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 insert_job_nodes_batched(
                     conn,
                     [
-                        (str(row[0]), node_key)
+                        (
+                            str(row[0]),
+                            node_key,
+                            (needs_capacity_by_node or {}).get(node_key, True),
+                        )
                         for row in chunk
                         if str(row[0]) in owned_chunk
                         for node_key in node_keys

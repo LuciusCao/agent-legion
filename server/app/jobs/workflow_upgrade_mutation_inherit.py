@@ -19,6 +19,7 @@ from server.app.jobs.workflow_upgrade_artifact_rows import (
     delete_reset_artifact_rows,
     existing_node_states,
 )
+from server.app.workflows.capacity_metadata import node_capacity_requirements_from_snapshot
 from server.app.workflows.scheduler import summarize_job_status
 from server.app.workflows.sharding import delete_shards
 
@@ -140,13 +141,23 @@ def upgrade_job_workflow_inherit(
     else:
         conn.execute("delete from job_nodes where job_id=%s", (job_id,))
     reset_nodes = reset_keys
+    needs_capacity_by_node = node_capacity_requirements_from_snapshot(
+        workflow_definition_snapshot_json
+    )
     for node_key in reset_nodes:
         conn.execute(
             """
-            insert into job_nodes(job_id, node_key, status, created_at, execution_generation)
-            values (%s, %s, 'pending', current_timestamp, %s)
+            insert into job_nodes(
+              job_id, node_key, status, created_at, execution_generation, needs_capacity
+            )
+            values (%s, %s, 'pending', current_timestamp, %s, %s)
             """,
-            (job_id, node_key, generation),
+            (
+                job_id,
+                node_key,
+                generation,
+                (needs_capacity_by_node or {}).get(node_key, True),
+            ),
         )
 
     # A4：新 revision 已消失的旧节点 key（rename 前身份）的同名清单行一并

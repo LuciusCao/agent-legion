@@ -83,8 +83,9 @@ returning id
 """
 
 JOB_NODES_BULK_INSERT_SQL = """
-insert into job_nodes(job_id, node_key, status, created_at)
-select c, k, 'pending', current_timestamp from unnest(%s::text[], %s::text[]) as t(c, k)
+insert into job_nodes(job_id, node_key, status, created_at, needs_capacity)
+select c, k, 'pending', current_timestamp, n
+from unnest(%s::text[], %s::text[], %s::boolean[]) as t(c, k, n)
 on conflict(job_id, node_key) do nothing
 """
 
@@ -109,9 +110,9 @@ def insert_jobs_batched(conn: Any, rows: list[tuple[Any, ...]]) -> set[str]:
     return owned
 
 
-def insert_job_nodes_batched(conn: Any, pairs: list[tuple[str, str]]) -> None:
-    for start in range(0, len(pairs), CHUNK_ROWS):
-        chunk = pairs[start : start + CHUNK_ROWS]
+def insert_job_nodes_batched(conn: Any, rows: list[tuple[str, str, bool]]) -> None:
+    for start in range(0, len(rows), CHUNK_ROWS):
+        chunk = rows[start : start + CHUNK_ROWS]
         columns = [list(column) for column in zip(*chunk, strict=True)]
         conn.execute(JOB_NODES_BULK_INSERT_SQL, columns)
 
