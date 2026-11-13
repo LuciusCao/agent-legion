@@ -23,7 +23,15 @@ class _ScanLimitedDecompressor:
         return payload
 
 
+def _reject_gzip_extra_fields(archive: Path) -> None:
+    with archive.open("rb") as raw:
+        header = raw.read(10)
+    if len(header) >= 4 and header[:3] == b"\x1f\x8b\x08" and header[3] & 0x04:
+        raise ValueError("result archive gzip extra fields are not supported")
+
+
 def open_result_archive_stream(archive: Path, max_scan_bytes: int) -> Any:
+    _reject_gzip_extra_fields(archive)
     stream_factory: Any = tarfile._Stream  # type: ignore[attr-defined]
     options: dict[str, int] = {}
     if "compresslevel" in inspect.signature(stream_factory).parameters:

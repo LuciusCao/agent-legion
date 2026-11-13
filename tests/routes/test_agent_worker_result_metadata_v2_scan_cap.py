@@ -6,6 +6,7 @@ import inspect
 import io
 import json
 import os
+import struct
 import tarfile
 import zlib
 from pathlib import Path
@@ -24,14 +25,26 @@ _MIB = 1024 * 1024
 _parse_only = pytest.mark.no_db
 
 
-def _archive(members: list[tuple[str, bytes]]) -> bytes:
+def _tar_archive(members: list[tuple[str, bytes]], mode: str) -> bytes:
     buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+    with tarfile.open(fileobj=buffer, mode=mode) as tar:
         for name, payload in members:
             info = tarfile.TarInfo(name)
             info.size = len(payload)
             tar.addfile(info, io.BytesIO(payload))
     return buffer.getvalue()
+
+
+def _archive(members: list[tuple[str, bytes]]) -> bytes:
+    return _tar_archive(members, "w:gz")
+
+
+def _fextra_archive(members: list[tuple[str, bytes]]) -> bytes:
+    xlen = 4
+    raw = b"P" * xlen + _tar_archive(members, "w")
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -zlib.MAX_WBITS)
+    compressed = compressor.compress(raw) + compressor.flush()
+    return b"\x1f\x8b\x08\x04" + b"\0" * 6 + struct.pack("<H", xlen) + compressed
 
 
 def _metadata() -> bytes:
@@ -93,6 +106,27 @@ def test_python_311_stream_constructor_reads_valid_archive(
     archive.write_bytes(_archive([(RESULT_METADATA_MEMBER, _metadata())]))
 
     assert json.loads(reader.read_archived_result_metadata(archive))["status"] == "completed"
+
+
+@_parse_only
+def test_fextra_constructor_bomb_rejected_before_stream(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tarfile_reads: list[int],
+    decompressed_outputs: list[int],
+) -> None:
+    monkeypatch.setattr(reader, "_MAX_RESULT_ARCHIVE_SCAN_BYTES", 64 * 1024)
+    archive = tmp_path / "fextra-constructor-bomb.tar.gz"
+    archive.write_bytes(
+        _fextra_archive(
+            [("padding.bin", b"0" * (256 * 1024)), (RESULT_METADATA_MEMBER, _metadata())]
+        )
+    )
+
+    with pytest.raises(ValueError, match="gzip extra fields are not supported"):
+        reader.read_archived_result_metadata(archive)
+    assert tarfile_reads[0] == 0
+    assert decompressed_outputs[0] == 0
 
 
 @_parse_only
@@ -254,12 +288,20 @@ def test_member_cap_remains_independent_from_scan_cap(
 
 
 @pytest.mark.postgres
-def test_scan_cap_is_fail_closed_400_and_claim_can_retry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("attack_kind", ["scan-cap", "fextra"])
+def test_archive_rejection_is_fail_closed_400_and_claim_can_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attack_kind: str
 ) -> None:
     monkeypatch.setattr(reader, "_MAX_RESULT_ARCHIVE_SCAN_BYTES", _MIB)
     app = _make_app(tmp_path)
-    _seed_request(app.state.job_db, job_id="job-v2-scan-cap", limit=2)
+    _seed_request(app.state.job_db, job_id=f"job-v2-{attack_kind}", limit=2)
+    members = [("padding.bin", b"0" * (4 * _MIB)), (RESULT_METADATA_MEMBER, _metadata())]
+    attack_archive = _fextra_archive(members) if attack_kind == "fextra" else _archive(members)
+    expected_detail = (
+        "gzip extra fields are not supported"
+        if attack_kind == "fextra"
+        else "scan exceeds decompressed-byte limit"
+    )
     with TestClient(app) as client:
         token = _register(client)["worker_token"]
         claimed = _claim(client, token)
@@ -271,12 +313,10 @@ def test_scan_cap_is_fail_closed_400_and_claim_can_retry(
         response = client.post(
             f"/api/agent-executions/{claimed['execution_id']}/result",
             headers=headers,
-            content=_archive(
-                [("padding.bin", b"0" * (4 * _MIB)), (RESULT_METADATA_MEMBER, _metadata())]
-            ),
+            content=attack_archive,
         )
         assert response.status_code == 400, response.text
-        assert "scan exceeds decompressed-byte limit" in response.json()["detail"]
+        assert expected_detail in response.json()["detail"]
         bundle_dir = Path(app.state.agent_broker.bundle_dir)
         assert not list(bundle_dir.glob(".result-*"))
         assert not list(bundle_dir.glob("*.result.tar.gz"))
