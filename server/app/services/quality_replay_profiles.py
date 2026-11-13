@@ -13,8 +13,8 @@ instead of Agent versions. This module owns that half of a replay:
     node's inputs/outputs and every other node stay the original's), and
     the rewritten snapshot gets its own ``definition_hash`` so the worker's
     hash-keyed definition cache never mixes it with the original;
-  * no choice + a legacy (not inlined) or code node → ``None``: the caller
-    keeps the pre-#1079 path (read-only ``agent_versions`` compatibility).
+  * no choice + a legacy (not inlined) or code node → ``None``: legacy nodes
+    must choose a self-contained profile; code nodes replay unpinned.
 - **options** — the revisions / draft a sample item can be replayed with.
 - **describe** — the pin a replay's copy run froze, for the replay views.
 
@@ -250,18 +250,6 @@ class ReplayProfileResolver:
                 f" original snapshot ({', '.join(PROFILE_FIELDS)} differ after reload)"
             )
         return text
-
-
-def sampled_agent_version(node: WorkflowNode, item: dict[str, Any]) -> int | None:
-    """The Agent version a legacy node's sampled run ran (None = not recorded).
-
-    Quality sampling records it by definition hash (``quality_sample_items``);
-    a self-contained or code node never pins an Agent version.
-    """
-    if node.node_type != "agent" or is_self_contained_agent_node(node):
-        return None
-    recorded = item.get("agent_version")
-    return int(recorded) if recorded is not None else None
 
 
 def _load_stored(definition_json: Any) -> WorkflowDefinition | None:

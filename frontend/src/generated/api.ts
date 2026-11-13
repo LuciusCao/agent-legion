@@ -6358,12 +6358,6 @@ export interface components {
     }
     /** QualityReplayCreateRequest */
     QualityReplayCreateRequest: {
-      /**
-       * Agent Version
-       * @deprecated
-       * @description Deprecated (#440 D6): replay with a workflow revision instead.
-       */
-      agent_version?: number | null
       /** Revision Id */
       revision_id?: string | null
       /**

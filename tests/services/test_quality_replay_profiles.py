@@ -230,7 +230,7 @@ def test_replay_profile_choice_errors(job_db, tmp_path: Path) -> None:
     legacy_rev = env.add_revision(2, _definition(None), "archived")
     service = env.service()
 
-    with pytest.raises(InvalidOperationError, match="legacy Agent-definition nodes only"):
+    with pytest.raises(InvalidOperationError, match="retired.*revision_id"):
         service.create_replay(env.workspace_id, "item-1", agent_version=1)
     with pytest.raises(NotFoundError):
         service.create_replay(env.workspace_id, "item-1", revision_id="missing")

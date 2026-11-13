@@ -11,9 +11,9 @@ import json
 
 import pytest
 
-from server.app.services.agent_version_pins import agent_version_pin
 from server.app.services.node_code_pins import frozen_dispatch_pin
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
+from server.app.services.node_profile_pins import agent_version_pin
 from server.app.services.run_payload import (
     candidate_input,
     reconstruct_batch_payload,

@@ -531,7 +531,7 @@ server/app/
 | QualitySampleItemDetailResponse | BaseModel | item: QualitySampleItem, labels: list[QualityLabel], artifacts: list[QualityA... | app/routes/quality_contracts.py |
 | QualityLabelCreateRequest | BaseModel | verdict: LabelVerdict, reason_codes: list[str], note: str, replay_id: str | N... | app/routes/quality_contracts.py |
 | QualityLabelResponse | BaseModel | label: QualityLabel | app/routes/quality_contracts.py |
-| QualityReplayCreateRequest | BaseModel | revision_id: str | None, use_draft: bool, agent_version: int | None | app/routes/quality_contracts.py |
+| QualityReplayCreateRequest | BaseModel | revision_id: str | None, use_draft: bool | app/routes/quality_contracts.py |
 | QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, revision_id:... | app/routes/quality_contracts.py |
 | QualityReplayResponse | BaseModel | replay: QualityReplay | app/routes/quality_contracts.py |
 | QualityReplayListResponse | BaseModel | replays: list[QualityReplay] | app/routes/quality_contracts.py |
@@ -987,6 +987,12 @@ Token Usage 收集并展示 agent 节点（pi / velites runtime）运行时的 t
 
 - `loader.py`:  canonical split 布局已不含任何运行时配置文件（全部退役）；启动时从代码默认值 + env 覆盖合成配置，`config/app.yaml` / `config/workflow.yaml` / `config/agent_legion.yaml` 存在即报错（带迁移指引）。
 - `owned_keys.py`: 登记退役文件名与迁移指引（`CONFIG_FILE_KEYS` 已为空——没有任何 split 文件再拥有顶层键）。
+
+### Quality Replay 执行档案与历史 pin
+
+- 新建 agent replay 只接受 `revision_id` / `use_draft`；自含节点缺省回放原快照档案，legacy（v93 内联前或未能内联）节点必须显式选择带自含执行档案的 revision 或 draft。新副本冻结 `node_profiles` pin，digest 中保留空的 `agent_versions` 成员以维持既有 run-id 与 reconstructed payload 形状，但不再存在非空 legacy pin 新写入口。
+- **迁移错误（#936）：**旧客户端在 create body 中发送 `agent_version`（包括 `null`）得到 422，并收到改用 `revision_id` / `use_draft` 的明确指引；legacy 节点未作选择得到 400。两种拒绝都发生在 `quality_replays` / `runs` / `jobs` / `agent_execution_requests` 任何新写之前，不会静默丢弃请求里的 pin。
+- **历史兼容：**replay 读取响应的 `agent_id` / `agent_version`、请求行与 `node_runs` 身份镜像均保留。存量 run 的 `agent_versions` 由 `node_profile_pins` 只读解析，仍按精确 version + definition hash fail-closed 执行；broker enqueue、claim、stale/unclaimable sweep 与 Worker 失联 requeue/recovery 语义不变。versioned_entities 的 Agent 归档行、pre-v93 rerun/upgrade resolver 和只读 catalog 不变，无 DDL。
 
 ### Quality Subsystem
 

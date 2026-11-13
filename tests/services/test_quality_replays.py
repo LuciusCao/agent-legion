@@ -8,9 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.db.transaction import write_transaction
-from server.app.services.agent_service import AgentService
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.quality_labels import QualityLabelService
@@ -339,53 +337,13 @@ def test_unknown_item_and_cross_workspace_rejected(env) -> None:
         env.service().create_replay("ws-other", "item-1")
 
 
-def test_agent_version_pin_rejected_for_executor_node(env) -> None:
-    with pytest.raises(InvalidOperationError, match="Agent-routed nodes only"):
-        env.service().create_replay(env.workspace_id, "item-1", agent_version=1)
-
-
-def _save_draft(workspace_id: str, capability: str = CAPABILITY) -> AgentDefinition:
-    definition = AgentDefinition(
-        capability=capability,
-        runtime="velites",
-        skill="education-video-problems-generation/write-script",
-        tools=("read",),
-    )
-    AgentService(TEST_DATABASE_URL, workspace_id).save_draft(
-        AGENT_ID, definition, created_by="test"
-    )
-    return definition
-
-
-def test_default_pin_uses_current_published(agent_env) -> None:
-    replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1")
-    assert replay["agent_id"] == AGENT_ID
-    assert replay["agent_version"] == 1
-    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
-    assert pin["agent_id"] == AGENT_ID
-    assert pin["version"] == 1
-    published = AgentService(TEST_DATABASE_URL, agent_env.workspace_id).get_published(AGENT_ID)
-    assert pin["definition_hash"] == published.definition_hash
-
-
-def test_explicit_draft_version_pin(agent_env) -> None:
-    draft = _save_draft(agent_env.workspace_id)
-    replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=2)
-    assert replay["agent_version"] == 2
-    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
-    assert pin["version"] == 2
-    assert pin["definition_hash"] == draft.definition_hash()
-
-
-def test_archived_version_pin_allowed(agent_env) -> None:
-    service = AgentService(TEST_DATABASE_URL, agent_env.workspace_id)
-    published_v1 = service.get_published(AGENT_ID)
-    _save_draft(agent_env.workspace_id)
-    service.publish(AGENT_ID)  # v2 published, v1 archived
-    replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=1)
-    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
-    assert pin["version"] == 1
-    assert pin["definition_hash"] == published_v1.definition_hash
+def _write_counts(job_db) -> dict[str, int]:
+    tables = ("quality_replays", "runs", "jobs", "agent_execution_requests")
+    with job_db.connect() as conn:
+        return {
+            table: int(conn.execute(f"select count(*) as n from {table}").fetchone()["n"])
+            for table in tables
+        }
 
 
 def _record_sample_version(version: int) -> None:
@@ -395,37 +353,46 @@ def _record_sample_version(version: int) -> None:
         )
 
 
-def test_default_replays_the_sampled_runs_agent_version(agent_env) -> None:
-    """#1079 review：legacy 节点不选档案 = 原运行实际跑的版本，而非当前 published。"""
-    service = AgentService(TEST_DATABASE_URL, agent_env.workspace_id)
-    original_v1 = service.get_published(AGENT_ID)
-    _save_draft(agent_env.workspace_id)
-    service.publish(AGENT_ID)  # v2 published now
+@pytest.mark.parametrize("agent_version", [None, 1, 99])
+def test_legacy_agent_version_replay_creation_is_retired(agent_env, agent_version) -> None:
+    """#936: neither an explicit nor a sampled legacy pin may create a replay."""
     _record_sample_version(1)
+    before = _write_counts(agent_env.job_db)
 
-    replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1")
+    with pytest.raises(InvalidOperationError, match="retired.*revision_id"):
+        agent_env.service().create_replay(
+            agent_env.workspace_id, "item-1", agent_version=agent_version
+        )
 
-    assert replay["agent_version"] == 1
-    pin = agent_env.copy_run_pins(replay)["agent_versions"]["generate"]
-    assert pin["version"] == 1
-    assert pin["definition_hash"] == original_v1.definition_hash
-
-
-def test_default_reports_a_vanished_sampled_version(agent_env) -> None:
-    _record_sample_version(99)
-    with pytest.raises(NotFoundError, match="no version 99.*choose a workflow revision"):
-        agent_env.service().create_replay(agent_env.workspace_id, "item-1")
+    assert _write_counts(agent_env.job_db) == before
 
 
-def test_unknown_version_rejected(agent_env) -> None:
-    with pytest.raises(NotFoundError, match="no version 99"):
-        agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=99)
+def test_agent_version_field_is_retired_for_code_nodes(env) -> None:
+    before = _write_counts(env.job_db)
+    with pytest.raises(InvalidOperationError, match="retired.*revision_id"):
+        env.service().create_replay(env.workspace_id, "item-1", agent_version=1)
+    assert _write_counts(env.job_db) == before
 
 
-def test_capability_mismatch_pin_rejected(agent_env) -> None:
-    _save_draft(agent_env.workspace_id, capability="some_other_capability")
-    with pytest.raises(InvalidOperationError, match="does not match node capability"):
-        agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=2)
+def test_historical_replay_identity_remains_readable(agent_env) -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into quality_replays("
+            "id, item_id, agent_id, agent_version, status, created_by, finished_at)"
+            " values ('legacy-replay', 'item-1', %s, 7, 'succeeded', 'user:legacy',"
+            " current_timestamp)",
+            (AGENT_ID,),
+        )
+    service = agent_env.service()
+
+    (listed,) = service.list_replays(agent_env.workspace_id, "item-1")
+    detail = service.get_replay_detail(agent_env.workspace_id, "legacy-replay")
+
+    for replay in (listed, detail["replay"]):
+        assert replay["id"] == "legacy-replay"
+        assert replay["agent_id"] == AGENT_ID
+        assert replay["agent_version"] == 7
+        assert replay["status"] == "succeeded"
 
 
 def test_upstream_artifact_refs_shared_with_copy(env, tmp_path) -> None:

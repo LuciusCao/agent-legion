@@ -36,7 +36,6 @@ def create_quality_replays_router(replays: QualityReplayService) -> APIRouter:
         replay = replays.create_replay(
             workspace_id,
             item_id,
-            agent_version=payload.agent_version,
             revision_id=payload.revision_id,
             use_draft=payload.use_draft,
             created_by=f"user:{user['id']}",

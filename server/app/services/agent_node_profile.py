@@ -31,8 +31,11 @@ from the Agent publish path without an import cycle.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
-from typing import Protocol
+from dataclasses import asdict
+from typing import Any, Protocol
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_node_profile_types import (
@@ -40,16 +43,47 @@ from server.app.services.agent_node_profile_types import (
     profile_from_definition,
     profile_from_node,
 )
+from server.app.workflows.schema import WorkflowNode
 from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 __all__ = [
     "AgentNodeProfile",
     "build_capability_index",
     "legacy_agent_candidates",
+    "node_profile_fields",
+    "node_profile_hash",
+    "node_profile_pin_error",
     "profile_from_definition",
     "resolve_agent_node_profile",
     "resolve_routed_agent_profile",
 ]
+
+#: The node fields a replay profile transplant replaces and the hash covers.
+PROFILE_FIELDS = ("execution", "requires_labels", "tools", "config_schema", "skill")
+
+
+def node_profile_fields(node: WorkflowNode) -> dict[str, Any]:
+    """The JSON-shaped profile fields of *node* (snapshot ``asdict`` form)."""
+    raw = asdict(node)
+    return {field: raw[field] for field in PROFILE_FIELDS}
+
+
+def node_profile_hash(node: WorkflowNode) -> str:
+    """Stable hash of the node's execution profile (:data:`PROFILE_FIELDS`)."""
+    text = json.dumps(
+        node_profile_fields(node), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def node_profile_pin_error(node: WorkflowNode, pin: Mapping[str, Any]) -> str | None:
+    """Why *node* does not satisfy its frozen profile pin; None when it does."""
+    if str(pin.get("node_key") or "") != node.key:
+        return f"node profile pin targets {pin.get('node_key')!r} but the node is {node.key!r}"
+    expected = str(pin.get("profile_hash") or "")
+    if not expected or node_profile_hash(node) != expected:
+        return f"node {node.key} execution profile does not match its replay pin (profile_hash)"
+    return None
 
 
 class AgentNodeLike(Protocol):
