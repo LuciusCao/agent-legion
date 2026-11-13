@@ -54,7 +54,7 @@ def _definition(**kwargs: str):
 def test_extract_runtime_config_normalizes_full_key_set() -> None:
     config = extract_runtime_config(_definition(model="m1", tools="bash"))
 
-    assert config["execution"] == {"provider": "", "model": "", "thinking": ""}
+    assert set(config) == {"nodes"}
     node = config["nodes"]["do_thing"]
     assert node["model"] == "m1"
     assert node["prompt"] == "" and node["prompt_mode"] == ""
@@ -98,6 +98,25 @@ def test_apply_runtime_config_preserves_runtime_and_unknown_nodes() -> None:
     assert applied.nodes["new_node"].execution.runtime == "pi"
     # 原对象不被 mutate（frozen dataclass 复制语义）。
     assert base.nodes["do_thing"].execution.model == "m2"
+
+
+@pytest.mark.no_db
+def test_legacy_runtime_row_ignores_retired_top_level_duplicate() -> None:
+    base = _definition(model="m2")
+    legacy = extract_runtime_config(_definition(model="m1"))
+    legacy["execution"] = {
+        "provider": "must-not-reappear",
+        "model": "must-not-reappear",
+        "thinking": "high",
+    }
+
+    applied = apply_runtime_config(base, legacy)
+
+    assert applied.nodes["do_thing"].execution.model == "m1"
+    assert applied.nodes["do_thing"].execution.provider == ""
+    assert applied.nodes["do_thing"].execution.thinking == ""
+    assert set(extract_runtime_config(applied)) == {"nodes"}
+    assert legacy["execution"]["provider"] == "must-not-reappear"
 
 
 # ---------------------------------------------------------------------------
@@ -242,18 +261,27 @@ def test_rollback_appends_new_version_with_target_content(job_db) -> None:
     save_workflow_runtime_config(
         job_db, workspace["id"], _definition(model="m3"), created_by="user:u2"
     )
+    historical = job_db.get_runtime_config_version(workspace["id"], 1)
+    legacy_config = json.loads(str(historical["config_json"]))
+    legacy_config["execution"] = {"provider": "retired", "model": "retired", "thinking": "high"}
+    with job_db.connect() as conn:
+        conn.execute(
+            "update workflow_runtime_config_versions set config_json=%s where id=%s",
+            (json.dumps(legacy_config), historical["id"]),
+        )
 
     result = rollback_workflow_runtime_config(job_db, workspace["id"], 1, created_by="user:u3")
 
     assert _active_model(job_db, workspace["id"]) == "m2"
     versions = job_db.list_runtime_config_versions(workspace["id"])
     assert [row["version"] for row in versions] == [3, 2, 1]
-    newest = versions[0]
-    # 回滚 = 目标版本切片应用到当前结构后追加为新版本（本用例结构未变，
-    # 故逐字节等于目标版本；跨结构场景不等于原文）；历史行不被篡改。
-    assert json.loads(str(newest["config_json"])) == json.loads(str(versions[2]["config_json"]))
-    assert json.loads(str(newest["changed_keys_json"])) == ["nodes.do_thing.model"]
-    assert newest["created_by"] == "user:u3"
+    newest = json.loads(str(versions[0]["config_json"]))
+    original = json.loads(str(versions[2]["config_json"]))
+    # 旧历史原样保留；新行只应用其完整节点切片，不复活退役的顶层副本。
+    assert original["execution"] == legacy_config["execution"]
+    assert newest == {"nodes": original["nodes"]}
+    assert json.loads(str(versions[0]["changed_keys_json"])) == ["nodes.do_thing.model"]
+    assert versions[0]["created_by"] == "user:u3"
     assert result["runtime_version"]["version"] == 3
 
 

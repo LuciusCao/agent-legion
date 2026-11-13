@@ -1,9 +1,9 @@
 """live_claim_manifest：claim 时按 revision 实时重解析 execution。
 
-解析链（每个 key）：当前 revision 节点 execution（loader 已合并 workflow
-顶层默认）→ enqueue 冻结的 workspace 默认（execution_defaults，legacy
-manifest 容错，schema v64 起新 manifest 不再写）→ enqueue 冻结的已解析
-execution（兜底）。重取键集合与重校验走 runtime adapter 的
+解析链（每个 key）：当前 revision 节点 execution（stored legacy 快照
+继续按节点值与入队冻结的有效值兼容）→ enqueue 冻结的 workspace 默认
+（execution_defaults，legacy manifest 容错，schema v64 起新 manifest 不再写）
+→ enqueue 冻结的已解析 execution（兜底）。重取键集合与重校验走 runtime adapter 的
 ExecutionContract（issue #75 阶段 2）：revision 升级引入 runtime 不支持的
 键或必填键不再可解析时 fail-fast。
 """

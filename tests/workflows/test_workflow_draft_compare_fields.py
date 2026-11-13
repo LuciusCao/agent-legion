@@ -158,11 +158,9 @@ def test_compare_node_type_only_change_creates_revision(tmp_path):
     assert result["valid"] is True
     assert result["creates_revision"] is True
     change = _modified_change(result, "publish_content")
-    # #935: the demo declares a workflow top-level execution.runtime, which
-    # the loader merges into the node once it is an agent node — the
-    # inherited runtime surfaces as an execution change alongside the type
-    # (#1114: the effective-runtime move is also flagged as ``runtime``).
-    assert change["fields"] == ["execution", "runtime", "node_type"]
+    # #805: runtime is declared per Agent node, so changing only the type of a
+    # former code node no longer invents an execution profile.
+    assert change["fields"] == ["node_type"]
     assert change["risk"] == "breaking"
 
 

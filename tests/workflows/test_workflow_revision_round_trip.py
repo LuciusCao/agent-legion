@@ -17,11 +17,11 @@ def test_revision_snapshot_and_yaml_round_trip_preserves_tools_config_and_fanout
             "key": "round_trip",
             "label": "Round Trip",
             "schema_version": 2,
-            "execution": {"runtime": "velites", "provider": "gateway", "model": "model-a"},
             "nodes": {
                 "fan_out": {
                     "type": "agent",
                     "label": "Fan Out",
+                    "execution": {"runtime": "velites", "provider": "gateway", "model": "model-a"},
                     "capability": "fan_out",
                     "tools": ["read", "uuid"],
                     "config": {"page_size": 20, "nested": {"enabled": True}},

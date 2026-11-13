@@ -142,7 +142,7 @@ def test_compare_execution_only_change_does_not_create_revision(app_with_workspa
     node = definition.nodes["write_script"]
     definition.nodes["write_script"] = replace(
         node,
-        execution=WorkflowNodeExecution(provider="openai", model="gpt-5.2"),
+        execution=WorkflowNodeExecution(runtime="velites", provider="openai", model="gpt-5.2"),
     )
 
     with authenticate_client(TestClient(app)) as client:

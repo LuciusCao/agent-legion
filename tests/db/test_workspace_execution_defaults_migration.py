@@ -137,7 +137,7 @@ def test_backfills_defaults_into_active_revision_top_level_execution() -> None:
     from server.app.workflows.definition import workflow_definition_from_dict
 
     definition = workflow_definition_from_dict(payload)
-    assert definition.execution.provider == "ws-provider"
+    assert definition.nodes["gen"].execution.provider == "ws-provider"
     block = resolve_execution_block(definition.nodes["gen"], "velites")
     assert block["provider"] == "ws-provider"
     assert block["model"] == "ws-model"

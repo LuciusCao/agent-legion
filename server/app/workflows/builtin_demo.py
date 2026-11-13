@@ -25,10 +25,8 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
     "key": DEMO_WORKFLOW_KEY,
     "label": "教学视频脚本与题目生成（示例）",
     "schema_version": 2,
-    # Demo agent nodes stay self-contained with explicit runtimes (#936). The
-    # top-level default is only a compatibility fallback for the legacy runtime
-    # channel until #805.
-    "execution": {"runtime": "velites"},
+    # #805: every Agent node owns its execution profile; there is no workflow
+    # default block. The runtime matches the legacy demo Agent definitions.
     # No legacy intake modes (retired in #154): the demo's only path is
     # material/ref items — the user uploads (or picks the seeded sample)
     # knowledge-point markdown and each material becomes one job; the intake

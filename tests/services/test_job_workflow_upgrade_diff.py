@@ -24,6 +24,7 @@ from server.app.workflows.schema import (
     WorkflowEdge,
     WorkflowIntake,
     WorkflowNode,
+    WorkflowNodeExecution,
     WorkflowNodeSkill,
     WorkflowShardSpec,
 )
@@ -69,6 +70,39 @@ def test_capability_and_execution_changes_do_change_definition_hash():
     assert node_definition_hash(replace(node, capability="other")) != node_definition_hash(node)
     assert node_definition_hash(replace(node, inputs=["in.json"])) != node_definition_hash(node)
     assert node_definition_hash(replace(node, outputs=["out.json"])) != node_definition_hash(node)
+
+
+def test_non_agent_execution_dead_values_do_not_change_definition_hash():
+    legacy = _node(
+        "a",
+        execution=WorkflowNodeExecution(provider="top-provider", model="top-model", thinking="low"),
+    )
+    cleaned = _node("a", execution=WorkflowNodeExecution())
+
+    assert node_definition_hash(legacy) == node_definition_hash(cleaned)
+
+
+def test_agent_execution_changes_still_change_definition_hash():
+    node = _node("a", node_type="agent", execution=WorkflowNodeExecution(runtime="velites"))
+    changed = replace(node, execution=replace(node.execution, model="new-model"))
+
+    assert node_definition_hash(changed) != node_definition_hash(node)
+
+
+def test_non_agent_execution_cleanup_does_not_seed_phantom_rerun():
+    old = _definition(
+        {
+            "a": _node("a", execution=WorkflowNodeExecution(provider="dead", model="dead")),
+            "b": _node("b", after=["a"]),
+        },
+        [WorkflowEdge(source="a", target="b")],
+    )
+    new = _definition(
+        {"a": _node("a"), "b": _node("b", after=["a"])},
+        [WorkflowEdge(source="a", target="b")],
+    )
+
+    assert compute_inherit_reset_nodes(old, None, new, None) == set()
 
 
 def test_node_hashes_are_stable_for_identical_definitions():

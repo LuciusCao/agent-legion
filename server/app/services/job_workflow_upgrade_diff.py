@@ -98,6 +98,10 @@ def node_signature(node: WorkflowNode) -> dict[str, Any]:
         payload.pop(field, None)
     # #858：运行时可调保留键（timeout_seconds）不影响产物，不进定义哈希。
     payload["config"] = without_runtime_adjustable(payload.get("config") or {})
+    # #805：v64 曾把顶层 execution 的 provider/model/thinking 烘焙进 code
+    # 节点。non-Agent 从不消费该块；物化迁移清理这些死值不得制造重跑。
+    if node.node_type != "agent":
+        payload.pop("execution", None)
     return payload
 
 
