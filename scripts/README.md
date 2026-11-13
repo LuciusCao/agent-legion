@@ -70,7 +70,7 @@ workspace_libs 包（`e83f9766`）移除。历史用法见 git 历史。
 | `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。由 `make prod-up` / `make prod-down` 调用。`NATIVE_{BACKEND,WORKER}_{BIND,PORT}` 按「进程环境 > 根 `.env`」取值。 |
 | `dotenv-lib.sh` | 运维 shell 脚本共用的 dotenv 解析（仅供 `source`）：`dotenv_lookup` / `dotenv_lookup_first` / `dotenv_lookup_or`，`local-s3-decide.sh`、`dev_stack.sh`、`native-prod-*.sh` 共用一份实现，不要在脚本里再内嵌解析。 |
 | `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
-| `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
+| `seed_from_prod.py` | 从本地 prod Docker stack 只读种子当前 worktree 的派生库/bucket：定义表 + job 抽样 + 全量 materials / 抽样 job_artifacts + S3 server-side copy；目标库/bucket 非本 worktree 派生资源或 endpoint 非 loopback 时 fail-closed。支持 dry-run、HEAD 幂等跳过与部分失败报告；legacy data/ job dir/CAS 保留兼容复制。用法与失败语义见 `docs/postgresql-runbook.md`。 |
 | `seed_dump_projection.py` | `seed_from_prod.py` 第 1 层的 COPY 块列投影（纯函数）：源库落后目标库一个 schema 版本时，剥离目标库已删除的列（如 v91 删除的 workspace key 列）。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 | `gc-s3-jobs.py` | 报告/回收对象存储 `jobs/`、`jobs-staging/` 前缀的孤儿对象（job 删除失败残留、promote 中途失败、staging 滞留；对照 `job_artifacts` 清单行 + 宽限窗判定，#340）与材料根前缀孤儿（v2g 单次使用 key、对象年龄过 max(宽限窗, 1h)、删除前反查无行才删，旧文法只报告，#1314）；默认 dry-run，`--apply` 回收。 |
