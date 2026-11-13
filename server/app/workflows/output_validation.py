@@ -14,6 +14,7 @@ path lives in ``worker_output_validation``.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -46,7 +47,13 @@ def _run_business_rule_validator(
     *,
     timeout_seconds: int,
 ) -> str | None:
-    """Run the skill's business-rule layer (``validate_output.py``) on ``job_dir``."""
+    """Run business rules with an explicit Host context (#1345).
+
+    Agent self-checks use ``AGENT_LEGION_VALIDATE_CONTEXT=agent``. An absent
+    variable retains the legacy full-check behavior; only the exact ``host``
+    value may skip checks of undeclared Agent process files. Declared-output
+    quality checks run in both contexts.
+    """
     validator = skill_dir / "scripts" / "validate_output.py"
     if not validator.is_file():
         return None
@@ -56,6 +63,7 @@ def _run_business_rule_validator(
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
+            env={**os.environ, "AGENT_LEGION_VALIDATE_CONTEXT": "host"},
         )
     except Exception as exc:
         # #204 broad-except audit: convert-to-contract, not a swallow — the

@@ -34,8 +34,9 @@
 运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
 harness 内置引擎校验（存在性、JSON Schema）。
 
-引擎不表达的部分由业务规则层 `scripts/validate_output.py` 校验
-（`python validate_output.py <job_dir>`，退出码 0 为通过）：
+引擎不表达的部分由业务规则层 `scripts/validate_output.py` 校验。Agent 收尾
+自查显式运行 `AGENT_LEGION_VALIDATE_CONTEXT=agent python validate_output.py <job_dir>`；
+Host 复验由平台注入 `host`，两种上下文都执行以下声明产物检查（退出码 0 为通过）：
 
 - `knowledge_point_id` 与输入 `knowledge_point.json` 的 id 一致性——
   跨文件业务规则，引擎不表达，仅业务规则脚本检查；

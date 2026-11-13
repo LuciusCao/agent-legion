@@ -36,9 +36,9 @@
 运行时优先按机器可读契约（本 skill 根目录的 `contract.yaml`）经
 harness 内置引擎校验（存在性、JSON Schema）。
 
-`scripts/validate_output.py` 为业务规则层
-（`python validate_output.py <job_dir>`，退出码 0 为通过），检查项与
-契约一致（空白-only 字符串的严格判定仅业务规则脚本检查，引擎
-`minLength: 1` 只挡空串）。任一不满足则以非零退出码退出并在 stderr
-打印原因，节点判失败。校验只管结构，不代 agent 判断评审内容本身是否
-合理。
+`scripts/validate_output.py` 为业务规则层，检查项与契约一致（空白-only
+字符串的严格判定仅业务规则脚本检查，引擎 `minLength: 1` 只挡空串）。Agent
+收尾自查显式运行 `AGENT_LEGION_VALIDATE_CONTEXT=agent python validate_output.py <job_dir>`；
+Host 复验由平台注入 `host`，两种上下文都执行声明产物检查。任一不满足则以
+非零退出码退出并在 stderr 打印原因，节点判失败。校验只管结构，不代 agent
+判断评审内容本身是否合理。
