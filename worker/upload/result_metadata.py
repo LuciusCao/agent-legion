@@ -19,8 +19,9 @@ MAX_ERROR_MESSAGE_CHARS = 4000
 
 def exit_verdict(exit_code: int, failure: str | None, stderr_tail: bytes) -> tuple[str, str]:
     """(status, error_message) of a finished agent process. ``failure`` is the
-    event-scan attribution the caller already gated (exit-0 model error or the
-    #952 output-truncation attribution); it outranks the exit-code faces."""
+    event-scan attribution the caller already gated (exit-0 model error,
+    explicitly recognized Provider auth failures on exit 1, or the #952
+    output-truncation attribution); it outranks the exit-code faces."""
     if exit_code == 130:
         return "cancelled", "Agent Worker is shutting down"
     if failure:

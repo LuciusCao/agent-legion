@@ -496,6 +496,19 @@ def test_velites_deterministic_call_failure_is_provider_request():
     )
 
 
+def test_velites_provider_auth_failures_are_technical_not_transient():
+    messages = (
+        "provider call failed: HTTP 401: Unauthorized",
+        "provider call failed: HTTP 200 error body: code=401: Authorization apikey is disabled",
+        "provider call failed: HTTP 200 error body: invalid API key",
+        "provider call failed: HTTP 200 error body: API key was revoked",
+    )
+    for message in messages:
+        category, detail = classify_failure(1, message)
+        assert (category, detail) == ("technical", "provider_request")
+        assert not is_transient_retryable(detail)
+
+
 def test_velites_transport_interruptions_are_provider_stream():
     assert classify_failure(
         0,
