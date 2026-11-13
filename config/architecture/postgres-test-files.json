@@ -193,6 +193,8 @@
     "tests/services/test_agent_stock.py",
     "tests/services/test_agent_version_pin.py",
     "tests/services/test_agent_worker_liveness.py",
+    "tests/services/test_artifact_dangling_recovery.py",
+    "tests/services/test_artifact_dangling_recovery_races.py",
     "tests/services/test_artifact_orphan_gc.py",
     "tests/services/test_artifact_store.py",
     "tests/services/test_builtin_agent_seed.py",

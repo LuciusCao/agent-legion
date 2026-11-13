@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from server.app.jobs.queries import JobQueries
 
 _JOB_COLUMNS = """
-  j.id, j.workspace_id, j.status, j.execution_generation, j.created_at,
+  j.id, j.workspace_id, j.status, j.execution_generation, j.created_at, j.storage_dir,
   j.workflow_revision_id, j.workflow_version, j.workflow_definition_hash,
   j.workflow_definition_snapshot_json, j.execution_mode, j.target_node_key
 """
@@ -40,6 +40,69 @@ def _filters(
         clauses.append("(j.created_at, j.id) > (%s, %s)")
         params.extend(after)
     return (f" where {' and '.join(clauses)}" if clauses else ""), params
+
+
+def _job_support(
+    conn: Any, jobs: list[dict[str, Any]], *, lock: bool = False
+) -> list[dict[str, Any]]:
+    if not jobs:
+        return []
+    ids = [str(job["id"]) for job in jobs]
+    workspace_keys = sorted({str(job["workspace_id"]) for job in jobs})
+    suffix = " for update" if lock else ""
+    artifacts = [
+        dict(row)
+        for row in conn.execute(
+            "select * from job_artifacts where job_id = ANY(%s)"
+            f" order by job_id, uploaded_at, node_key{suffix}",
+            (ids,),
+        ).fetchall()
+    ]
+    nodes = [
+        dict(row)
+        for row in conn.execute(
+            "select job_id, node_key, status from job_nodes"
+            f" where job_id = ANY(%s) order by job_id, node_key{suffix}",
+            (ids,),
+        ).fetchall()
+    ]
+    pending_shards = [
+        dict(row)
+        for row in conn.execute(
+            "select distinct job_id, node_key from node_shards"
+            " where job_id = ANY(%s) and status='pending' order by job_id, node_key",
+            (ids,),
+        ).fetchall()
+    ]
+    revisions = [
+        dict(row)
+        for row in conn.execute(
+            "select id, workspace_id, version, definition_hash, definition_json, status"
+            " from workflow_revisions where workspace_id = ANY(%s) and status='active'"
+            " order by workspace_id, version desc",
+            (workspace_keys,),
+        ).fetchall()
+    ]
+    artifacts_by_job: dict[str, list[dict[str, Any]]] = {job_id: [] for job_id in ids}
+    for row in artifacts:
+        artifacts_by_job[str(row["job_id"])].append(row)
+    nodes_by_job: dict[str, list[dict[str, Any]]] = {job_id: [] for job_id in ids}
+    for row in nodes:
+        nodes_by_job[str(row["job_id"])].append(row)
+    shards_by_job: dict[str, list[str]] = {job_id: [] for job_id in ids}
+    for row in pending_shards:
+        shards_by_job[str(row["job_id"])].append(str(row["node_key"]))
+    revisions_by_workspace = {str(row["workspace_id"]): row for row in revisions}
+    return [
+        {
+            **job,
+            "artifacts": artifacts_by_job[str(job["id"])],
+            "nodes": nodes_by_job[str(job["id"])],
+            "pending_shard_nodes": shards_by_job[str(job["id"])],
+            "active_revision": revisions_by_workspace.get(str(job["workspace_id"])),
+        }
+        for job in jobs
+    ]
 
 
 class ArtifactDanglingQueriesMixin(ConnectionQueriesMixin):
@@ -69,65 +132,15 @@ class ArtifactDanglingQueriesMixin(ConnectionQueriesMixin):
                     [*params, limit],
                 ).fetchall()
             ]
-            if not jobs:
-                return []
-            ids = [str(job["id"]) for job in jobs]
-            workspace_keys = sorted({str(job["workspace_id"]) for job in jobs})
-            artifacts = [
-                dict(row)
-                for row in conn.execute(
-                    "select * from job_artifacts where job_id = ANY(%s)"
-                    " order by job_id, uploaded_at, node_key",
-                    (ids,),
-                ).fetchall()
-            ]
-            nodes = [
-                dict(row)
-                for row in conn.execute(
-                    "select job_id, node_key, status from job_nodes"
-                    " where job_id = ANY(%s) order by job_id, node_key",
-                    (ids,),
-                ).fetchall()
-            ]
-            pending_shards = [
-                dict(row)
-                for row in conn.execute(
-                    "select distinct job_id, node_key from node_shards"
-                    " where job_id = ANY(%s) and status='pending'"
-                    " order by job_id, node_key",
-                    (ids,),
-                ).fetchall()
-            ]
-            revisions = [
-                dict(row)
-                for row in conn.execute(
-                    "select id, workspace_id, version, definition_hash, definition_json, status"
-                    " from workflow_revisions where workspace_id = ANY(%s) and status='active'"
-                    " order by workspace_id, version desc",
-                    (workspace_keys,),
-                ).fetchall()
-            ]
+            return _job_support(conn, jobs)
 
-        artifacts_by_job: dict[str, list[dict[str, Any]]] = {job_id: [] for job_id in ids}
-        for row in artifacts:
-            artifacts_by_job[str(row["job_id"])].append(row)
-        nodes_by_job: dict[str, list[dict[str, Any]]] = {job_id: [] for job_id in ids}
-        for row in nodes:
-            nodes_by_job[str(row["job_id"])].append(row)
-        shards_by_job: dict[str, list[str]] = {job_id: [] for job_id in ids}
-        for row in pending_shards:
-            shards_by_job[str(row["job_id"])].append(str(row["node_key"]))
-        revisions_by_workspace = {str(row["workspace_id"]): row for row in revisions}
-        return [
-            {
-                **job,
-                "artifacts": artifacts_by_job[str(job["id"])],
-                "nodes": nodes_by_job[str(job["id"])],
-                "pending_shard_nodes": shards_by_job[str(job["id"])],
-                "active_revision": revisions_by_workspace.get(str(job["workspace_id"])),
-            }
-            for job in jobs
-        ]
+    @staticmethod
+    def artifact_dangling_job_in_transaction(conn: Any, job_id: str) -> dict[str, Any] | None:
+        """Read and row-lock the same complete job projection in a mutation transaction."""
+        row = conn.execute(f"select {_JOB_COLUMNS} from jobs j where j.id=%s", (job_id,)).fetchone()
+        if row is None:
+            return None
+        return _job_support(conn, [dict(row)], lock=True)[0]
 
 
 def artifact_dangling_reader_from_dsn(dsn: str) -> JobQueries:

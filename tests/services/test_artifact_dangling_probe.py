@@ -16,6 +16,7 @@ from server.app.services.artifact_dangling_probe import (
     OBJECT_MISSING,
     OK,
     UNKNOWN,
+    ArtifactHashLimits,
     probe_artifact,
     probe_storage,
 )
@@ -300,3 +301,110 @@ def test_s3_client_streams_list_pages_and_hashes_configuration() -> None:
     assert "private-endpoint" not in str(fingerprint)
     assert "secret-access" not in str(fingerprint)
     assert "secret-key" not in str(fingerprint)
+
+
+def test_hash_limits_allow_the_exact_raw_and_gzip_boundaries() -> None:
+    limits = ArtifactHashLimits(max_stored_bytes=128, max_content_bytes=16, max_seconds=None)
+    for key, content in (("jobs/ws/job/raw", b"exact"), ("jobs/ws/job/gzip.gz", b"exact")):
+        stored = gzip.compress(content, mtime=0) if key.endswith(".gz") else content
+        storage = FakeStorage({key: stored})
+        result = probe_artifact(
+            storage,
+            _row(key, content, size=len(stored)),
+            probe_storage(storage, [key]),
+            limits=limits,
+        )
+        assert result["outcome"] == OK
+        assert result["get"]["stored_bytes_read"] == len(stored)
+        assert result["get"]["content_bytes"] == len(content)
+
+
+def test_stored_head_over_limit_skips_get_and_fails_closed() -> None:
+    key = "jobs/ws/job/large"
+    storage = FakeStorage({key: b"12345"})
+    result = probe_artifact(
+        storage,
+        _row(key, b"12345"),
+        probe_storage(storage, [key]),
+        limits=ArtifactHashLimits(max_stored_bytes=4, max_content_bytes=100),
+    )
+    assert result["outcome"] == UNKNOWN
+    assert result["reason"] == "resource_budget_exceeded"
+    assert result["get"]["reason"] == "stored_bytes_exceeded"
+    assert result["get"]["stored_bytes_read"] == 0
+    assert "content_sha256" not in result["get"]
+    assert storage.get_calls == []
+
+
+def test_gzip_expansion_budget_discards_partial_hash() -> None:
+    key = "jobs/ws/job/bomb.gz"
+    raw = b"a" * 128
+    stored = gzip.compress(raw, mtime=0)
+    assert len(stored) < 64
+    storage = FakeStorage({key: stored})
+    result = probe_artifact(
+        storage,
+        _row(key, raw, size=len(stored)),
+        probe_storage(storage, [key]),
+        limits=ArtifactHashLimits(max_stored_bytes=64, max_content_bytes=32),
+    )
+    assert result["outcome"] == UNKNOWN
+    assert result["reason"] == "resource_budget_exceeded"
+    assert result["get"]["reason"] == "content_bytes_exceeded"
+    assert result["get"]["content_bytes_read"] == len(raw)
+    assert "content_sha256" not in result["get"]
+
+
+def test_continuous_stream_is_cut_off_by_cumulative_stored_budget() -> None:
+    key = "jobs/ws/job/endless"
+
+    class EndlessStorage(FakeStorage):
+        def open_stream(self, storage_key: str):
+            self.get_calls.append(storage_key)
+
+            class Endless:
+                def __init__(self) -> None:
+                    self.reads = 0
+                    self.closed = False
+
+                def read(self, _size: int) -> bytes:
+                    self.reads += 1
+                    return b"x" * 1024
+
+                def close(self) -> None:
+                    self.closed = True
+
+            self.endless = Endless()
+            return self.endless
+
+    storage = EndlessStorage({key: b"head"})
+    result = probe_artifact(
+        storage,
+        _row(key, b"head"),
+        probe_storage(storage, [key]),
+        limits=ArtifactHashLimits(
+            max_stored_bytes=4096, max_content_bytes=1 << 20, max_seconds=None
+        ),
+    )
+    assert result["outcome"] == UNKNOWN
+    assert result["get"]["reason"] == "stored_bytes_exceeded"
+    assert result["get"]["stored_bytes_read"] == 5120
+    assert storage.endless.reads == 5
+    assert storage.endless.closed is True
+
+
+def test_hash_deadline_is_unknown_and_never_accepts_partial_content() -> None:
+    key = "jobs/ws/job/slow"
+    storage = FakeStorage({key: b"slow"})
+    ticks = iter([0.0, 0.5, 2.0])
+    result = probe_artifact(
+        storage,
+        _row(key, b"slow"),
+        probe_storage(storage, [key]),
+        limits=ArtifactHashLimits(max_stored_bytes=10, max_content_bytes=10, max_seconds=1),
+        clock=lambda: next(ticks),
+    )
+    assert result["outcome"] == UNKNOWN
+    assert result["reason"] == "resource_budget_exceeded"
+    assert result["get"]["reason"] == "deadline_exceeded"
+    assert "content_sha256" not in result["get"]

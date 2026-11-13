@@ -1,26 +1,15 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
-from server.app.events.aggregator import broadcast_job_update, record_job_update
-from server.app.jobs.atomic_mutations import JobMutationConflict
-from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
+from server.app.services.job_rerun.commit import commit_rerun as _commit_rerun
 from server.app.services.job_rerun.eligibility import check_rerun_eligibility
-from server.app.services.job_rerun.upstream_guard import raise_if_failed_upstream_in_tx
-from server.app.services.job_reset_closure import rerun_reset_closure
-from server.app.services.job_staged_cleanup import (
-    commit_staged_outputs,
-    delete_rerun_artifact_objects,
-)
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
-
-logger = logging.getLogger(__name__)
 
 
 def resolve_rerun_node(
@@ -70,102 +59,12 @@ def commit_rerun(
     *,
     definition: Any | None = None,
 ) -> JobOperationResult:
-    """Write portion of ``execute_rerun``; the caller has validated eligibility.
-
-    The DB-level guard (lease_guarded_mutation with reject_running_nodes)
-    still re-validates inside the write transaction, so a state change
-    between a batch caller's prefetch and this write fails safely.
-    ``definition`` lets batch callers pass their cached workflow definition.
-    """
+    """Write portion of ``execute_rerun`` with the ordinary unconstrained path."""
     if definition is None:
         definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
             service.job_db, str(job["workspace_id"]), str(job["workspace_id"])
         )
-
-    # #759: stale 面走合并下游（显式边 ∪ 隐式消费边）——loader 不要求 input
-    # 的生产者有显式边，漏掉隐式消费者会让其产物静默基于旧输入。暂存集合
-    # 与重置集合必须是同一个（stage_outputs 不做任何图遍历），否则隐式
-    # 下游的旧产物残留、消费者可能读到旧结果。codex #776 复审 P1：同名
-    # 纯输出生产者一并进重置面（对象键按名，拆分重置会静默串用旧字节），
-    # 由 rerun_reset_closure 统一收敛。
-    affected = sorted(rerun_reset_closure(definition, [actual_node_key]))
-    stale_nodes = [key for key in affected if key != actual_node_key]
-    staged = None
-    deleted_rows: list[dict[str, Any]] = []
-    try:
-        with service.job_db.lease_guarded_mutation(
-            job_id,
-            service._now(),
-            reject_running_nodes=True,
-        ) as conn:
-            # #759 invariant 5：failed-upstream 资格在锁内用当前状态重查
-            # （锁外预检到取锁之间上游可能转 failed）。
-            raise_if_failed_upstream_in_tx(
-                service.job_db,
-                conn,
-                definition,
-                actual_node_key,
-                job_id,
-                "rerun",
-                actual_node_key,
-                stale_nodes=stale_nodes,
-            )
-            staged = service.artifact_service.stage_outputs(job, affected, definition)
-            deleted_rows = service.job_db.mark_nodes_for_rerun_in_transaction(
-                conn,
-                job_id,
-                [actual_node_key],
-                {actual_node_key: stale_nodes},
-                staged_artifact_names=staged.artifact_names,
-            )
-    except JobMutationConflict as exc:
-        if staged is not None:
-            staged.rollback()
-        raise JobOperationError(
-            job_id, "rerun", "skipped", actual_node_key, exc.reason_code, str(exc)
-        ) from exc
-    except JobOperationError:
-        # 锁内 failed-upstream 重查的业务拒绝：回滚暂存后原样抛出（不
-        # 归一化为 rerun_failed）。
-        if staged is not None:
-            staged.rollback()
-        raise
-    except ValueError as exc:
-        if staged is not None:
-            staged.rollback()
-        raise JobOperationError(
-            job_id, "rerun", "failed", actual_node_key, "cleanup_failed", str(exc)
-        ) from exc
-    except Exception as exc:
-        # #204 broad-except audit: terminal safety net of the staged rerun
-        # mutation, mirroring job_execution's run_to arm. The conflict arm
-        # (JobMutationConflict → skipped) and the contract arm (ValueError →
-        # cleanup_failed) are handled above; this arm exists so the staged
-        # artifacts (already moved off their original paths by stage_outputs)
-        # are ALWAYS rolled back before the error is normalized to
-        # JobOperationError — otherwise the node's outputs would vanish from
-        # the job dir while the DB still marks them present.
-        # logger.exception keeps the unexpected kind's traceback.
-        logger.exception("Failed to mark nodes for rerun for job %s", job_id)
-        if staged is not None:
-            staged.rollback()
-        raise JobOperationError(
-            job_id,
-            "rerun",
-            "failed",
-            actual_node_key,
-            "rerun_failed",
-            str(exc),
-        ) from exc
-
-    commit_staged_outputs(staged, job_id, "rerun")
-    delete_rerun_artifact_objects(service.object_store, deleted_rows, job_id, "rerun")
-    notify_schedulable_work()
-    if service.job_event_buffer is not None:
-        record_job_update(service.job_db, service.job_event_buffer, job_id)
-    elif service.job_event_manager is not None:
-        broadcast_job_update(service.job_db, service.job_event_manager, job_id)
-    return _result(job_id, "succeeded", actual_node_key)
+    return _commit_rerun(service, job, job_id, actual_node_key, definition=definition)
 
 
 def execute_rerun_result(
@@ -194,14 +93,3 @@ def commit_rerun_result(
         return commit_rerun(service, job, job_id, actual_node_key, definition=definition)
     except JobOperationError as exc:
         return exc.to_result()
-
-
-def _result(job_id: str, status: str, node_key: str | None = None) -> JobOperationResult:
-    return {
-        "job_id": job_id,
-        "operation": "rerun",
-        "status": status,
-        "node_key": node_key,
-        "reason_code": None,
-        "message": None,
-    }

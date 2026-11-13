@@ -820,17 +820,44 @@ TMP="$(mktemp "$BK/.skills-tar.XXXXXX")" \
   对象缺失」的产物会让依赖它的下游节点停在等待中，job 详情页对应节点显示
   「输入恢复不全，建议重跑 <生产节点>」，按提示重跑生产节点即可。
 
-  需要一份机器可读的悬挂行证据时，在恢复调度前运行（报告含部署标识与对象 key，只留在本地）：
+  需要机器可读的悬挂行证据或受控恢复时，在恢复调度前运行（计划/报告含部署标识与对象 key，只留在本地）。
+  默认 dry-run 的数据库强制只读且不跑 `init_db`，对象存储只执行 HEAD、完整 LIST 和有界流式 GET；不删行/
+  对象、不 rerun、不撤公告、不恢复调度。健康门检查配置指纹与可达性、跨 job 正面对照、空 LIST 误配、unknown
+  和候选阈值。退出码 0 表示证据门通过（可以有候选），1 表示熔断，2 表示未配置对象存储。
+
+  生产 apply 是单独授权维护动作，不由健康报告自动授予。先确认备份、当前版本和恢复窗口，暂停 Host/Worker
+  写入与调度，再根据该实例实测对象规模显式校准两个阈值。下面数值只是工具默认值，不是任何实例的校准结论：
 
   ```bash
-  uv run python -m scripts.clean_dangling_job_artifacts --output "$BK/dangling-job-artifacts.json"
+  uv run python -m scripts.clean_dangling_job_artifacts \
+    --max-candidates 20 --max-candidate-ratio 0.02 --calibrate-thresholds \
+    --hash-max-stored-bytes 1073741824 --hash-max-content-bytes 4294967296 \
+    --hash-max-seconds 60 --output "$BK/dangling-job-artifacts.json"
   ```
 
-  此 M4 工具只有 dry-run：数据库强制只读且不跑 `init_db`，对象存储只执行 HEAD、完整 LIST 和流式 GET；
-  不删行/对象、不 rerun、不撤公告、不恢复调度。健康门检查 bucket 配置指纹与可达性、跨 job 正面对照、
-  空 LIST 误配、unknown、以及候选 20 行/2% 的保守阈值。退出码 0 表示证据门通过（可以有候选），1 表示
-  熔断，2 表示未配置对象存储。阈值尚未完成生产校准，`production_apply_allowed` 恒为 false；当前版本
-  没有 apply，不能把健康报告当作自动修复许可，仍按详情页提示经现有 rerun 重生成产物。
+  hash 对 raw 或 gzip 解压后内容计算 sha256，stored 与解压后累计字节均有上限，单条目 deadline 是协作式
+  上限（持续产出的流也会被累计字节门截断）；超限为 `unknown` 并熔断，绝不会把截断摘要判为匹配。AWS 默认
+  endpoint 为空时，下面的参数写成 `--expected-endpoint=`。逐项审阅计划中的 `unknown`、候选范围、RMW/无
+  生产者/闭包外排除项和 `plan_sha256`，然后在同一维护窗执行：
+
+  ```bash
+  SHA=<审阅后的 plan_sha256>
+  uv run python -m scripts.clean_dangling_job_artifacts \
+    --apply "$BK/dangling-job-artifacts.json" --plan-sha256 "$SHA" \
+    --expected-bucket "$AGENT_LEGION_S3_BUCKET" \
+    --expected-endpoint "$AGENT_LEGION_S3_ENDPOINT" \
+    --output "$BK/dangling-job-artifacts-apply.json"
+  ```
+
+  apply 没有 `--force`，也不允许覆盖计划中的扫描、阈值或 hash 上限。它在首次写库前重算计划，要求配置和
+  全部健康证据通过且新鲜计划哈希与已审计划完全相同；每批最多 20 个 job，每 job 独立经既有 rerun 事务和
+  锁内逐钉复核。首个 stale-plan、竞态或失败即停止后续 job，报告分别列出 `applied`、`not_applied` 与
+  `not_attempted`；此前独立提交不会伪装成批次原子回滚。任何拒绝都应在排除原因后重新 dry-run 审阅，不能
+  用旧计划继续硬闯，尤其部分成功后旧计划必然 stale。
+
+  `applied` 只表示 rerun 突变已提交，不表示生产者已执行完成。确认报告后恢复 Host/Worker：现有 wakeup 丢失
+  时 poll/backoff 仍会发现 pending 生产者；hydration 公告随旧行退役和在途重写撤下。等待生产者完成后，再以
+  新的 dry-run 和产物读取核验恢复结果。真实生产 apply 必须另行授权，开发/测试不得连接真实存量数据执行。
 - **legacy CAS**（D7，有 §2.2.3 备份时）：`artifact_refs` 引用的每个 blob 都在
   `artifacts/<hash 前 2 位>/<hash>`（`server/app/services/artifact_store.py` 的
   `open_blob`），输出为空即通过：
