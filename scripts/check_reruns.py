@@ -23,7 +23,6 @@ Registry: ``tests/flaky_registry.yaml``.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 from datetime import date, timedelta
@@ -43,6 +42,7 @@ from scripts.quality.flaky_registry import (  # noqa: E402  # sys.path first (ab
     load_registry,
 )
 from scripts.quality.flaky_registry_lenient import touched_entry_ids  # noqa: E402
+from scripts.quality.flaky_rerun_reports import load_rerun_nodeids  # noqa: E402
 
 __all__ = [
     "MAX_DEADLINE_WINDOW_DAYS",
@@ -58,21 +58,6 @@ __all__ = [
 
 DEFAULT_REGISTRY = ROOT_DIR / "tests" / "flaky_registry.yaml"
 DEADLINE_WARNING_DAYS = 7
-
-
-def load_rerun_nodeids(paths: list[Path]) -> tuple[set[str], list[Path]]:
-    """Collect rerun nodeids; missing/unreadable reports are skipped, not fatal."""
-    nodeids: set[str] = set()
-    missing: list[Path] = []
-    for path in paths:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            tests = payload.get("tests", [])
-        except (OSError, json.JSONDecodeError, AttributeError):
-            missing.append(path)
-            continue
-        nodeids.update(str(test) for test in tests)
-    return nodeids, missing
 
 
 def evaluate(
@@ -149,6 +134,11 @@ def main(argv: list[str] | None = None) -> int:
         help="pytest_telemetry rerun report; repeatable",
     )
     parser.add_argument(
+        "--require-reports",
+        action="store_true",
+        help="fail when any declared rerun report is missing or unreadable (required CI evidence)",
+    )
+    parser.add_argument(
         "--today",
         type=date.fromisoformat,
         default=None,
@@ -191,6 +181,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     rerun_nodeids, missing = load_rerun_nodeids(args.rerun_report)
+    if args.require_reports and missing:
+        for path in missing:
+            print(f"FAIL: required rerun report is missing or unreadable: {path}", file=sys.stderr)
+        return 1
     lines, violations = evaluate(
         entries,
         rerun_nodeids,
