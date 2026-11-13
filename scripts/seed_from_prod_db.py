@@ -41,9 +41,7 @@ def restore_plain_sql(
     proc.stdin.close()
     stderr = proc.stderr.read() if proc.stderr else b""
     if proc.wait() != 0:
-        raise SeedError(
-            f"psql 恢复 {dump_path.name} 失败:\n{stderr.decode(errors='replace')[-2000:]}"
-        )
+        raise SeedError(f"psql 恢复 {dump_path.name} 失败；stderr {len(stderr)} bytes 已脱敏")
 
 
 def load_csv_transaction(
@@ -66,15 +64,17 @@ def load_csv_transaction(
     proc.stdin.write(f"TRUNCATE {truncate} CASCADE;\n".encode())
     for table in tables:
         proc.stdin.write(build_copy_in_sql(table, columns_by_table[table]).encode() + b"\n")
+        last_byte = b"\n"
         with csv_paths[table].open("rb") as fh:
             for chunk in iter(lambda: fh.read(1024 * 1024), b""):
                 proc.stdin.write(chunk)
-        proc.stdin.write(b"\n\\.\n")
+                last_byte = chunk[-1:]
+        proc.stdin.write(b"\\.\n" if last_byte == b"\n" else b"\n\\.\n")
     proc.stdin.write(b"COMMIT;\n")
     proc.stdin.close()
     stderr = proc.stderr.read() if proc.stderr else b""
     if proc.wait() != 0:
         raise SeedError(
             "Layer 2 psql 事务失败，已回滚全部 Layer 2 行；"
-            f"已复制对象保留供重跑:\n{stderr.decode(errors='replace')[-2000:]}"
+            f"已复制对象保留供重跑；stderr {len(stderr)} bytes 已脱敏"
         )

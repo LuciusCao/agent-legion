@@ -1121,6 +1121,7 @@
     "scripts/seed_dump_projection.py": 47,
     "scripts/seed_from_prod.py": 444,
     "scripts/seed_from_prod_db.py": 66,
+    "scripts/seed_from_prod_env.py": 18,
     "scripts/seed_from_prod_files.py": 63,
     "scripts/seed_from_prod_guard.py": 46,
     "scripts/seed_from_prod_objects.py": 335,
