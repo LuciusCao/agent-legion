@@ -15,10 +15,9 @@ from tests.fakes.artifact_rows import seed_artifact_row
 
 
 def _seed_workspace(c, workspace_id: str) -> None:
-    from tests.helpers import publish_legacy_intake_revision, seed_workspace_agent_definitions
+    from tests.helpers import publish_legacy_intake_revision
 
     c.post("/api/workspaces", json={"id": workspace_id, "name": workspace_id})
-    seed_workspace_agent_definitions(workspace_id)
     publish_legacy_intake_revision(c.app.state.job_db, workspace_id)
 
 

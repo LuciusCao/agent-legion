@@ -14,8 +14,13 @@ from __future__ import annotations
 
 import pytest
 
+from server.app.agent_catalog import AgentDefinition
 from server.app.auth import scoped_tokens
-from tests.helpers import seed_workspace_agent_definitions
+from tests.helpers import (
+    publish_agent_definition,
+    save_agent_definition_draft,
+    seed_workspace_agent_definitions,
+)
 
 _WORKFLOW_KEY = "education_video_problems_generation"
 
@@ -36,22 +41,25 @@ def workspace_id(client, job_db) -> str:
     return str(response.json()["workspace"]["id"])
 
 
-def _draft_agent(client, workspace_id: str, agent_id: str, capability: str) -> dict:
-    saved = client.put(
-        f"/api/agent-definitions/{agent_id}/draft",
-        params={"workspace_id": workspace_id},
-        json={"capability": capability, "runtime": "velites", "skill": "g/s"},
+def _draft_agent(
+    job_db, workspace_id: str, agent_id: str, capability: str, *, created_by: str = "test"
+):
+    return save_agent_definition_draft(
+        job_db.dsn_identity,
+        workspace_id,
+        agent_id,
+        AgentDefinition(capability=capability, runtime="velites", skill="g/s"),
+        created_by=created_by,
     )
-    assert saved.status_code == 200, saved.text
-    return saved.json()
 
 
 def test_list_agent_definitions_returns_all_fields_with_version_metadata(
     client, job_db, workspace_id
 ) -> None:
     scoped, admin_id = _scoped_client(client, job_db)
-    _draft_agent(client, workspace_id, "agent-a", "review_keywords")
-    _draft_agent(client, workspace_id, "agent-b", "generate_questions")
+    created_by = f"user:{admin_id}"
+    _draft_agent(job_db, workspace_id, "agent-a", "review_keywords", created_by=created_by)
+    _draft_agent(job_db, workspace_id, "agent-b", "generate_questions", created_by=created_by)
 
     response = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions")
 
@@ -71,38 +79,21 @@ def test_list_agent_definitions_returns_all_fields_with_version_metadata(
     assert item["definition"]["requires_labels"] == {}
     assert item["definition"]["config_schema"] == {}
     assert item["definition_hash"]
-    assert item["created_by"] == f"user:{admin_id}"
+    assert item["created_by"] == created_by
     assert item["created_at"]
     assert item["published_at"] is None
 
 
-def _admin_publish(client, workspace_id: str, agent_id: str):
-    """Human publish (admin client) asserting the current draft hash (#841)."""
-    params = {"workspace_id": workspace_id}
-    detail = client.get(f"/api/agent-definitions/{agent_id}", params=params).json()
-    return client.post(
-        f"/api/agent-definitions/{agent_id}/publish",
-        params=params,
-        json={"expected_hash": detail["latest"]["definition_hash"]},
-    )
-
-
 def test_list_agent_definitions_latest_beats_published_row(client, job_db, workspace_id) -> None:
     """list_latest semantics: a pending draft v2 shadows the published v1 —
-    the agent sees exactly what the next publish would ship. Publishing is a
-    HUMAN action (the scoped token gets 403 on the publish endpoint — pinned
-    in test_studio_agent_scope.py), so the publish rides the admin client."""
+    the agent sees exactly what the next publish would ship."""
     scoped, _ = _scoped_client(client, job_db)
-    _draft_agent(client, workspace_id, "agent-a", "review_keywords")
-    assert (
-        scoped.post(
-            f"/api/agent-definitions/agent-a/publish?workspace_id={workspace_id}"
-        ).status_code
-        == 403
+    saved = _draft_agent(job_db, workspace_id, "agent-a", "review_keywords")
+    published = publish_agent_definition(
+        job_db.dsn_identity, workspace_id, "agent-a", saved.definition_hash
     )
-    published = _admin_publish(client, workspace_id, "agent-a")
-    assert published.status_code == 200, published.text
-    _draft_agent(client, workspace_id, "agent-a", "review_keywords")
+    assert published.version == 1
+    _draft_agent(job_db, workspace_id, "agent-a", "review_keywords")
 
     listed = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions")
 

@@ -1,6 +1,6 @@
 def test_list_agent_catalog_endpoint(client):
-    # Agent 半区是 workspace 作用域（schema v46）：创建绑定 demo workflow 的
-    # workspace（绑定时自动 seed demo agent 模板）后按其 scope 读取目录。
+    # Agent 半区是 workspace 作用域（schema v46）：创建 demo workspace 后
+    # 显式构造 legacy 历史目录，再按其 scope 读取。
     created = client.post(
         "/api/workspaces",
         json={"id": "education_video_problems_generation", "name": "catalog-ws"},

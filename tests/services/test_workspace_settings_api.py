@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
-from tests.helpers import publish_builtin_revision, seed_workspace_agent_definitions
+from tests.helpers import publish_builtin_revision
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -171,22 +171,17 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
         publish_builtin_revision(c.app.state.job_db, workspace_id)
-        seed_workspace_agent_definitions(workspace_id)
         _inject_write_script_config_schema(workspace_id)
 
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
         assert fetched.status_code == 200
         settings = fetched.json()["settings"]
         assert settings["nodeConfig"] == {}
-        # write_script comes from the Agent catalog; intake_knowledge_points
-        # is an executor capability whose schema is declared in the built-in
-        # executor definitions (D15). publish_content declares no parameters,
-        # but as a code-routed node it still carries the platform-reserved
-        # execution keys (timeout_seconds/sandbox_network, P-0.5 step 1).
-        # #550: agent-routed nodes merge the same reserved keys under their
-        # Agent schema — including schema-less demo agents (review_script /
-        # review_questions / generate_questions), whose timeouts are now
-        # configurable through the regular node-config chain.
+        # Agent nodes read their self-contained schemas; code nodes merge the
+        # platform-reserved execution keys (timeout_seconds/sandbox_network)
+        # with any declared schema. publish_content declares no parameters.
+        # Schema-less agent nodes still expose the reserved keys through the
+        # regular node-config chain.
         assert set(settings["nodeConfigSchemas"]) == {
             "write_script",
             "review_script",
@@ -233,7 +228,6 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
         )
         workspace_id = ws.json()["workspace"]["id"]
         publish_builtin_revision(c.app.state.job_db, workspace_id)
-        seed_workspace_agent_definitions(workspace_id)
         _inject_write_script_config_schema(workspace_id)
 
         unknown_key = c.patch(

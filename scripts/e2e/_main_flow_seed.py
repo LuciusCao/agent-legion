@@ -6,10 +6,10 @@ needs a real LLM for four Agent nodes):
     _start(ref) → intake(code) → draft(velites Agent, stub gateway) → publish(code)
 
 Everything is seeded through the same production services the demo seed
-uses — workspace-scoped node_code (DB published text), a workspace-scoped
-Agent definition (runtime=velites; the skill binding lives on the DAG node,
-at ``latest`` against an in-place git repo created under the skills root)
-and an active workflow revision (which materializes the Agent route).
+uses — workspace-scoped node_code (DB published text) and an active workflow
+revision whose self-contained Agent node declares runtime and binds its skill
+at ``latest`` against an in-place git repo created under the skills root. No
+AgentDefinition row or materialized Agent route is needed.
 Seeding runs BEFORE the backend boots (seed-before-serve):
 the backend's WorkflowWorkerThread builds its scan_entries snapshot at
 startup and direct-DB seeding triggers no reload, so the workspace must
@@ -27,9 +27,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import AgentService
 from server.app.services.node_code_seeding import seed_workspace_node_code
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -41,7 +39,6 @@ logger = logging.getLogger(__name__)
 
 WORKSPACE_ID = "e2e_main_flow"
 WORKSPACE_NAME = "E2E 主流程"
-AGENT_ID = "e2e-stub-agent-v1"
 AGENT_CAPABILITY = "e2e_draft"
 SKILL_KEY = "e2e-main-flow/stub-agent"
 # ``latest`` (#322): the node follows the seeded repo's live HEAD, so no lock
@@ -78,19 +75,15 @@ WORKFLOW_DEFINITION: dict[str, Any] = {
         },
         "draft": {
             "label": "生成草稿",
-            # Explicit type (#284): without it the node normalizes to code,
-            # no Agent route materializes, and dispatch falls to the code
-            # pool where no node code exists.
+            # Explicit type (#284): without it the node normalizes to code
+            # and dispatch falls to the code pool where no node code exists.
             "type": "agent",
             "capability": AGENT_CAPABILITY,
-            # Node-level skill binding (issue #76); the Agent definition
-            # carries no skill anymore.
+            # Self-contained skill binding and execution profile (#76, #935).
             "skill": {"key": SKILL_KEY, "ref": SKILL_REF},
             "after": ["intake"],
             "inputs": [INTAKE_OUTPUT],
             "outputs": [DRAFT_OUTPUT],
-            # #935 (#440 P3): self-contained execution profile — the runtime
-            # the seeded Agent definition declares (velites).
             "execution": {
                 "runtime": "velites",
                 "provider": "gateway",
@@ -229,18 +222,7 @@ def seed_main_flow_workspace(dsn: str, data_dir: Path) -> str:
         codes, WORKSPACE_ID, WORKSPACE_ID, "publish", PUBLISH_NODE_CODE, "e2e seed"
     )
 
-    agents = AgentService(dsn, WORKSPACE_ID)
-    if not agents.list_versions(AGENT_ID):
-        agents.save_draft(
-            AGENT_ID,
-            # The skill binding lives on the DAG node (issue #76), not here.
-            AgentDefinition(capability=AGENT_CAPABILITY, runtime="velites"),
-            created_by="system",
-        )
-        agents.publish(AGENT_ID)
-
-    # Publish after the Agent definition exists so the revision materializes
-    # the draft node's Agent route (exactly one published Agent per capability).
+    # The self-contained draft node publishes without an Agent catalog row.
     WorkflowRevisionService(job_db).ensure_active_revision(
         WORKSPACE_ID, workflow_definition_from_dict(WORKFLOW_DEFINITION)
     )

@@ -219,39 +219,79 @@ def pid_is_running(pid: int) -> bool:
     return tail.split()[0] != "Z" if tail else True
 
 
-def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
-    """Seed the built-in demo Agent definitions into *workspace_id*.
+def save_agent_definition_draft(
+    database_dsn: Any,
+    workspace_id: str,
+    agent_id: str,
+    definition: Any,
+    *,
+    created_by: str = "test",
+) -> Any:
+    """Write one historical Agent draft through the generic lifecycle store."""
+    from server.app.agent_catalog import AgentDefinition
+    from server.app.services.versioned_entities import VersionedEntityStore
 
-    Agent definitions are workspace-scoped (schema v46): the conftest reset no
-    longer seeds a global catalog, so tests that run the demo workflow end to
-    end instantiate the factory templates into their own workspace here.
+    assert isinstance(definition, AgentDefinition)
+    return VersionedEntityStore(database_dsn, "agent").save_draft(
+        agent_id,
+        definition.model_dump(mode="json"),
+        definition.definition_hash(),
+        workspace_id,
+        created_by,
+    )
+
+
+def publish_agent_definition(
+    database_dsn: Any, workspace_id: str, agent_id: str, expected_hash: str
+) -> Any:
+    """Publish a staged historical draft with CAS, then invalidate read caches."""
+    from server.app.services.agent_service import reset_published_agent_cache
+    from server.app.services.versioned_entities import VersionedEntityStore
+
+    published = VersionedEntityStore(database_dsn, "agent").publish(
+        agent_id, workspace_id, expected_hash
+    )
+    reset_published_agent_cache()
+    return published
+
+
+def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
+    """Seed absent legacy demo rows for tests that exercise old resolvers.
+
+    Self-contained workflow tests do not need this fixture. Existing versions,
+    including archived ones, are left untouched.
     """
-    from server.app.agent_catalog.builtin import seed_demo_workspace_agent_definitions
+    from server.app.agent_catalog.builtin import BUILTIN_AGENT_DEFINITIONS
+    from server.app.services.versioned_entities import VersionedEntityStore
     from tests.postgres_support import TEST_DATABASE_URL
 
-    return seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
+    store = VersionedEntityStore(TEST_DATABASE_URL, "agent")
+    seeded: list[str] = []
+    for agent_id, definition in BUILTIN_AGENT_DEFINITIONS.items():
+        if store.list_versions(agent_id, workspace_id):
+            continue
+        saved = save_agent_definition_draft(
+            TEST_DATABASE_URL, workspace_id, agent_id, definition, created_by="system"
+        )
+        publish_agent_definition(TEST_DATABASE_URL, workspace_id, agent_id, saved.definition_hash)
+        seeded.append(agent_id)
+    return seeded
 
 
 def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str, Any]) -> None:
-    """Archive every live Agent version in the given workspaces, then insert
-    *definitions* as published into each of them.
+    """Archive live Agent versions, then publish *definitions* as new history.
 
-    Mirrors the retired ``sync_agent_definitions`` replace semantics for
-    tests, workspace-scoped (schema v46): after the call exactly the given
-    catalog is published in each listed workspace. An empty mapping leaves no
-    published Agents in those workspaces. Missing workspace rows are created
-    (the versioned_entities workspace FK requires the row first). Writes go
-    straight to versioned_entities so tests can stage catalogs the
-    service-level publish guard would reject (e.g. two published Agents
-    sharing one capability for dual-runtime fleets).
+    After the call exactly the given catalog is published in each workspace;
+    older versions remain archived for exact-version/hash resolvers. Missing
+    workspace rows are created for the versioned_entities foreign key.
     """
-    import json as _json
-
     from server.app.agent_catalog import AgentDefinition
     from server.app.db.transaction import write_transaction
     from server.app.services.agent_service import reset_published_agent_cache
+    from server.app.services.versioned_entities import VersionedEntityStore
     from tests.postgres_support import TEST_DATABASE_URL
 
+    assert all(isinstance(definition, AgentDefinition) for definition in definitions.values())
     ids = [workspace_ids] if isinstance(workspace_ids, str) else list(workspace_ids)
     with write_transaction(TEST_DATABASE_URL) as conn:
         for workspace_id in ids:
@@ -259,58 +299,35 @@ def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str,
                 "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
                 (workspace_id,),
             )
-            conn.execute(
-                "update versioned_entities set status='archived'"
-                " where entity_type='agent' and workspace_id=%s"
-                " and status in ('draft', 'published')",
-                (workspace_id,),
+    store = VersionedEntityStore(TEST_DATABASE_URL, "agent")
+    for workspace_id in ids:
+        for entity in store.list_latest(workspace_id):
+            store.archive_all(entity.entity_key, workspace_id)
+        for agent_id, definition in definitions.items():
+            saved = save_agent_definition_draft(
+                TEST_DATABASE_URL,
+                workspace_id,
+                agent_id,
+                definition,
+                created_by="test-seed",
             )
-            for agent_id, definition in definitions.items():
-                assert isinstance(definition, AgentDefinition)
-                latest = conn.execute(
-                    "select max(version) as v from versioned_entities"
-                    " where entity_type='agent' and workspace_id=%s and entity_key=%s",
-                    (workspace_id, agent_id),
-                ).fetchone()
-                version = (
-                    int(latest["v"]) + 1 if latest is not None and latest["v"] is not None else 1
-                )
-                canonical = _json.dumps(
-                    definition.model_dump(mode="json"),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                conn.execute(
-                    "insert into versioned_entities("
-                    "id, entity_type, workspace_id, entity_key, version, status,"
-                    " definition_json, definition_hash, created_by, created_at, published_at)"
-                    " values (%s, 'agent', %s, %s, %s, 'published', %s, %s, 'test-seed',"
-                    " current_timestamp, current_timestamp)",
-                    (
-                        f"agent:{workspace_id}:{agent_id}:v{version}",
-                        workspace_id,
-                        agent_id,
-                        version,
-                        canonical,
-                        definition.definition_hash(),
-                    ),
-                )
+            publish_agent_definition(
+                TEST_DATABASE_URL, workspace_id, agent_id, saved.definition_hash
+            )
     reset_published_agent_cache()
 
 
 def make_workspace_job(client: Any, workspace_id: str, item_id: str | None = None) -> str:
     """Create one job in *workspace_id* through the HTTP intake path.
 
-    Shared scaffolding for the guard suites (#710): seeds the workspace's
-    agent definitions and active revision once per call (idempotent at the
-    service layer), then posts a single direct-ids batch. ``item_id`` makes
-    the source id (and thus the job id) unique per call — mutating endpoint
-    tests consume their job, so callers that need a survivor mint fresh ids.
+    Shared scaffolding for the guard suites (#710): publishes the self-
+    contained legacy-intake revision, then posts a single direct-ids batch.
+    ``item_id`` makes the source id (and thus the job id) unique per call —
+    mutating endpoint tests consume their job, so callers that need a survivor
+    mint fresh ids.
     """
     import time
 
-    seed_workspace_agent_definitions(workspace_id)
     publish_legacy_intake_revision(_job_db_of(client), workspace_id)
     source = item_id or f"item_{int(time.time() * 1000) % 10**9}"
     created = client.post(

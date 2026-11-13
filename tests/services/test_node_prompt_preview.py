@@ -10,10 +10,13 @@ from __future__ import annotations
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.node_prompt_preview import preview_node_prompt, save_node_prompt
-from tests.helpers import publish_builtin_revision
+from tests.helpers import (
+    publish_agent_definition,
+    publish_builtin_revision,
+    save_agent_definition_draft,
+)
 
 _WORKFLOW_KEY = "education_video_problems_generation"
 _DEMO_SKILL = "education-video-problems-generation/write-script"
@@ -80,13 +83,15 @@ def _workspace_with_agent_skill(job_db, name: str) -> str:
     """Workspace whose published Agent for ``custom_cap`` carries a legacy skill."""
     workspace = job_db.create_workspace(name)
     workspace_id = str(workspace["id"])
-    service = AgentService(job_db.dsn_identity, workspace_id)
-    service.save_draft(
+    saved = save_agent_definition_draft(
+        job_db.dsn_identity,
+        workspace_id,
         "custom-agent-v1",
         AgentDefinition(capability="custom_cap", runtime="velites", skill="agent/legacy-skill"),
-        created_by="test",
     )
-    service.publish("custom-agent-v1")
+    publish_agent_definition(
+        job_db.dsn_identity, workspace_id, "custom-agent-v1", saved.definition_hash
+    )
     return workspace_id
 
 
@@ -97,8 +102,8 @@ def test_preview_active_revision_defaults(job_db) -> None:
 
     assert payload["is_default"] is True
     assert payload["custom_instructions"] == ""
-    # publish_builtin_revision 种子 demo Agent 与 demo DAG：write_script 节点
-    # 自带 skill 绑定（#76，节点优先于 Agent 定义）。
+    # publish_builtin_revision 发布自含 demo DAG：write_script 节点自带
+    # skill 绑定（#76），无需 AgentDefinition 历史行。
     assert payload["skill_key"] == _DEMO_SKILL
     assert "撰写教学视频脚本" in payload["default_instructions"]
     assert f"`{_DEMO_SKILL}`" in payload["default_instructions"]

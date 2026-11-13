@@ -29,13 +29,9 @@ def test_create_batch_compensation_failure_does_not_mask_original_error(
     OSError）只记 warning，原始错误上抛（intake 的 create_batch 不做
     ValueError 换型，原类型保持）。"""
     from server.app.services.workflow_revisions import WorkflowRevisionService
-    from tests.helpers import (
-        load_demo_legacy_intake_definition,
-        seed_workspace_agent_definitions,
-    )
+    from tests.helpers import load_demo_legacy_intake_definition
 
     workspace = job_db.create_workspace("ws-comp")
-    seed_workspace_agent_definitions(workspace["id"])
     # The demo workflow retired intake modes (#154); the job-batches intake
     # path needs the legacy variant published as the active revision.
     WorkflowRevisionService(job_db).ensure_active_revision(
@@ -74,13 +70,9 @@ def test_create_batch_compensation_programming_error_propagates(
 ):
     """#204 窄化：补偿路径的编程错误（TypeError）不再被吞——直接上抛。"""
     from server.app.services.workflow_revisions import WorkflowRevisionService
-    from tests.helpers import (
-        load_demo_legacy_intake_definition,
-        seed_workspace_agent_definitions,
-    )
+    from tests.helpers import load_demo_legacy_intake_definition
 
     workspace = job_db.create_workspace("ws-comp2")
-    seed_workspace_agent_definitions(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], load_demo_legacy_intake_definition()
     )
@@ -117,13 +109,9 @@ def test_create_batch_chunk_failure_keeps_partial_run_failed(job_db, settings, a
     """
     from server.app.services.run_partial_failure import PartialRunCreationError
     from server.app.services.workflow_revisions import WorkflowRevisionService
-    from tests.helpers import (
-        load_demo_legacy_intake_definition,
-        seed_workspace_agent_definitions,
-    )
+    from tests.helpers import load_demo_legacy_intake_definition
 
     workspace = job_db.create_workspace("ws-chunk-fail")
-    seed_workspace_agent_definitions(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], load_demo_legacy_intake_definition()
     )
@@ -184,13 +172,9 @@ def test_create_batch_before_first_chunk_failure_deletes_run(
     """codex 轮 1 #2 的另一支：首块前失败（零 job 提交）照旧删除 run 行——
     与旧单事务语义一致，不产生 PartialRunCreationError 的失败现场。"""
     from server.app.services.workflow_revisions import WorkflowRevisionService
-    from tests.helpers import (
-        load_demo_legacy_intake_definition,
-        seed_workspace_agent_definitions,
-    )
+    from tests.helpers import load_demo_legacy_intake_definition
 
     workspace = job_db.create_workspace("ws-empty-fail")
-    seed_workspace_agent_definitions(workspace["id"])
     WorkflowRevisionService(job_db).ensure_active_revision(
         workspace["id"], load_demo_legacy_intake_definition()
     )

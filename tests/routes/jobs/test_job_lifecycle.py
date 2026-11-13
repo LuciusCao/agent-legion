@@ -11,12 +11,8 @@ def _create_workspace(client, name="default", workspace_key="test"):
         "workspace"
     ]["id"]
     # The demo workflow no longer declares intake modes (#154); these tests
-    # post job-batches, so publish the legacy-intake variant. Creation no
-    # longer seeds the factory Agents (v62), so seed them here — agent route
-    # materialization at publish time needs them.
-    from tests.helpers import seed_workspace_agent_definitions
-
-    seed_workspace_agent_definitions(workspace_id)
+    # post job-batches, so publish the legacy-intake variant. Its agent nodes
+    # carry self-contained execution profiles and need no Agent catalog rows.
     publish_legacy_intake_revision(client.app.state.job_db, workspace_id)
     return workspace_id
 
