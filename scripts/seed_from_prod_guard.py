@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import urllib.parse
 from pathlib import Path
+
+import psycopg.conninfo
 
 from scripts.seed_from_prod_db import SeedError
 from scripts.seed_from_prod_objects import expected_dev_resource_names
@@ -20,16 +23,27 @@ def parse_dsn(dsn: str) -> urllib.parse.ParseResult:
     return parsed
 
 
+def _target_hosts(dsn: str) -> list[str]:
+    params = psycopg.conninfo.conninfo_to_dict(dsn)
+    hosts: list[str] = []
+    for key, env in (("host", "PGHOST"), ("hostaddr", "PGHOSTADDR")):
+        value = params.get(key, os.environ.get(env))
+        if value is not None:
+            hosts.extend(str(value).split(","))
+    return hosts
+
+
 def guard_target_dsn(dsn: str) -> None:
-    """Refuse to run against anything that looks like the prod database."""
-    parsed = parse_dsn(dsn)
-    host = parsed.hostname or ""
-    # libpq semantics cover URL-decoding, ?dbname= and PGDATABASE; urlparse alone is insufficient.
+    """Refuse prod names and every non-loopback libpq connection candidate."""
+    parse_dsn(dsn)
     dbname = dsn_database_name(dsn)
     if dbname == PROD_DB_NAME:
         raise SeedError(f"拒绝执行：目标库名 {dbname!r} 与生产库同名，疑似指向生产。")
-    if host not in LOOPBACK_HOSTS:
-        raise SeedError(f"拒绝执行：目标 host {host!r} 不是本机回环地址 {sorted(LOOPBACK_HOSTS)}。")
+    hosts = _target_hosts(dsn)
+    if not hosts or any(host not in LOOPBACK_HOSTS for host in hosts):
+        raise SeedError(
+            f"拒绝执行：目标 host/hostaddr 不是本机回环地址，必须全部为 {sorted(LOOPBACK_HOSTS)}。"
+        )
 
 
 def guard_target_repo(dsn: str, repo_root: Path) -> tuple[str, str]:
@@ -41,23 +55,3 @@ def guard_target_repo(dsn: str, repo_root: Path) -> tuple[str, str]:
             f"拒绝执行：当前 worktree 的目标库必须是 {expected_db!r}，收到 {actual_db!r}。"
         )
     return expected_db, expected_bucket
-
-
-def read_env_file_database_url(env_file: Path) -> str | None:
-    if not env_file.is_file():
-        return None
-    for line in env_file.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        if key.strip() == "AGENT_LEGION_DATABASE_URL":
-            return value.strip().strip('"').strip("'")
-    return None
-
-
-def resolve_target_dsn(environ: dict[str, str], env_file: Path) -> str:
-    dsn = environ.get("AGENT_LEGION_DATABASE_URL") or read_env_file_database_url(env_file)
-    if not dsn:
-        raise SeedError("找不到目标库 DSN：请设置 AGENT_LEGION_DATABASE_URL 或写进 .env。")
-    return dsn

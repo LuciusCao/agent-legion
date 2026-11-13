@@ -41,6 +41,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import seed_from_prod_db as seed_db  # noqa: E402
+from scripts import seed_from_prod_env as seed_env  # noqa: E402
 from scripts import seed_from_prod_guard as guard  # noqa: E402
 from scripts.seed_from_prod_files import copy_artifact_blobs, copy_job_files  # noqa: E402
 from scripts.seed_from_prod_objects import (  # noqa: E402
@@ -185,8 +186,7 @@ def run(cmd: Sequence[str], *, stdin=None, stdout=None) -> subprocess.CompletedP
             for arg in cmd[:6]
         ]
         raise SeedError(
-            f"命令失败 ({proc.returncode}): {' '.join(display)}...\n"
-            f"{proc.stderr.decode(errors='replace')[-2000:]}"
+            f"命令失败 ({proc.returncode}): {' '.join(display)}...\n<redacted-psql-stderr>"
         )
     return proc
 
@@ -474,7 +474,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     prod_data = (compose_dir.parent / "data").resolve()
     dev_data = (REPO_ROOT / "data").resolve()
 
-    dsn = guard.resolve_target_dsn(dict(os.environ), REPO_ROOT / ".env")
+    dsn = seed_env.resolve_target_dsn(dict(os.environ), REPO_ROOT / ".env")
     _expected_db, expected_bucket = guard.guard_target_repo(dsn, REPO_ROOT)
     if args.object_batch_size < 1:
         raise SeedError("--object-batch-size 必须 >= 1")

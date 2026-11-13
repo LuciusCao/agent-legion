@@ -19,16 +19,15 @@ from scripts.seed_from_prod import (  # noqa: E402
     run,
 )
 from scripts.seed_from_prod_db import build_copy_in_sql  # noqa: E402
+from scripts.seed_from_prod_env import (  # noqa: E402
+    read_env_file_database_url,
+    resolve_target_dsn,
+)
 from scripts.seed_from_prod_files import (  # noqa: E402
     artifact_blob_relpath,
     job_storage_relpath,
 )
-from scripts.seed_from_prod_guard import (  # noqa: E402
-    guard_target_dsn,
-    guard_target_repo,
-    read_env_file_database_url,
-    resolve_target_dsn,
-)
+from scripts.seed_from_prod_guard import guard_target_dsn, guard_target_repo  # noqa: E402
 
 pytestmark = pytest.mark.no_db
 
@@ -58,6 +57,33 @@ class TestGuardTargetDsn:
     def test_rejects_non_postgres_scheme(self):
         with pytest.raises(SeedError, match="postgresql://"):
             guard_target_dsn("mysql://127.0.0.1/agent_legion_develop")
+
+    @pytest.mark.parametrize(
+        "dsn",
+        [
+            "postgresql://127.0.0.1/agent_legion_develop?host=remote.invalid",
+            "postgresql://127.0.0.1/agent_legion_develop?hostaddr=192.0.2.1",
+            "postgresql://127.0.0.1/agent_legion_develop?host=localhost&hostaddr=192.0.2.1",
+            "postgresql://127.0.0.1/agent_legion_develop?host=remote.invalid&hostaddr=127.0.0.1",
+            "postgresql://127.0.0.1/agent_legion_develop?host=localhost,remote.invalid",
+            "postgresql://127.0.0.1/agent_legion_develop?hostaddr=127.0.0.1,192.0.2.1",
+        ],
+    )
+    def test_rejects_remote_conninfo_candidates(self, dsn: str):
+        with pytest.raises(SeedError, match="不是本机回环地址"):
+            guard_target_dsn(dsn)
+
+    def test_conninfo_query_host_overrides_url_authority(self):
+        guard_target_dsn("postgresql://remote.invalid/agent_legion_develop?host=localhost")
+        guard_target_dsn(
+            "postgresql://remote.invalid/agent_legion_develop"
+            "?host=localhost,127.0.0.1&hostaddr=127.0.0.1,::1"
+        )
+
+    def test_hostaddr_environment_cannot_bypass_guard(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("PGHOSTADDR", "192.0.2.1")
+        with pytest.raises(SeedError, match="不是本机回环地址"):
+            guard_target_dsn("postgresql://127.0.0.1/agent_legion_develop")
 
 
 class TestResolveTargetDsn:
@@ -161,12 +187,18 @@ class TestSecretRedaction:
 
         monkeypatch.setattr(
             "scripts.seed_from_prod.subprocess.run",
-            lambda *_a, **_k: subprocess.CompletedProcess([], 1, stderr=b"failed"),
+            lambda *_a, **_k: subprocess.CompletedProcess(
+                [],
+                1,
+                stderr=b"psql: postgresql://user:stderr-do-not-print@remote.invalid/dev",
+            ),
         )
         with pytest.raises(SeedError) as caught:
             run(["psql", "postgresql://user:do-not-print@127.0.0.1/dev"])
         assert "do-not-print" not in str(caught.value)
+        assert "stderr-do-not-print" not in str(caught.value)
         assert "<redacted-database-url>" in str(caught.value)
+        assert "<redacted-psql-stderr>" in str(caught.value)
 
 
 class TestTargetRepoGuard:
