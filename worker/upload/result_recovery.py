@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
@@ -89,8 +90,9 @@ def copy_completed_emergency_events(task: UploadTask) -> Path | None:
     source = incident / EMERGENCY_EVENTS_FILENAME
     if not source.is_file() or not completed_emergency_events(source, lease_id=task.lease_id):
         return None
-    target = incident / "recovered"
-    target.mkdir(parents=True, exist_ok=True)
+    staging_root = incident / "recovered"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    target = Path(tempfile.mkdtemp(prefix="attempt-", dir=staging_root))
     with (
         source.open(encoding="utf-8", errors="replace") as src,
         (target / "events.jsonl").open("w", encoding="utf-8") as dst,
@@ -101,12 +103,16 @@ def copy_completed_emergency_events(task: UploadTask) -> Path | None:
                 event = json.loads(line)
             except json.JSONDecodeError:
                 event = None
-            if isinstance(event, dict) and event.get("type") == EMERGENCY_ATTEMPT_EVENT:
+            kind = str(event.get("type") or "") if isinstance(event, dict) else ""
+            if kind == EMERGENCY_ATTEMPT_EVENT:
                 selected = event.get("lease_id") == task.lease_id
                 dst.seek(0)
                 dst.truncate()
                 continue
             if selected:
+                if kind == "agent_start":
+                    dst.seek(0)
+                    dst.truncate()
                 dst.write(line)
     return target
 

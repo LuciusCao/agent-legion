@@ -47,14 +47,18 @@ def _successful_events() -> list[dict[str, Any]]:
 
 
 def _write_emergency(
-    evidence_root: Path, events: list[dict[str, Any]], lease_id: str | None = "lease-1"
+    evidence_root: Path, events: list[dict[str, Any] | str], lease_id: str | None = "lease-1"
 ) -> Path:
     incident = evidence_root / "exec-1__node_a"
     incident.mkdir(parents=True, exist_ok=True)
     dump = incident / state_evidence.EMERGENCY_EVENTS_FILENAME
     attempt = [] if lease_id is None else [{"type": "worker_attempt_start", "lease_id": lease_id}]
     dump.write_text(
-        "".join(json.dumps(event) + "\n" for event in [*attempt, *events]), encoding="utf-8"
+        "".join(
+            event if isinstance(event, str) else json.dumps(event) + "\n"
+            for event in [*attempt, *events]
+        ),
+        encoding="utf-8",
     )
     return dump
 
@@ -171,6 +175,140 @@ def test_recovered_archive_excludes_previous_lease_events(
         "outputs_validation",
         "agent_end",
     ]
+
+
+def test_recovered_archive_excludes_previous_agent_start_in_same_lease(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    _write_emergency(
+        evidence_root,
+        [
+            {"type": "agent_start"},
+            "OLD-ATTEMPT-STDERR\n",
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "length"},
+            },
+            {"type": "outputs_validation", "missing": [], "violations": []},
+            {"type": "agent_end"},
+            {"type": "agent_start"},
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            },
+            {"type": "outputs_validation", "missing": [], "violations": []},
+            {"type": "agent_end"},
+        ],
+    )
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    client = _ArchiveClient()
+    queue = _queue(client)
+    queue.submit(_task(work_root, exit_code=0))
+    queue.shutdown()
+
+    report = client.reports[0]
+    assert report["status"] == "completed"
+    assert "output_truncation" not in report
+    archived = _archive_events(client)
+    assert [event["type"] for event in archived] == [
+        "agent_start",
+        "message_end",
+        "outputs_validation",
+        "agent_end",
+    ]
+    assert [event["message"]["stopReason"] for event in archived if "message" in event] == ["stop"]
+    with tarfile.open(fileobj=io.BytesIO(client.archives[0])) as tar:
+        assert "runs/node_a/worker/agent-stderr.log" not in tar.getnames()
+
+
+def test_sequential_lease_recovery_does_not_reuse_stderr_anchor(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    old_events: list[dict[str, Any] | str] = [
+        {"type": "worker_attempt_start", "lease_id": "lease-old"},
+        {"type": "agent_start"},
+        "OLD-LEASE-STDERR\n",
+        {
+            "type": "message_end",
+            "message": {"role": "assistant", "stopReason": "stop"},
+        },
+        {"type": "outputs_validation", "missing": [], "violations": []},
+        {"type": "agent_end"},
+    ]
+    _write_emergency(evidence_root, old_events, lease_id=None)
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    old_client = _ArchiveClient()
+    old_queue = _queue(old_client)
+    old_queue.submit(_task(work_root, exit_code=0, lease_id="lease-old"))
+    old_queue.shutdown()
+
+    assert old_client.reports[0]["status"] == "completed"
+    with tarfile.open(fileobj=io.BytesIO(old_client.archives[0])) as tar:
+        member = tar.extractfile("runs/node_a/worker/agent-stderr.log")
+        assert member is not None
+        assert b"OLD-LEASE-STDERR" in member.read()
+
+    new_events: list[dict[str, Any] | str] = [
+        {"type": "worker_attempt_start", "lease_id": "lease-new"},
+        *_successful_events(),
+    ]
+    _write_emergency(evidence_root, [*old_events, *new_events], lease_id=None)
+    _execution_dir(work_root)
+    shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+    new_client = _ArchiveClient()
+    new_queue = _queue(new_client)
+    new_queue.submit(_task(work_root, exit_code=0, lease_id="lease-new"))
+    new_queue.shutdown()
+
+    assert new_client.reports[0]["status"] == "completed"
+    assert [event["type"] for event in _archive_events(new_client)] == [
+        "agent_start",
+        "message_end",
+        "outputs_validation",
+        "agent_end",
+    ]
+    with tarfile.open(fileobj=io.BytesIO(new_client.archives[0])) as tar:
+        assert "runs/node_a/worker/agent-stderr.log" not in tar.getnames()
+
+
+def test_recovered_reentry_rebuilds_current_attempt_stderr(
+    tmp_path: Path, evidence_root: Path
+) -> None:
+    work_root = tmp_path / "work"
+    _write_emergency(
+        evidence_root,
+        [
+            {"type": "agent_start"},
+            "CURRENT-LEASE-STDERR\n",
+            *_successful_events()[1:],
+        ],
+    )
+    clients: list[_ArchiveClient] = []
+    for _ in range(2):
+        _execution_dir(work_root)
+        shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
+        client = _ArchiveClient()
+        queue = _queue(client)
+        queue.submit(_task(work_root, exit_code=0))
+        queue.shutdown()
+        clients.append(client)
+
+    for client in clients:
+        assert client.reports[0]["status"] == "completed"
+        assert [event["type"] for event in _archive_events(client)] == [
+            "agent_start",
+            "message_end",
+            "outputs_validation",
+            "agent_end",
+        ]
+        with tarfile.open(fileobj=io.BytesIO(client.archives[0])) as tar:
+            member = tar.extractfile("runs/node_a/worker/agent-stderr.log")
+            assert member is not None
+            assert member.read() == b"CURRENT-LEASE-STDERR"
 
 
 def test_recovered_emergency_events_use_outbound_redaction(
@@ -510,7 +648,14 @@ def test_direct_fallback_preserves_recovered_evidence_directory(
     monkeypatch.setattr(upload_queue, "upload_artifact_direct", failing_direct)
     work_root = tmp_path / "work"
     _execution_dir(work_root)
-    _write_emergency(evidence_root, _successful_events())
+    _write_emergency(
+        evidence_root,
+        [
+            {"type": "agent_start"},
+            "CURRENT-LEASE-STDERR\n",
+            *_successful_events()[1:],
+        ],
+    )
     shutil.rmtree(work_root / "exec-1" / "job" / "runs" / "node_a" / "worker")
     task = _task(work_root, exit_code=0)
     task.artifact_uploads = {"output.json": {"storage_key": "jobs-staging/x", "url": "http://x"}}
@@ -528,6 +673,10 @@ def test_direct_fallback_preserves_recovered_evidence_directory(
         "agent_end",
     ]
     assert list(client.uploads.values()) == [b"{}"]
+    with tarfile.open(fileobj=io.BytesIO(client.archives[0])) as tar:
+        member = tar.extractfile("runs/node_a/worker/agent-stderr.log")
+        assert member is not None
+        assert member.read() == b"CURRENT-LEASE-STDERR"
 
 
 def test_recovered_run_still_fails_when_artifact_upload_is_rejected(
