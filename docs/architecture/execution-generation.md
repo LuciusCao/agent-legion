@@ -112,13 +112,15 @@ brick。现行语义：决策写在 `job-mutation` 锁下只做状态守卫—�
 | 1（最外） | 池级锁：`code-pool` / `agent-ws:<workspace_id>` / `agent-worker:<worker_id>` | claim 与批路径（批的 code-pool 在写事务首句集中决策，#1149）；`workspace_node_limits` 配置写（#1149，共享 code-pool，先于任何 limit 行写）；mutation 侧**永不取** |
 | 1.5 | `artifact-authority:<key>` | promote 事务首句（多 key 升序），串行化产物字节面的备份/copy/登记/恢复；mutation 侧不取，与池锁无共持 |
 | 2 | `job-mutation:<job_id>` | mutation 侧首句；所有执行态写面在池锁之后（或无池锁直接）取；job 创建（`create_job` / `create_jobs_bulk` 每个 chunk）事务首句、先于 mkdir 与任何行锁（#1083） |
-| 3 | `implementation-publication:<workspace_id>` | upgrade guard 事务（无条件，先于 active revision 重读）；发布侧共享（见 2.9） |
+| 2.5 | `artifact-manifest:<job_id>` | 无 lease `record_remote_many` / `_register_row` 写事务首句（按 job_id 排序去重）；recovery 最终 try-lock（见 §4 第 19 条） |
+| 3 | `implementation-publication:<workspace_id>` | upgrade guard 事务（无条件，先于 active revision 重读）；发布侧共享（见 2.9）；recovery 最终 try-lock |
 | 4 | `skill-lock`（全局单文档域） | skill 锁文档写与 upgrade 重验（见 2.9） |
 | 5（最内） | 行锁（`FOR UPDATE` 等） | 各写面自身 |
 
 无环论证：mutation 侧不取池锁也不取 artifact 锁，发布侧不碰 job 行也不取
 job-mutation 锁，跨层只有单向边（artifact-authority → job-mutation；池锁 →
-job-mutation；job-mutation → implementation-publication → skill-lock）。
+job-mutation；job-mutation → artifact-manifest → implementation-publication → skill-lock）。无 lease 登记只取
+artifact-manifest，发布只取 implementation-publication，不存在反向边；普通 rerun 不取 artifact-manifest。
 enqueue 不持池锁、直接取 job-mutation，环保持无环。#1149 的两个新持有者不
 破序：批 claim 的 code-pool 在写事务首句集中获取（先于全部 job-mutation），
 agent-worker 域是 per-worker 的且同 worker 的单条/批写事务都在
@@ -675,14 +677,21 @@ pre-existing 或需后续层设计；评审时按现状接受，不许扩大）�
     另：`.part` 固定暂存名在 hydration 与 claim
     侧 `restore_missing_inputs` 并发恢复同名时互相截断、双方 digest 失
     败后各自重试——自愈，仅浪费一次下载，不修。
-19. **存量悬挂行恢复只有 dry-run（#1019，M4）**：
-    `scripts/clean_dangling_job_artifacts.py` 只生成健康证明与 rerun 计划，不删行、不删对象、不 bump
-    generation、不撤公告、不恢复调度，因此 EXEC-GENERATION-002 没有新增写面。扫描按 latest 行分类，
-    同时钉 execution_generation、定义/节点状态和同名完整行集；对象缺失须双 HEAD 404 + 完整 LIST，
-    hash 须流式重算，任何异常均为 unknown。只有配置/存储健康、跨 job 正面对照、unknown=0 和保守阈值
-    全部通过，且名字落在 live/run-to/rerun closure/staging 范围内时，条目才标记 `actionable`。
-    这不是修复结果：裸删行既不能重启 completed 生产者，还可能撤掉唯一公告。后续 M5 只能在锁内重读并
-    CAS 全部钉点后走现有 rerun；20/2% 阈值未校准前禁止生产 apply。
+19. **存量悬挂行恢复的计划约束 rerun（#1019，M4+M5）**：
+    dry-run 强制只读并按 latest 行分类，钉 execution_generation、定义/执行控制/完整节点状态、同名完整行集和
+    实际 retire 面；对象缺失须双 HEAD 404 + 完整 LIST，hash 须在累计 stored/decoded 字节和单条目 deadline
+    内重算（#1507），任何异常或超限均为 unknown。只有显式校准阈值、配置/存储健康、跨 job 正面对照、
+    unknown=0 和候选阈值全部通过，且名字落在 live/run-to/rerun closure/staging 内时，条目才可 apply。
+    apply 先要求新鲜计划哈希与已审计划完全相同，再逐 job 进入既有 `lease_guarded_mutation` / rerun。
+    锁内重读全部钉点和 live 面，按名 retire 后再次核对实际删除行身份；新 promote/reconciler 行、普通 rerun、
+    active lease/running 或任一钉点变化都使该 job 整事务回滚，staged 文件恢复，不额外 bump generation。
+    COMMIT 前的最后判定是 try 获取 `artifact-manifest:<job_id>` → `implementation-publication:<workspace>` 后
+    最终重读预期提交后投影和 active definition/live 面；无 lease `record_remote_many` / `_register_row` 在写事务
+    首句按 job_id 排序去重持 manifest 锁，发布持既有 publication 锁。锁前已提交写入由重读发现，活跃写令 try
+    失败，锁后写只能 COMMIT 后发生；最终判定后不再写 DB。普通 rerun/默认读取不加新锁，SERIALIZABLE 不能替代该协议。
+    EXEC-GENERATION-002 没有新增写面：仍由 `mark_nodes_for_rerun_in_transaction` 统一退役、bump 和重置，
+    普通 rerun 不带计划守卫。每批最多 20 job、首错停止、逐 job 独立提交并如实报告；RMW/无生产者/闭包外/
+    unknown 不自动处理。生产者经现有 wakeup + poll/backoff 重跑，hydration 公告随旧行退役撤下。
 
 后续方向：评估 immutable/versioned authority key + manifest 原子切换（#759
 复审增补的长期项）；`.result-staging-*` / `.promote-rollback-*` 的进程崩溃残留

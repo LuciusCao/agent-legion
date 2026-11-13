@@ -2,8 +2,9 @@
 
 Only the latest manifest row for each name is probed. ``object_missing``
 requires two HEAD misses plus a complete ``jobs/`` LIST that does not contain
-the key. Hash checks stream raw or gzip-decoded content in bounded chunks.
-Every storage, timeout, or decoding failure is ``unknown`` and therefore not
+the key. Hash checks stream raw or gzip-decoded content with cumulative byte
+and deadline budgets (#1507). Every storage, timeout, budget, or decoding
+failure is ``unknown`` and therefore not
 an actionable recovery candidate.
 """
 
@@ -11,23 +12,24 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Iterator, Mapping
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, BinaryIO, Protocol
 
 from server.app.executors.artifact_restore import HASH_MISMATCH
-from server.app.services.job_artifact_gzip import GunzipStream, is_gzip_key
+from server.app.services.job_rerun.recovery_hash import OK, UNKNOWN, ArtifactHashLimits, stream_hash
+from server.app.services.job_rerun.recovery_hash import (
+    error_evidence as _error_evidence,
+)
 from server.app.storage.s3_client import ObjectHead, S3StorageClient
 from server.app.storage.s3_settings import S3Settings
 from server.app.workflow_worker.hydration_dangling import OBJECT_MISSING
 
-OK = "ok"
 SIZE_MISMATCH = "size_mismatch"
-UNKNOWN = "unknown"
 DANGLING_CANDIDATE_OUTCOMES = frozenset({OBJECT_MISSING, HASH_MISMATCH})
 LIST_PREFIX = "jobs/"
 LIST_PAGE_SIZE = 1000
-HASH_CHUNK_BYTES = 1 << 20
 
 
 def s3_configuration_fingerprint(settings: S3Settings) -> dict[str, str]:
@@ -79,19 +81,6 @@ class S3ArtifactDanglingStorage(S3StorageClient):
 class StorageProbe:
     evidence: dict[str, Any]
     listed_references: frozenset[str]
-
-
-def _error_evidence(exc: Exception) -> dict[str, Any]:
-    evidence: dict[str, Any] = {"type": type(exc).__name__}
-    response = getattr(exc, "response", None)
-    if isinstance(response, Mapping):
-        error = response.get("Error")
-        metadata = response.get("ResponseMetadata")
-        if isinstance(error, Mapping) and error.get("Code") is not None:
-            evidence["code"] = str(error["Code"])
-        if isinstance(metadata, Mapping) and metadata.get("HTTPStatusCode") is not None:
-            evidence["http_status"] = int(metadata["HTTPStatusCode"])
-    return evidence
 
 
 def _head_bucket(storage: ArtifactDanglingStorage) -> dict[str, Any]:
@@ -185,32 +174,13 @@ def _head_attempts(
     return attempts, None
 
 
-def _stream_hash(storage: ArtifactDanglingStorage, key: str) -> dict[str, Any]:
-    digest = hashlib.sha256()
-    content_bytes = 0
-    try:
-        raw = storage.open_stream(key)
-        stream = GunzipStream(raw) if is_gzip_key(key) else raw
-        with stream:
-            while chunk := stream.read(HASH_CHUNK_BYTES):
-                digest.update(chunk)
-                content_bytes += len(chunk)
-    except Exception as exc:
-        # #204 broad-except audit: GET open/read, gzip decode/truncation, and
-        # stream close all fail closed as unknown. Partial digests are dropped;
-        # only the sanitized exception identity is exposed in the report.
-        return {"status": UNKNOWN, "error": _error_evidence(exc)}
-    return {
-        "status": OK,
-        "stored_form": "gzip" if is_gzip_key(key) else "raw",
-        "chunk_bytes": HASH_CHUNK_BYTES,
-        "content_bytes": content_bytes,
-        "content_sha256": digest.hexdigest(),
-    }
-
-
 def probe_artifact(
-    storage: ArtifactDanglingStorage, row: Mapping[str, Any], storage_probe: StorageProbe
+    storage: ArtifactDanglingStorage,
+    row: Mapping[str, Any],
+    storage_probe: StorageProbe,
+    *,
+    limits: ArtifactHashLimits | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
     """Return structured evidence for one latest row without writing anything."""
     key = str(row["storage_key"])
@@ -249,9 +219,16 @@ def probe_artifact(
         result.update(outcome=UNKNOWN, reason="head_list_disagreement")
         return result
 
-    result["get"] = _stream_hash(storage, key)
+    budget = limits or ArtifactHashLimits()
+    result["get"] = stream_hash(storage, key, budget, stored_size=head.size_bytes, clock=clock)
     if result["get"]["status"] != OK:
-        result.update(outcome=UNKNOWN, reason="get_or_decode_failed")
+        reason = (
+            "resource_budget_exceeded"
+            if result["get"].get("reason")
+            in {"stored_bytes_exceeded", "content_bytes_exceeded", "deadline_exceeded"}
+            else "get_or_decode_failed"
+        )
+        result.update(outcome=UNKNOWN, reason=reason)
         return result
     expected_hash = str(row.get("content_hash") or "")
     actual_hash = str(result["get"]["content_sha256"])

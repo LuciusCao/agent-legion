@@ -163,15 +163,16 @@ def test_cli_dry_run_preserves_db_and_object_snapshots(
     assert plan["scan"]["job_ids"] is None
     assert plan["artifacts"] == []
     assert plan["summary"]["outcomes"] == {"ok": 1}
+    assert plan["schema_version"] == 2
     assert plan["recovery"] == {
-        "apply_implemented": False,
+        "apply_implemented": True,
         "rerun_executed": False,
         "manifest_rows_deleted": 0,
         "object_bytes_written": 0,
         "hydration_notices_cleared": False,
         "scheduling_resumed": False,
         "production_apply_allowed": False,
-        "next_step": "M5 constrained rerun after explicit threshold calibration",
+        "next_step": "explicitly calibrate thresholds before apply",
     }
     assert storage.head_calls == [key]
     assert "dry-run only" in capsys.readouterr().err
@@ -213,7 +214,22 @@ def test_keyset_pages_include_complete_supporting_rows(cli_db: JobQueries) -> No
         reader.artifact_dangling_job_page(limit=0)
 
 
-def test_cli_has_no_apply_flag() -> None:
+def test_cli_apply_requires_a_plan_path() -> None:
     with pytest.raises(SystemExit) as exc_info:
         _parser().parse_args(["--apply"])
+    assert exc_info.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--page-size", "0"],
+        ["--hash-max-stored-bytes", "0"],
+        ["--hash-max-content-bytes", "0"],
+        ["--hash-max-seconds", "-1"],
+    ],
+)
+def test_cli_rejects_invalid_page_and_hash_budget_values(argv: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(argv)
     assert exc_info.value.code == 2

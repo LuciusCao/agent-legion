@@ -194,33 +194,56 @@ jobs/{workspace_id}/{job_id}/.v/{version}/{name}[.gz]  # #853 起每次写入
 | 闸拒 / 中途失败的 promote | 新版本 key 孤儿（无行、未签发） | GC / lifecycle |
 | 被取代对象删除前的进行中读取 | 连接中断或 404 | 调用方重取清单（[workspace-api-tokens.md「读取产物」](../workspace-api-tokens.md#读取产物清单直连下载与全链路示例)） |
 
-### 4.6 存量悬挂清单的只读恢复计划（#1019，M4）
+### 4.6 存量悬挂清单的恢复计划与受控 apply（#1019）
 
 `uv run python -m scripts.clean_dangling_job_artifacts [--workspace ID ...] [--job ID ...] [--output PATH]`
-生成确定性的 JSON dry-run 计划；**没有 apply 模式**，不裸删 `job_artifacts`，不写对象、不执行
-rerun、不撤 #887 hydration 公告，也不恢复 workspace 调度。DB 连接强制
-`default_transaction_read_only=on`，不运行 `init_db`；job 按 `(created_at, id)` keyset 分页，每页以
-`REPEATABLE READ READ ONLY` 读取 jobs、节点、pending shards、完整清单行和 active revision。
-legacy 无快照 job 只回退本 workspace 的 active revision。
+生成确定性的 JSON dry-run 计划。dry-run 不删行/对象、不 rerun、不撤公告、不恢复调度；DB 连接强制
+`default_transaction_read_only=on`，不运行 `init_db`。job 按 `(created_at, id)` keyset 分页，每页以
+`REPEATABLE READ READ ONLY` 读取 jobs、节点、pending shards、完整清单行和 active revision；legacy
+无快照 job 只回退本 workspace 的 active revision。
 
-- 每个 `(job, name)` 只探测 `(uploaded_at, node_key)` 决胜的 latest 行，与 hydration/API 同源；计划同时
-  钉住 job 代次、定义与节点状态、同名全部行的 `node_key/storage_key/size_bytes/content_hash/uploaded_at`。
-- `object_missing` 必须同时有两次 HEAD 404 和完整 `jobs/` 分页 LIST 无 key；raw 与 `.gz` 都行式
-  GET，hash 始终对解压后内容重算 sha256，size 仍对存储字节。403/5xx/超时、LIST 不完整、HEAD/LIST
-  矛盾、GET 或 gzip 解码异常一律 `unknown`，不可行动。LIST 只保留与 DB 引用相交的 key，GET 按
-  1 MiB chunk 读取，均不缓存全量 bucket key 或对象字节。
-- 健康证据包括非敏感 bucket/endpoint 配置指纹、`head_bucket`、空 LIST 但 DB 有引用熔断、来自其他
-  job 的非候选 GET+hash 正面对照、`unknown=0`，以及候选数不超过 20 且占扫描 latest 名数不超过 2%。
-  20/2% 是开发初值而非生产校准结论；M4 计划的 `production_apply_allowed` 恒为 false。
+- 每个 `(job, name)` 只探测 `(uploaded_at, node_key)` 决胜的 latest 行，与 hydration/API 同源。schema v2
+  计划钉住 job 代次、执行控制、本地 `storage_dir`、完整节点状态、定义内容及哈希、同名全部行的
+  `node_key/storage_key/size_bytes/content_hash/uploaded_at`，并钉住 rerun 将退役的全部名字行集。
+- `object_missing` 必须同时有两次 HEAD 404 和完整 `jobs/` 分页 LIST 无 key；raw 与 `.gz` 都行式 GET，
+  hash 始终对解压后内容重算 sha256，size 仍对存储字节。403/5xx/超时、LIST 不完整、HEAD/LIST 矛盾、GET
+  或 gzip 解码异常一律 `unknown`。GET 按 1 MiB chunk 读取，默认累计 stored 上限 1 GiB、解压后上限
+  4 GiB、单条目协作式 deadline 60s（#1507）；超限丢弃部分摘要并归类 `unknown`，健康门失败。
+- 健康证据包括非敏感配置指纹、`head_bucket`、空 LIST 但 DB 有引用熔断、来自其他 job 的非候选
+  GET+hash 正面对照、`unknown=0` 和候选数/比例阈值。20/2% 只是开发默认值；只有两个阈值都显式给出并加
+  `--calibrate-thresholds` 才生成 apply-eligible 计划，校准结论与 hash 上限一并进入 `plan_sha256`。
 - 可行动范围复用 `live_probe_names`、run-to `defer_scope`、`rewrite_pending`、`rerun_reset_closure` 和
-  `staging_output_names`。终态分支、休眠坏行、RMW/staging 排除、无现存生产者、在途生产者将重写或
-  job 仍有 running 节点时只报告。计划以 synthetic empty job_dir 计算 live 面，不读取或改写本地缓存；
-  后续 M5 必须在写事务内重新校验全部钉点与当下 live 面，只能经现有 rerun 让按名退役生效。
+  `staging_output_names`。终态分支、休眠坏行、RMW/staging 排除、无现存生产者、在途重写、running 节点、
+  unknown 或闭包越界均只报告，绝不自动处理。
 
-计划不采集墙钟时间，条目排序固定；`plan_sha256` 是移除该字段后 canonical JSON 的 sha256，渲染时再次
-校验，防止报告被改写后冒充原扫描证据。Quality Impact：无 schema/API/auth/UI 变化，无新增生产写面；
-分类、异常、阈值、分页、范围、计划稳定性和隔离 Postgres 零写由 `tests/services/test_artifact_dangling_*`
-与 `tests/scripts/test_clean_dangling_job_artifacts.py` 覆盖。
+apply 只接受 `--apply PLAN --plan-sha256 SHA --expected-bucket B --expected-endpoint E`，没有 `--force`，
+也不接受扫描、阈值或 hash 上限覆盖。首次写库前重算同一 dry-run：当前 bucket/endpoint 和全部配置指纹一致、
+健康门通过，且新鲜计划哈希与已审计划完全相同；随后每 job 再做对象证据和跨 job 正面对照。每批最多 20 个
+job，所有计划和批次健康证明先备妥。
+
+每 job 独立进入既有 `lease_guarded_mutation` / rerun 事务，复查 active lease、running nodes，并在锁内重读
+代次、执行控制、定义、完整节点状态和当下 live 面。计划守卫逐钉比对同名完整行集，按名 retire 后先核对实际
+RETURNING 的 node/key 集合，再在 COMMIT 前依次 try 获取 `artifact-manifest:<job_id>` 与既有
+`implementation-publication:<workspace>`。无 lease `record_remote_many` / `_register_row` 在写事务首句按
+job_id 排序去重获取前者，发布路径本来即持后者。任一锁被活跃写持有即 `stale_plan`；两锁内最终重读预期提交后
+投影（generation+1、seed pending、其余闭包 stale、目标名零行）以及 active definition/live 面，任何漂移同样回滚。
+此后不再写 DB，COMMIT 是唯一后续动作。锁前已提交写入由最终重读发现，活跃写使 try 失败，最终锁后的写入只能
+在 COMMIT 后合法登记。锁序为 job-mutation → artifact-manifest → implementation-publication；普通 rerun 和默认
+读取不加新锁，失败时释放全部锁并恢复 staged 文件。
+
+写面仍是既有 `mark_nodes_for_rerun_in_transaction` / `retire_artifact_rows_by_name` / staged
+rollback / guarded object cleanup，没有新增裸 DELETE 或独立对象回传协议；普通 rerun 不携带计划守卫，行为不变。
+
+首个 stale-plan、健康门或 rerun 失败即停止后续 job。报告逐项区分 `applied`、`not_applied` 与
+`not_attempted`，如实保留此前独立提交，不宣称批次原子。`applied` 仅表示 rerun 突变已提交、生产者已回到
+调度面，不表示新产物已执行完成。公告板在当前进程立即撤下，Host worker 下一轮 poll 也会随旧行退役和生产者
+在途而撤公告；现有 wakeup 通知缺失或回调失败时，poll/backoff 仍会发现 pending 生产者。
+
+计划不采集墙钟时间，条目排序固定；`plan_sha256` 是移除该字段后 canonical JSON 的 sha256。Quality Impact：
+无 schema/API/auth/UI 变化，无新执行写面；隔离 Postgres/fake S3 覆盖逐钉竞态、reconciler、active lease、
+普通 rerun 竞争、raw/gzip、legacy/.v、dry-run 零写、CLI 端到端恢复与首错停止，见
+`tests/services/test_artifact_dangling_{plan,probe,recovery,recovery_races}.py` 和 CLI 测试。真实生产 apply
+仍需单独授权的阈值校准与维护窗，不由开发测试替代。
 
 ### 4.7 材料 TTL
 

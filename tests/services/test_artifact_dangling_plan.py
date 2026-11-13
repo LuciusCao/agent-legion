@@ -14,6 +14,7 @@ from server.app.services.artifact_dangling_plan import (
     build_artifact_dangling_plan,
     render_artifact_dangling_plan,
 )
+from server.app.services.job_rerun.recovery_hash import ArtifactHashLimits
 from server.app.workflows.revision_format import serialize_definition
 from server.app.workflows.schema import (
     WorkflowDefinition,
@@ -245,7 +246,7 @@ def test_control_selection_short_circuits_and_preserves_plan(
     plan = _plan(jobs, FakeStorage(objects))
 
     assert calls == ["job-b", "job-c", "job-b", "job-b"]
-    assert plan["plan_sha256"] == "abe91b16bafc951cf62a2712dc1853320207174040877c3652f7ece1285583b1"
+    assert plan["plan_sha256"] == "a6c61328c2146b334cab767ce88d1a0fded79ca838146261a76707e69c960ead"
     assert plan["artifacts"][0]["positive_controls"] == [
         {
             "workspace_id": "ws",
@@ -318,7 +319,7 @@ def test_no_valid_control_preserves_plan_without_materializing_controls(
     plan = _plan([job], FakeStorage(objects))
 
     assert calls == []
-    assert plan["plan_sha256"] == "d82a6366dde26ee95bd60259c4251f6054b7d0f9ccb2d98e59305907530962f0"
+    assert plan["plan_sha256"] == "40f874a7df0c20eb924a3f2ae63e289c2f478f3f5ed1f19d58d9915340a5ef5c"
     assert plan["summary"]["candidate_count"] == 0
     assert plan["positive_controls"] == []
     assert plan["artifacts"] == []
@@ -356,6 +357,14 @@ def test_latest_tie_complete_row_set_actionable_scope_and_stable_hash() -> None:
     assert entry["rerun"]["seed_node"] == "producer"
     assert entry["rerun"]["reset_closure"] == ["consumer", "producer"]
     assert entry["rerun"]["staging_output_names"] == ["result.json"]
+    assert entry["rerun"]["retire_manifest"] == [
+        {"name": "result.json", "manifest_rows": entry["manifest_rows"]}
+    ]
+    assert entry["job_state"]["node_statuses"] == {
+        "consumer": "pending",
+        "producer": "completed",
+    }
+    assert len(entry["definition"]["resolved_sha256"]) == 64
     assert entry["rerun"]["actionable"] is True
     assert entry["positive_controls"][0]["job_id"] == "job-control"
     assert storage.head_calls.count(latest_key) == 2
@@ -370,7 +379,9 @@ def test_latest_tie_complete_row_set_actionable_scope_and_stable_hash() -> None:
     defaults = build_artifact_dangling_plan(FakeQueries([]), FakeStorage())
     assert defaults["health"]["thresholds"]["max_candidates"] == 20
     assert defaults["health"]["thresholds"]["max_candidate_ratio"] == 0.02
-    assert first["recovery"]["apply_implemented"] is False
+    assert first["schema_version"] == 2
+    assert first["health"]["hash_limits"]["max_stored_bytes"] == 1 << 30
+    assert first["recovery"]["apply_implemented"] is True
     assert first["recovery"]["production_apply_allowed"] is False
     assert render_artifact_dangling_plan(first) == render_artifact_dangling_plan(second)
     assert first["plan_sha256"] == second["plan_sha256"]
@@ -634,3 +645,25 @@ def test_plan_is_json_serializable_without_runtime_timestamps() -> None:
     assert "scanned_at" not in rendered
     assert plan["scan"]["page_count"] == 0
     assert plan["health"]["passed"] is True
+
+
+def test_hash_resource_budget_failure_fuses_plan_health() -> None:
+    candidate = _job("job-a", [_artifact("producer", "jobs/ws/job-a/result.json", b"expected")])
+    control, control_key, control_content = _healthy_job()
+    candidate_key = "jobs/ws/job-a/result.json"
+    storage = FakeStorage({candidate_key: b"x", control_key: control_content})
+
+    plan = _plan(
+        [candidate, control],
+        storage,
+        hash_limits=ArtifactHashLimits(max_stored_bytes=1, max_content_bytes=16),
+    )
+
+    assert plan["summary"]["unknown_count"] == 1
+    assert plan["summary"]["candidate_count"] == 1
+    assert plan["summary"]["actionable_count"] == 0
+    assert plan["health"]["passed"] is False
+    budget_entry = next(entry for entry in plan["artifacts"] if entry["job_id"] == "job-control")
+    assert budget_entry["probe"]["outcome"] == "unknown"
+    assert budget_entry["probe"]["reason"] == "resource_budget_exceeded"
+    assert all(not entry["rerun"]["actionable"] for entry in plan["artifacts"])
