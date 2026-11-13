@@ -102,6 +102,8 @@ class WorkflowTextInput:
 class WorkflowNode:
     key: str
     label: str
+    # Optional label for self-contained agent nodes (#936); code and legacy
+    # agent nodes still require a non-empty capability at definition load.
     capability: str
     after: list[str] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)

@@ -189,9 +189,10 @@ def _load_nodes(
 
         node_type, accepted_item_types, text_input = load_start_fields(raw_node, node_key)
         capability = raw_node.get("capability", "")
-        # start and approval nodes never dispatch, so they carry no capability.
+        # Self-contained agent nodes may omit this optional label; legacy agents
+        # are checked after the effective runtime default has been merged.
         if not isinstance(capability, str) or (
-            not capability and node_type not in ("start", "approval")
+            not capability and node_type not in ("start", "approval", "agent")
         ):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
@@ -283,6 +284,12 @@ def workflow_definition_from_mapping(
 
     intake = load_intake(raw)
     execution, nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
+    for node in nodes.values():
+        if node.node_type == "agent" and not node.execution.runtime and not node.capability:
+            raise WorkflowDefinitionError(
+                f"Node {node.key} legacy agent capability must be a non-empty string;"
+                " declare execution.runtime for a self-contained agent node"
+            )
     edges = _load_edges(raw, nodes, schema_version)
     nodes, edges = ensure_start_node(nodes, edges)
     validate_approval_edges(nodes, edges)

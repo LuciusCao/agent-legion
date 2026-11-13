@@ -21,7 +21,8 @@ export function WorkflowNodeStructuredEditor({
 }: Props) {
   const draftNode = parseWorkflowNode(definitionYaml, node.key) ?? node
   const label = draftNode.label
-  const capability = draftNode.capability ?? node.capability
+  // 草稿节点存在但省略 capability 时就是空标签；不得回显 published 值。
+  const capability = draftNode.capability ?? ''
   // M48：结构字段的「已修改 · 待发布」标记（原型屏 3/4）——compare 报告的
   // 该节点变更字段即数据源；execution-only 变更已被单独归类，不会误挂。
   const studio = useStudioStateOptional()

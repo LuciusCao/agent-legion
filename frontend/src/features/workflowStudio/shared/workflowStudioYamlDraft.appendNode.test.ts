@@ -64,12 +64,23 @@ describe('appendWorkflowNode', () => {
     })
   })
 
-  it('lets a new agent node inherit the workflow top-level runtime (#935)', () => {
+  it('lets a new agent node inherit runtime and keeps capability empty (#935/#936)', () => {
     const out = appendWorkflowNode(`execution:\n  runtime: pi\n${baseYaml}`, {
       nodeType: 'agent',
       key: 'gen',
     })
-    expect(parseNodes(out).nodes?.gen).not.toHaveProperty('execution')
+    const node = parseNodes(out).nodes?.gen
+    expect(node).not.toHaveProperty('execution')
+    expect(node?.capability).toBe('')
+    expect(node?.label).toBe('gen')
+
+    const blank = appendWorkflowNode(baseYaml, {
+      nodeType: 'agent',
+      key: 'blank',
+      capability: '   ',
+    })
+    expect(parseNodes(blank).nodes?.blank?.capability).toBe('')
+    expect(parseNodes(blank).nodes?.blank?.label).toBe('blank')
   })
 
   it('never writes a runtime onto a new code node (#935)', () => {

@@ -16,8 +16,8 @@ import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 // 草稿 YAML 并按目标类型清洗字段。校验失败 toast 提示并保留原类型；
 // 不可恢复错误降级提示手动改 YAML。
 // #405：approval 按契约无 capability、结构化 UI 又隐藏该输入，切回
-// code/agent 的 capability 缺失必须经弹窗随本次切换原子补上（一次
-// 提交，无中间非法态）；已有 capability 的节点维持原直通路径。
+// code 的 capability 缺失必须经弹窗随本次切换原子补上（一次提交，无
+// 中间非法态）；agent 允许空标签，直接切换并归一为 ''。
 export function useNodeTypeSwitch(
   definitionYaml: string,
   nodeKey: string,
@@ -27,12 +27,11 @@ export function useNodeTypeSwitch(
   const showToast = useUiStore((s) => s.showToast)
   return useCallback(
     (nodeTypeTarget: SwitchableNodeType) => {
-      // approval 切出（无 capability）先弹补能力通道（弹窗先于校验，
-      // 取消/留空即放弃本次切换，草稿保持原类型）；其余类型直通。
-      // 手写 approval+capability 的节点已有直通语义——只有 capability
-      // 缺失才弹窗（否则 cancel 会拦下此前合法的切换）。
+      // approval→code 先弹补能力通道（弹窗先于校验，取消/留空即放弃，
+      // 草稿保持原类型）；agent 与其余类型直通。手写 approval+capability
+      // 的节点也直通，避免 cancel 拦下此前合法的切换。
       const needsCapabilityChannel =
-        nodeTypeTarget !== 'approval' &&
+        nodeTypeTarget === 'code' &&
         nodeType === 'approval' &&
         !parseWorkflowNode(definitionYaml, nodeKey)?.capability
       const promptResult = needsCapabilityChannel

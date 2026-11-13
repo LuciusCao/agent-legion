@@ -86,8 +86,10 @@ def profile_from_node(node: Any) -> AgentNodeProfile:
 
     Undeclared ``tools`` fall back to the same default set a fresh Agent
     definition gets; ``skill`` stays empty (the node's own binding is the
-    only source). The projection doubles as the dispatch definition, so its
-    ``definition_hash()`` is the profile hash the request row records.
+    only source). ``capability`` remains an optional label (possibly ``""``)
+    and is never replaced by the node key. The projection doubles as the
+    dispatch definition, so its ``definition_hash()`` is the profile hash the
+    request row records.
     """
     definition = AgentDefinition(
         capability=node.capability,
