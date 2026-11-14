@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 def park_ready_approvals_without_capacity(worker: WorkflowWorkerThread) -> bool:
     """Evaluate only jobs with approval rows, then park their ready gates."""
+    for job_id in worker.job_db.list_terminal_job_ids(list(worker.state.job_evals)):
+        worker.state.job_evals.pop(job_id, None)
     rows = worker.job_db.list_approval_park_candidates()
     if not rows:
         return False
@@ -46,6 +48,8 @@ def park_ready_approvals_without_capacity(worker: WorkflowWorkerThread) -> bool:
                     candidate.job["id"],
                     candidate.node.key,
                     execution_generation=candidate.execution_generation,
+                    control_snapshot=candidate.control_snapshot,
+                    allowed_node_keys=candidate.allowed,
                 )
                 or parked
             )
