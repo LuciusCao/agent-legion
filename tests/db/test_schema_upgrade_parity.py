@@ -43,25 +43,15 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v104, approval_batch) must leave behind so
-# the undo step rewinds a current-shape database to exactly v103.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("approval_decisions", "payload_json", "text"),
-    ("approval_decisions", "batch_id", "text"),
-    ("approval_decisions", "batch_selection", "text"),
-)
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_approval_decisions_batch",)
-_NEWEST_MIGRATION_NAME = "approval_batch"
+# Effects the newest migration (v105, execution retirement) must leave behind
+# so the undo step rewinds a current-shape database to exactly v104.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workflow_execution_retirement_backups",)
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "workflow_execution_defaults_retirement"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
-# Restore the v101 kind vocabulary after removing approve/reject.
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
-    "alter table job_batch_operations drop constraint if exists job_batch_operations_kind_check",
-    "alter table job_batch_operations add constraint job_batch_operations_kind_check "
-    "check(kind in ('rerun', 'rerun_by_failure', 'delete', 'run_to', "
-    "'pause', 'resume', 'upgrade_workflow', 'package', 'clear_packed'))",
-)
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]
