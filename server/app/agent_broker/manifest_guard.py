@@ -64,13 +64,22 @@ def require_unreserved_output_names(manifest: Mapping[str, Any]) -> None:
             )
 
 
-def require_routable_execution(manifest: Mapping[str, Any]) -> None:
-    """Fail fast when the frozen manifest carries no routable provider/model."""
+def require_routable_execution(manifest: Mapping[str, Any], *, node_key: str) -> None:
+    """Fail fast when the frozen request carries no routable execution identity."""
     if manifest.get("kind") == "code":
-        # Code payloads carry no provider/model; routability is the code text
-        # itself (hash-pinned bundle) plus the capability declaration.
-        if not str(manifest.get("capability") or "") or not str(manifest.get("code_hash") or ""):
-            raise ValueError("code request manifest requires a capability and a code_hash")
+        # The request row supplies identity when a manifest omits node_key.
+        # An explicit manifest value must agree with it; capability is only a
+        # label and never an identity fallback.
+        if not isinstance(node_key, str) or not node_key:
+            raise ValueError("code request requires a non-empty node_key")
+        if "node_key" in manifest:
+            manifest_node_key = manifest["node_key"]
+            if not isinstance(manifest_node_key, str) or not manifest_node_key:
+                raise ValueError("code request manifest requires a non-empty node_key")
+            if manifest_node_key != node_key:
+                raise ValueError("code request manifest node_key does not match the request")
+        if not str(manifest.get("code_hash") or ""):
+            raise ValueError("code request manifest requires a node_key and a code_hash")
         return
     execution = manifest.get("execution") or {}
     provider = str(execution.get("provider") or "")

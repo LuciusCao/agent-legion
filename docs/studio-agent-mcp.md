@@ -20,7 +20,7 @@ workflow、预览面板与节点代码 / prompt 相关工具都是**读取 / 校
 **节点代码与节点 prompt**
 
 - `get_node_code`：读节点代码现状（builtin 源码、已发布自定义代码与待发布草稿）。
-- `save_node_code_draft`：存节点代码草稿；`expected_capability` 声明支持新节点骨架草稿。
+- `save_node_code_draft`：存节点代码草稿；`expected_capability` 声明支持新节点骨架草稿。capless code 节点显式传 `''` 可做精确匹配并授权骨架草稿；缺省或 `null` 不授权未知节点骨架，旧非空 match/mismatch 语义不变。
 - `get_node_prompt`：预览节点运行 prompt（平台信封 + 节点指令段；`execution.prompt` 为空时是自动组装的默认指令，非空则整段替代）。
 - `save_node_prompt`：写进未发布 draft YAML 的 `nodes.<key>.execution.prompt`，空串清除回默认。
 

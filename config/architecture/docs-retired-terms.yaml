@@ -173,5 +173,19 @@ terms:
     retired_in: '#1362'
     note: 单请求选择上限已退役；同名旧 env 在 0.8.2 仅保留 deprecation warning，
       现行护栏是增量解析与 workspace backlog 水位
+  - pattern: '\bcode nodes? (?:must|required to) declare (?:a )?non-empty capability\b'
+    retired_in: '#440（code capability 可选化首片）'
+    note: 仅禁止 code 必须声明非空 capability 的旧规则；capless 统一为 ''，
+      旧非空标签保留，不匹配裸 capability 或 agent/legacy resolver 语义
+  - pattern: 'code 节点(?:必须|必填)(?:声明)?非空 capability'
+    retired_in: '#440（code capability 可选化首片）'
+    note: 中文同义旧规则的窄 pattern；code 可省略/空串，null/非字符串仍拒绝
+  - pattern: '节点按 capability 分发'
+    retired_in: '#440（code capability 可选化首片）'
+    note: code 不按 capability 路由；published identity 是 node key，完整性是 code_hash
+  - pattern: '\bcode (?:requests?|nodes?).{0,40}(?:routed|dispatch(?:ed)?).{0,20}(?:by|using|via) capability\b'
+    retired_in: '#440（code capability 可选化首片）'
+    note: 仅禁止 code 按 capability 路由/派发的表述；Worker admission 按协议、
+      code 容量与 workspace ACL，远程身份按 node_key+code_hash
 
 exemptions: []

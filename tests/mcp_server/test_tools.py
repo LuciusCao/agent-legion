@@ -279,16 +279,17 @@ def test_save_node_code_draft_empty_note_becomes_null(recorded) -> None:
     assert "expected_capability" not in calls[0]["json"]
 
 
-def test_save_node_code_draft_forwards_expected_capability(recorded) -> None:
+@pytest.mark.parametrize("capability", ["publish_content", ""])
+def test_save_node_code_draft_forwards_expected_capability(recorded, capability: str) -> None:
     server, calls = recorded
     args = {
         "workspace_id": "ws-1",
         "node_key": "node",
         "code": "def run(job, job_dir, runtime):\n    return {}\n",
-        "expected_capability": "publish_content",
+        "expected_capability": capability,
     }
     _run_tool(server, "save_node_code_draft", args)
-    assert calls[0]["json"]["expected_capability"] == "publish_content"
+    assert calls[0]["json"]["expected_capability"] == capability
 
 
 def test_get_node_code(recorded) -> None:

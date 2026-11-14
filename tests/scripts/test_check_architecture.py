@@ -335,7 +335,11 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
     "definition,expected_error",
     [
         (
-            {"key": "example", "label": "Example", "nodes": {"fetch": {"label": "Fetch"}}},
+            {
+                "key": "example",
+                "label": "Example",
+                "nodes": {"fetch": {"type": "agent", "label": "Fetch"}},
+            },
             "capability must be a non-empty string",
         ),
         (
@@ -369,6 +373,62 @@ def test_rejects_invalid_builtin_workflow_definition(definition, expected_error)
     errors = check_workflow_raw_definitions({"example": definition})
 
     assert any(expected_error in error for error in errors)
+
+
+def _code_builtin_declaration(capability: str | None, runtime_location: str) -> dict:
+    node: dict = {"type": "code"}
+    if capability is not None:
+        node["capability"] = capability
+    raw = {"key": "example", "label": "Example", "nodes": {"fetch": node}}
+    if runtime_location == "workflow":
+        raw["execution"] = {"runtime": "velites"}
+    return raw
+
+
+@pytest.mark.parametrize("capability", [None, ""])
+@pytest.mark.parametrize("runtime_location", ["none", "workflow"])
+def test_builtin_code_capability_may_be_omitted_or_empty(
+    capability: str | None, runtime_location: str
+) -> None:
+    raw = _code_builtin_declaration(capability, runtime_location)
+
+    loaded = workflow_definition_from_mapping(raw)
+
+    assert loaded.nodes["fetch"].capability == ""
+    # Workflow runtime defaults reach agent nodes only; code remains code.
+    assert loaded.nodes["fetch"].execution.runtime == ""
+    assert check_workflow_raw_definitions({"example": raw}) == []
+
+
+@pytest.mark.parametrize("capability", [None, 42, []])
+@pytest.mark.parametrize("node_type", ["code", "agent"])
+@pytest.mark.parametrize("runtime_location", ["none", "node", "workflow"])
+def test_builtin_capability_rejects_null_and_non_strings(
+    capability, node_type: str, runtime_location: str
+) -> None:
+    node = {"type": node_type, "capability": capability}
+    raw = {"key": "example", "label": "Example", "nodes": {"fetch": node}}
+    if runtime_location == "node":
+        node["execution"] = {"runtime": "velites"}
+    elif runtime_location == "workflow":
+        raw["execution"] = {"runtime": "velites"}
+
+    errors = check_workflow_raw_definitions({"example": raw})
+
+    assert any(
+        "fetch" in error and "capability must be a non-empty string" in error for error in errors
+    )
+    with pytest.raises(WorkflowDefinitionError, match="capability must be a non-empty string"):
+        workflow_definition_from_mapping(raw)
+
+
+@pytest.mark.parametrize("node", [{"type": "agent"}, {"type": "agent", "capability": ""}])
+def test_builtin_legacy_agent_capability_still_required(node: dict) -> None:
+    raw = {"key": "example", "label": "Example", "nodes": {"fetch": node}}
+
+    errors = check_workflow_raw_definitions({"example": raw})
+
+    assert any("fetch" in error and "capability" in error for error in errors)
 
 
 def test_rejects_legacy_module_present(tmp_path):
@@ -428,17 +488,13 @@ def test_builtin_agent_optional_capability_matches_loader(
 
 
 @pytest.mark.parametrize("capability", [None, ""])
-@pytest.mark.parametrize("node_type", ["code", "agent"])
-def test_builtin_empty_capability_still_fails_closed_for_code_and_legacy(
-    capability: str | None, node_type: str
+def test_builtin_empty_capability_still_fails_closed_for_legacy_agent(
+    capability: str | None,
 ):
-    node = {"type": node_type}
+    node = {"type": "agent"}
     if capability is not None:
         node["capability"] = capability
     raw = {"key": "ws", "label": "Workspace", "nodes": {"draft": node}}
-    if node_type == "code":
-        # A workflow runtime default never makes a code node self-contained.
-        raw["execution"] = {"runtime": "velites"}
 
     errors = check_workflow_raw_definitions({"ws": raw})
 

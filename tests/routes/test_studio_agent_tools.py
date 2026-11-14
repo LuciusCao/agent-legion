@@ -336,15 +336,51 @@ def test_get_node_code_state_reads_skeleton_node(client, job_db) -> None:
     assert state.json()["draft_code"] == _NODE_CODE
 
 
-def test_save_node_code_draft_rejects_empty_expected_capability(client, job_db) -> None:
-    # min_length=1: an empty string must not bypass the presence gate (#101).
+def test_save_node_code_draft_empty_expected_capability_authorizes_capless_skeleton(
+    client, job_db
+) -> None:
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
-    response = scoped.put(
-        f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/{_NODE_KEY}/code/draft",
-        json={"code": _NODE_CODE, "expected_capability": ""},
-    )
-    assert response.status_code == 422
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/capless_skeleton/code/draft"
+
+    for body in ({"code": _NODE_CODE}, {"code": _NODE_CODE, "expected_capability": None}):
+        response = scoped.put(url, json=body)
+        assert response.status_code == 404
+
+    saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": ""})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["status"] == "draft"
+
+
+def test_existing_capless_code_echoes_string_and_matches_empty_expected_capability(
+    client, job_db
+) -> None:
+    from server.app.services.node_codes import NodeCodeService
+    from server.app.services.workflow_draft_publish import publish_workflow_draft
+
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    codes = NodeCodeService(job_db.dsn_identity)
+    codes.save_draft(workspace_id, workspace_id, "capless", _NODE_CODE, "test seed")
+    codes.publish(workspace_id, workspace_id, "capless")
+    draft = f"key: {workspace_id}\nlabel: Capless\nnodes:\n  capless:\n    type: code\n"
+    ok, errors = publish_workflow_draft(job_db, workspace_id, draft)
+    assert (ok, errors) == (True, [])
+
+    active = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active")
+    assert active.status_code == 200, active.text
+    nodes = active.json()["workflow"]["nodes"]
+    capless = next(node for node in nodes if node["key"] == "capless")
+    assert capless["capability"] == ""
+    assert "capability: ''" in active.json()["definition_yaml"]
+
+    url = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/capless/code/draft"
+    matched = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": ""})
+    assert matched.status_code == 200, matched.text
+    omitted = scoped.put(url, json={"code": _NODE_CODE})
+    assert omitted.status_code == 200, omitted.text
+    mismatched = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": "legacy"})
+    assert mismatched.status_code == 400
 
 
 def test_node_code_tools_404_for_start_node(client, job_db) -> None:

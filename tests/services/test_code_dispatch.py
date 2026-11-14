@@ -244,6 +244,90 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
     )
 
 
+def test_enqueue_capless_code_uses_node_identity_and_empty_protocol_label(job_db, tmp_path) -> None:
+    from dataclasses import replace
+
+    _insert_job(job_db)
+    service = _service(job_db, tmp_path)
+
+    queued = service.enqueue(
+        capability="",
+        capability_config=CodeCapabilityConfig(),
+        workspace={"id": "test-workspace"},
+        job={"id": "job-1"},
+        workflow_key="questions",
+        node=replace(_node(), capability=""),
+        job_dir=tmp_path / "job",
+        log_path=tmp_path / "logs" / "jobs" / "job-1-package.log",
+        inputs=(),
+        code_text=_CODE,
+        custom_code=True,
+        config={},
+        secret_config={},
+    )
+
+    assert queued is True
+    with job_db._connect_read() as conn:
+        row = conn.execute("select * from agent_execution_requests").fetchone()
+    manifest = json.loads(row["manifest_json"])
+    assert row["agent_id"] == ""
+    assert row["node_key"] == "package"
+    assert manifest["capability"] == ""
+    assert manifest["node_key"] == "package"
+    assert manifest["code_hash"] == hashlib.sha256(_CODE.encode()).hexdigest()
+
+
+@pytest.mark.no_db
+def test_code_manifest_guard_accepts_capless_and_request_row_identity() -> None:
+    from server.app.agent_broker.manifest_guard import require_routable_execution
+
+    require_routable_execution(
+        {"kind": "code", "capability": "", "code_hash": "abc123"}, node_key="package"
+    )
+    require_routable_execution(
+        {"kind": "code", "node_key": "package", "code_hash": "abc123"}, node_key="package"
+    )
+    require_routable_execution(
+        {"kind": "code", "node_key": "package", "capability": "legacy", "code_hash": "abc123"},
+        node_key="package",
+    )
+
+
+@pytest.mark.no_db
+@pytest.mark.parametrize("manifest_node_key", ["", None, 7])
+def test_code_manifest_guard_rejects_empty_or_invalid_manifest_identity(
+    manifest_node_key,
+) -> None:
+    from server.app.agent_broker.manifest_guard import require_routable_execution
+
+    with pytest.raises(ValueError, match="node_key"):
+        require_routable_execution(
+            {"kind": "code", "node_key": manifest_node_key, "code_hash": "abc123"},
+            node_key="package",
+        )
+
+
+@pytest.mark.no_db
+def test_code_manifest_guard_requires_identity_and_rejects_mismatch() -> None:
+    from server.app.agent_broker.manifest_guard import require_routable_execution
+
+    for invalid_node_key in ("", None, 7):
+        with pytest.raises(ValueError, match="node_key"):
+            require_routable_execution(
+                {"kind": "code", "node_key": "package", "code_hash": "abc123"},
+                node_key=invalid_node_key,
+            )
+    with pytest.raises(ValueError, match="does not match"):
+        require_routable_execution(
+            {"kind": "code", "node_key": "other", "code_hash": "abc123"},
+            node_key="package",
+        )
+    with pytest.raises(ValueError, match="code_hash"):
+        require_routable_execution(
+            {"kind": "code", "node_key": "package", "code_hash": ""}, node_key="package"
+        )
+
+
 _SENSITIVE_CONFIG = {
     "vault": {"master_key": "fernet-key-material"},
     "auth": {"bootstrap_admin_password": "bootstrap-pw"},

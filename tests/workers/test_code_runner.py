@@ -157,11 +157,21 @@ def test_prepare_stages_code_snapshot_and_inputs(tmp_path: Path) -> None:
     assert not (execution_dir / "bundle" / "manifest.json").exists()
 
 
-def test_prepare_rejects_code_hash_mismatch(tmp_path: Path) -> None:
-    claim = _code_claim(code_hash="0" * 64)
+@pytest.mark.parametrize("capability", ["intake_items", ""])
+def test_prepare_rejects_code_hash_mismatch(tmp_path: Path, capability: str) -> None:
+    claim = _code_claim(capability=capability, code_hash="0" * 64)
     client = FakeClient(_code_bundle(tmp_path))
-    with pytest.raises(ValueError, match="code_hash mismatch"):
+    with pytest.raises(ValueError, match="code_hash mismatch for node 'node_a'"):
         _prepare(tmp_path, claim, client)
+
+
+def test_build_child_payload_preserves_capless_compatibility_fields(tmp_path: Path) -> None:
+    from worker.code_runner import build_child_payload
+
+    payload = build_child_payload(_code_manifest(capability=""), CODE_OK, tmp_path)
+
+    assert payload["runtime"]["capability"] == ""
+    assert payload["runtime"]["node_key"] == "node_a"
 
 
 def test_prepare_rejects_bundle_without_node_code(tmp_path: Path) -> None:

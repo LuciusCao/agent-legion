@@ -88,7 +88,7 @@ def test_legacy_agent_still_requires_its_original_capability(
 
 @pytest.mark.parametrize("node_type", ["code", None])
 @pytest.mark.parametrize("capability", [None, ""])
-def test_code_node_capability_remains_required(
+def test_code_node_capability_defaults_to_empty_optional_label(
     node_type: str | None, capability: str | None
 ) -> None:
     node = _agent(capability)
@@ -100,8 +100,10 @@ def test_code_node_capability_remains_required(
     else:
         node["type"] = node_type
 
-    with pytest.raises(WorkflowDefinitionError, match="capability must be a non-empty string"):
-        workflow_definition_from_mapping(_raw(node))
+    loaded = workflow_definition_from_mapping(_raw(node))
+
+    assert loaded.nodes["draft"].capability == ""
+    assert loaded.nodes["draft"].key == "draft"
 
 
 def test_agent_capability_must_still_be_a_string() -> None:

@@ -51,6 +51,7 @@ def _seed_code_request(
     job_id: str = "job-code-1",
     with_secret: bool = False,
     expected_outputs: list[str] | None = None,
+    capability: str = "package",
 ) -> None:
     """Enqueue a self-contained kind='code' request straight into the broker."""
     with write_transaction(app.state.job_db.dsn_identity) as conn:
@@ -66,7 +67,8 @@ def _seed_code_request(
         conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))
     manifest = {
         "kind": "code",
-        "capability": "package",
+        "node_key": "package",
+        "capability": capability,
         "code_hash": "abc123",
         "job_id": job_id,
         "workspace_id": "test-workspace",
@@ -97,7 +99,7 @@ def _seed_code_request(
             job_id=job_id,
             workflow_key="questions",
             node_key="package",
-            agent_id="package",
+            agent_id=capability,
             agent_definition_hash="abc123",
             manifest=manifest,
             kind="code",
@@ -344,17 +346,28 @@ def _archive_with_files(files: dict[str, str]) -> bytes:
 
 
 def test_code_result_with_expected_outputs_commits_completed(tmp_path: Path) -> None:
-    """Cross-end contract: a completed code result with non-empty
-    expected_outputs commits as completed — the Worker-side upload queue fills
-    the output_artifacts refs (worker/upload/queue.py) that the Host commit
-    requires before promoting outputs (agent_completion.py)."""
+    """A capless code request claims and reports by node identity; the legacy
+    agent_id/lease strings stay shape-compatible while outputs commit."""
     app = _make_app(tmp_path)
-    _seed_code_request(app, expected_outputs=["out.json"])
+    _seed_code_request(app, expected_outputs=["out.json"], capability="")
 
     with TestClient(app) as client:
         _authenticate_admin(client)
         token = _register_code_worker(client)
         claimed = _claim_code(client, token)
+        assert claimed["manifest"]["capability"] == ""
+        assert claimed["manifest"]["node_key"] == "package"
+        with app.state.job_db._connect_read() as conn:
+            request = conn.execute(
+                "select agent_id from agent_execution_requests where execution_id=%s",
+                (claimed["execution_id"],),
+            ).fetchone()
+            lease = conn.execute(
+                "select executor_id from executor_leases where execution_id=%s",
+                (claimed["execution_id"],),
+            ).fetchone()
+        assert request["agent_id"] == ""
+        assert lease["executor_id"] == "agent:code:"
         (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
         # The Worker upload queue pushes each output first (POST /api/artifacts)
         # and reports the returned ref in output_artifacts.

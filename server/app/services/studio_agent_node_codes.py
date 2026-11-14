@@ -1,10 +1,10 @@
 """Node-code read/draft composition for the studio-agent tool surface.
 
 Split from ``studio_agent_tools`` (budget): resolves the node's capability
-from the active revision, applies the ``expected_capability`` contract
-(existing node → validate, mismatch is a 400; unknown node → skeleton draft
-only when the declaration is present), and mirrors the Studio read of
-effective code plus any pending draft.
+label from the active revision, applies the ``expected_capability`` contract
+(existing node → exact string match, mismatch is a 400; unknown node →
+skeleton draft only when the declaration is non-null, including ``''``), and
+mirrors the Studio read of effective code plus any pending draft.
 """
 
 from __future__ import annotations

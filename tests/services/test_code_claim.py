@@ -70,6 +70,63 @@ def test_code_claim_skips_agent_definition_and_returns_kind(job_db) -> None:
     assert run["status"] == "running"
 
 
+def test_capless_code_claim_preserves_protocol_fields_and_node_limit(job_db) -> None:
+    from server.app.agent_broker import AgentExecutionRequest
+
+    broker = _broker(job_db.jobs_dir.parent)
+    for job_id in ("job-1", "job-2"):
+        _insert_code_job_rows(job_db, job_id=job_id)
+        execution_id = broker.enqueue(
+            AgentExecutionRequest(
+                workspace_id="test-workspace",
+                job_id=job_id,
+                workflow_key="questions",
+                node_key="package",
+                agent_id="",
+                agent_definition_hash="abc123",
+                manifest={
+                    "kind": "code",
+                    "node_key": "package",
+                    "capability": "",
+                    "code_hash": "abc123",
+                    "job_id": job_id,
+                    "log_path": f"logs/{job_id}.log",
+                    "config": {},
+                },
+                kind="code",
+            )
+        )
+        assert execution_id is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_limits(workspace_id, node_key, concurrency_limit)"
+            " values ('test-workspace', 'package', 1)"
+        )
+    _register_code_worker(max_code_concurrency=2)
+
+    claimed = broker.claim("worker-code")
+    blocked = broker.claim("worker-code")
+
+    assert claimed is not None
+    assert claimed.agent_id == ""
+    assert claimed.manifest["capability"] == ""
+    assert claimed.manifest["node_key"] == "package"
+    assert blocked is None
+    with job_db._connect_read() as conn:
+        lease = conn.execute(
+            "select executor_id from executor_leases where execution_id=%s",
+            (claimed.execution_id,),
+        ).fetchone()
+        states = conn.execute(
+            "select job_id, state from agent_execution_requests order by job_id"
+        ).fetchall()
+    assert lease["executor_id"] == "agent:code:"
+    assert [(row["job_id"], row["state"]) for row in states] == [
+        ("job-1", "claimed"),
+        ("job-2", "queued"),
+    ]
+
+
 def test_code_claim_records_config_snapshot(job_db) -> None:
     """The manifest config built at enqueue lands on node_runs as the
     dispatch-time audit snapshot (CONFIG-RUNTIME-MUTABLE-001)."""
