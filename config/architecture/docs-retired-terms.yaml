@@ -142,5 +142,13 @@ terms:
     retired_in: '#1362'
     note: 单请求选择上限已退役；同名旧 env 在 0.8.2 仅保留 deprecation warning，
       现行护栏是增量解析与 workspace backlog 水位
+  - pattern: '顶层\s+`?execution(?::|\.runtime)?`?'
+    retired_in: 'schema v105 (#805)'
+    note: workflow 根级 execution 默认块已退役；执行配置只在各 agent 节点
+      authoring。pattern 锚定顶层概念，不匹配活跃的节点 execution.*
+  - pattern: '\btop-level\s+`?execution(?::|\.runtime)?`?'
+    retired_in: 'schema v105 (#805)'
+    note: English equivalent of the retired workflow-root execution default;
+      node-level execution.runtime / provider / model / thinking remains active
 
 exemptions: []

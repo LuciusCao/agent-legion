@@ -367,27 +367,37 @@ Secret handling for code tasks is summarized in §8 (Worker hygiene).
 
 ## 6. Migrating an agent node between runtimes (pi ↔ velites)
 
-`pi` and `velites` are peer runtimes declared per agent node: since 0.7.17
-(#440 P3) every agent node carries its own execution profile in the workflow
-revision (`execution.runtime`, or the workflow top-level default) — Agent
-definitions are read-only history (their write API is deprecated). The
-legacy capability resolution only serves job snapshots frozen before the v93
-inlining and the nodes of an active revision that v93 could not inline: new
-jobs on such a revision keep resolving those nodes by capability until the
-node declares `execution.runtime` and a new revision is published. The yaml `agents:` section
-and the `workflows.pi` block are retired (their presence in yaml fails Host
-startup), and `workflows.pi.flavor` no longer exists: the node's
-`execution.runtime` selects the adapter in the Host-side runtime catalog
-(`server/app/agent_runtime/`), which pins the command builder (pi → pi argv,
-velites → velites argv). openclaw was briefly a third runtime and retired
-with #75 (no streaming events / token metering); new runtimes onboard via
-the same adapter mechanism — see the onboarding guide in
-`docs/architecture/velites-harness.md`.
+`pi` and `velites` are peer runtimes declared per agent node. Since #805 /
+schema v105, a self-contained node's own `execution.runtime` is the only
+authoring source; writing a workflow-root `execution` block fails fast with
+migration guidance. Agent definitions are read-only history (their write API
+is deprecated). The legacy capability resolution only serves job snapshots
+frozen before the v93 inlining and the nodes of an active revision that v93
+could not inline: new jobs on such a revision keep resolving those nodes by
+capability until the node declares `execution.runtime` and a new revision is
+published. The yaml `agents:` section and the `workflows.pi` block are retired
+(their presence in yaml fails Host startup), and `workflows.pi.flavor` no
+longer exists: the node's `execution.runtime` selects the adapter in the
+Host-side runtime catalog (`server/app/agent_runtime/`), which pins the
+command builder (pi → pi argv, velites → velites argv). openclaw was briefly
+a third runtime and retired with #75 (no streaming events / token metering);
+new runtimes onboard via the same adapter mechanism — see the onboarding
+guide in `docs/architecture/velites-harness.md`.
+
+During the v105 upgrade, active revisions and valid Studio drafts have the old
+runtime/provider/model/thinking defaults materialized field-by-field into
+empty agent-node fields; existing node values win, non-agent raw values stay
+unchanged, and a legacy node without a runtime gets no invented default.
+Archived revisions, frozen jobs, queued manifests and Runtime history are not
+rewritten. Old stored revisions/job snapshots remain readable through the
+explicit legacy materializer; only already-queued claims may fall back to
+manifest `execution_defaults` and then the enqueue-frozen execution. These
+compatibility paths preserve frozen behavior and are not authoring channels.
+
 Migrating one agent node to velites — or rolling it back — is a single-field
-edit of the workflow plus a revision publish; no Host restart is required.
-New jobs pick it up immediately; in-flight jobs keep their frozen snapshot
-until they are upgraded (「升级 workflow」). Facts to know before flipping
-the field:
+edit on that node plus a revision publish; no Host restart is required. New
+jobs pick it up immediately; in-flight jobs keep their frozen snapshot until
+they are upgraded (「升级 workflow」). Facts to know before flipping the field:
 
 - **Worker declarations first, definition migration second.** A queued request
   whose runtime no non-revoked Worker declares is failed by the unclaimable
@@ -412,32 +422,32 @@ the field:
   they should switch.
 - **In-flight executions are unaffected.** Manifests are frozen at enqueue;
   claimed/running executions finish on the frozen command spec.
-- **Rollback** is the same single-field operation: publish the workflow back
-  with `execution.runtime: pi` (a workflow top-level default flips every agent
-  node that does not override it).
+- **Rollback** is the same per-node operation: set `execution.runtime: pi`
+  on each affected agent node and publish the workflow. For a fleet-wide
+  rollback, edit every target node explicitly; there is no cross-node default
+  switch.
 - **Sandbox:** the `workflows.pi.velites_no_sandbox` escape hatch is retired
   with the yaml block; `execution.no_sandbox` is always false in manifests, so
   a sandbox incident currently requires a code change, not a config flip.
-- **Execution defaults:** provider/model/thinking come from the workflow-level
-  `execution:` default or per-node Studio overrides (strict chain, no
-  workspace/global fallback) — runtime migration never touches them. Resolved
-  values are validated against the runtime adapter's execution contract:
-  a missing required key or a configured unsupported key fails fast at
-  dispatch and at claim re-resolution.
+- **Execution settings:** set provider/model/thinking in each agent node's
+  `execution.*` (strict chain, no workflow/workspace/global fallback). Runtime
+  migration changes only `execution.runtime`; resolved values are validated
+  against the target runtime adapter's execution contract, and a missing
+  required key or a configured unsupported key fails fast at dispatch and at
+  claim re-resolution.
 
   > **Status note:** the runtime migration described above is complete; the
   > canary playbook is kept as operational context for future runtime changes.
 
 ### 6.1 Self-contained agent nodes and rolling back to 0.7.15 (#933)
 
-From 0.7.16 an agent node may declare its own profile in the workflow YAML
-(`execution.runtime`, optional node-level `requires_labels`; the workflow
-top-level `execution.runtime` is the default). Such a node needs no Agent
-definition: its runtime is switched by editing the workflow and publishing a
-revision, and in-flight jobs pick the change up only through「升级 workflow」
-(the profile is frozen with the job snapshot). Queued requests of these
-nodes are marked `profile_source='node'` in `agent_execution_requests`
-(schema v92), with `agent_id` = node key.
+An agent node declares its own profile in the workflow YAML
+(`execution.runtime`, optional node-level `requires_labels`). Such a node
+needs no Agent definition: its runtime is switched by editing that node and
+publishing a revision, and in-flight jobs pick the change up only through
+「升级 workflow」 (the profile is frozen with the job snapshot). Queued
+requests of these nodes are marked `profile_source='node'` in
+`agent_execution_requests` (schema v92), with `agent_id` = node key.
 
 **Rolling the Host back to 0.7.15** needs no schema step (v92 only added
 columns, which 0.7.15 ignores), but plan for these rows:
