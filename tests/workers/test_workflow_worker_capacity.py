@@ -94,10 +94,16 @@ def test_saturated_executor_skips_scan_and_claims(
 
     scan_calls = _count_calls(monkeypatch, worker, "_runnable_workspaces")
     claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim_many")
+    fat_row_calls = _count_calls(monkeypatch, worker.job_db, "list_jobs_by_ids")
+    node_status_calls = _count_calls(monkeypatch, worker.job_db, "list_job_nodes_for_jobs")
+    approval_probe_calls = _count_calls(monkeypatch, worker.job_db, "list_approval_park_candidates")
 
     assert worker._poll() is False
     assert scan_calls["count"] == 0
     assert claim_calls["count"] == 0
+    assert fat_row_calls["count"] == 0
+    assert node_status_calls["count"] == 0
+    assert approval_probe_calls["count"] == 1
     assert worker.leases.active_counts("code")["global"] == 1
 
     block_event.set()

@@ -46,6 +46,7 @@ from server.app.services.run_partial_failure import (
     raise_compensated_partial_creation,
 )
 from server.app.settings import Settings
+from server.app.workflows.capacity_metadata import node_capacity_requirements
 
 if TYPE_CHECKING:
     from server.app.events import JobEventManager
@@ -177,6 +178,7 @@ class JobCreationPipeline:
             node_keys=list(definition.executable_nodes),
             workspace_id=workspace_id,
             revision=revision,
+            needs_capacity_by_node=node_capacity_requirements(definition),
             frozen_config=node_config,
         )
         if job_ids and notify is not None:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from server.app.jobs.job_id_encoding import encode_job_id
+from server.app.jobs.queries.job_approval_park import JobApprovalParkQueriesMixin
 from server.app.jobs.queries.job_bulk_sql import id_chunks, lock_job_mutations_sorted
 from server.app.jobs.queries.job_list_columns import JOB_LIST_COLUMNS
 from server.app.jobs.queries.job_locked_rereads import JobLockedRereadQueriesMixin
@@ -15,7 +16,10 @@ from server.app.storage_paths import make_data_relative
 
 
 class JobNodeQueriesMixin(
-    JobNodeRunQueriesMixin, JobShardReadQueriesMixin, JobLockedRereadQueriesMixin
+    JobApprovalParkQueriesMixin,
+    JobNodeRunQueriesMixin,
+    JobShardReadQueriesMixin,
+    JobLockedRereadQueriesMixin,
 ):
     jobs_dir: Path
 
@@ -33,6 +37,7 @@ class JobNodeQueriesMixin(
         workflow_version: int | None = None,
         workflow_definition_hash: str = "",
         workflow_definition_snapshot_json: str = "",
+        needs_capacity_by_node: Mapping[str, bool] | None = None,
     ) -> dict[str, Any]:
         job_id = encode_job_id(workspace_id, workflow_key, source_id)
         storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
@@ -81,11 +86,11 @@ class JobNodeQueriesMixin(
             for node_key in node_keys:
                 conn.execute(
                     """
-                    insert into job_nodes(job_id, node_key, status, created_at)
-                    values (%s, %s, 'pending', current_timestamp)
+                    insert into job_nodes(job_id, node_key, status, created_at, needs_capacity)
+                    values (%s, %s, 'pending', current_timestamp, %s)
                     on conflict(job_id, node_key) do nothing
                     """,
-                    (job_id, node_key),
+                    (job_id, node_key, (needs_capacity_by_node or {}).get(node_key, True)),
                 )
             row = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
         if row is None:

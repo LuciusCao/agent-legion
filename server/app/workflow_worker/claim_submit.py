@@ -50,7 +50,11 @@ def try_claim_and_submit(
     # for the pass cadence; a False return (lost race) is simply skipped.
     if node.node_type == APPROVAL_NODE_TYPE:
         return worker.leases.park_awaiting_approval(
-            job["id"], node_key, execution_generation=execution_generation
+            job["id"],
+            node_key,
+            execution_generation=execution_generation,
+            control_snapshot=control_snapshot,
+            allowed_node_keys=allowed_node_keys,
         )
     if node.shard is not None:
         return claim_shard_node(
