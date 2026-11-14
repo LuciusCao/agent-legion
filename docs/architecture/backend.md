@@ -940,7 +940,7 @@ Studio 分离改造把 workflow 编辑分成两条通道。**结构通道**（�
 
 - 端点：`PATCH /workspaces/{id}/workflow-runtime`（body 为完整 definition YAML；结构判定与发布路径共用 `revision_structurally_changed`，结构有差异即 409 拒绝，须走草稿通道）、`GET .../workflow-runtime/versions`（版本历史：时间戳/操作者/变更键清单）、`POST .../workflow-runtime/rollback`（回滚 = 把目标版本的切片应用到当前结构后追加为新版本——目标版本不认识的新增节点保留现值，跨结构变更后结果不等于目标版本原文；历史行永不篡改）。
 - 版本化（schema v102 `workflow_runtime_config_versions`）：每次有实际变更的保存（runtime 端点或草稿发布的 runtime-only 原地臂）在同一事务、同一 implementation-publication 锁下追加一条不可变版本行——每版本即审计行；无变更保存是 no-op。新版本的配置切片与 changed_keys 只含 `nodes.*`，diff 基线取锁内重读的 active 现内容，并发 runtime 保存在锁下串行；旧行及旧键名不改写。
-- 解析链（EXEC-RUNTIME-DISPATCH-001）：dispatch/claim 永远读 active revision 的 definition_json，按节点 `execution.*` → 报错解析，版本表不是解析输入；在途 job 持 intake 冻结快照，快照语义不受 runtime 保存影响。
+- 解析链（EXEC-RUNTIME-DISPATCH-001）：新 dispatch 严格从 active revision 的节点 `execution.*` 解析，必填缺失即报错，版本表不是解析输入；claim 重解析仅对已入队请求保留 current revision 节点值 → manifest `execution_defaults` → enqueue-frozen execution 的只读兼容链，该 fallback 不是新 dispatch 的全局来源；在途 job 持 intake 冻结快照，快照语义不受 runtime 保存影响。
 - 与「升级 workflow」的关系：already_current 判定按 revision id + definition_json 实际内容比对——runtime 保存不改 revision id 但改 definition_json，因此钉在同一 revision 上的既有 job 在 runtime 保存后**不**判 already_current，走既有升级路径把快照 re-pin 到新内容；正在执行的节点不受回追影响（其 manifest/快照在 dispatch/claim 时已冻结）。回滚同理等价于一次 runtime 保存。
 
 ## Database
