@@ -164,6 +164,76 @@ describe('AgentPublishRequestDialog', () => {
     )
   })
 
+  it('confirms the request-bound server draft without a local dirty compare (#1198)', async () => {
+    const draftHash = 'a'.repeat(64)
+    const serverYaml = 'key: w\nlabel: Agent v2\n'
+    mocks.fetchPendingPublishRequest.mockResolvedValue(
+      pendingRecord({ draft_hash: draftHash })
+    )
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'idle', savedAt: '2026-09-03T09:59:00Z' },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({
+      definition_yaml: serverYaml,
+      definition_hash: draftHash,
+      generation: 7,
+    })
+    mocks.confirmPublishRequest.mockResolvedValue({
+      ...pendingRecord({ draft_hash: draftHash }),
+      status: 'confirmed',
+      result_revision_id: 'ws1:demo_video_workflow:v2',
+      resolved_at: '2026-09-03T10:02:00Z',
+    })
+    renderDialog({ compareSummary: null, dirty: false, canSubmit: false })
+
+    const confirmButton = await screen.findByRole('button', {
+      name: '确认发布',
+    })
+    expect(confirmButton).toBeEnabled()
+    await userEvent.click(confirmButton)
+
+    await waitFor(() =>
+      expect(mocks.confirmPublishRequest).toHaveBeenCalledWith('ws1', 'req-1')
+    )
+    expect(studioState.flushDraftSave).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchWorkflowDraft).toHaveBeenCalledWith('ws1')
+    expect(studioState.markDraftPublished).toHaveBeenCalledWith(serverYaml)
+  })
+
+  it('keeps a draft-hash conflict authoritative and does not mark a failed publish (#1198)', async () => {
+    mocks.fetchPendingPublishRequest.mockResolvedValue(
+      pendingRecord({ draft_hash: 'a'.repeat(64) })
+    )
+    studioState.flushDraftSave = vi.fn().mockResolvedValue({
+      ok: true,
+      state: { status: 'saved', savedAt: null },
+    })
+    mocks.fetchWorkflowDraft.mockResolvedValue({
+      definition_yaml: 'key: w\nlabel: Changed later\n',
+      definition_hash: 'b'.repeat(64),
+      generation: 8,
+    })
+    mocks.confirmPublishRequest.mockRejectedValue(
+      Object.assign(new Error('Draft changed since the publish request'), {
+        status: 409,
+      })
+    )
+    renderDialog({ compareSummary: null, dirty: false, canSubmit: false })
+
+    await userEvent.click(
+      await screen.findByRole('button', { name: '确认发布' })
+    )
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toContain(
+        'Draft changed since the publish request'
+      )
+    )
+    expect(mocks.confirmPublishRequest).toHaveBeenCalledTimes(1)
+    expect(studioState.markDraftPublished).not.toHaveBeenCalled()
+  })
+
   // M65 评审 P2-3 钉：镜像 effect 是 pendingRequestId 的唯一写入方——
   // 删掉它，结构卡的「发布请求挂起」引导条会静默消失（引导条测试直接
   // 置 store，不覆盖镜像链路）。
