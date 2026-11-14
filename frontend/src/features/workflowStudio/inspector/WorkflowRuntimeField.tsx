@@ -2,14 +2,12 @@ import editorStyles from './WorkflowStructuredEditor.module.css'
 import { WorkflowRuntimeOptionsDatalist } from './WorkflowRuntimeOptionsDatalist'
 
 /**
- * 节点 execution 输入框：空值继承 workflow 顶层 execution 默认（schema v64
- * 起 workspace 级默认已退役）。options 非空时挂 datalist——在线 Worker
- * 实际声明的 provider/model，自由输入仍然可用。
+ * 节点 execution 输入框。options 非空时挂 datalist——在线 Worker 实际声明的
+ * provider/model，自由输入仍然可用；空值不继承 workflow 顶层配置。
  */
-export function WorkflowRuntimeInheritedField(props: {
+export function WorkflowRuntimeField(props: {
   label: string
   value: string
-  inherited: string
   options?: string[]
   listId?: string
   readOnly?: boolean
@@ -28,7 +26,7 @@ export function WorkflowRuntimeInheritedField(props: {
         className={editorStyles.fieldInput}
         value={props.value}
         disabled={props.readOnly}
-        placeholder="继承 workflow 默认"
+        placeholder="未配置"
         list={props.listId}
         onChange={(event) => props.onChange(event.target.value)}
       />
@@ -37,8 +35,7 @@ export function WorkflowRuntimeInheritedField(props: {
         options={props.options}
       />
       <span className={editorStyles.fieldHint}>
-        {props.value ? '覆盖 workflow 默认' : '继承 workflow 默认'}：
-        {props.inherited || '未配置'}
+        仅作用于当前节点；空值 = 未配置。
       </span>
     </label>
   )

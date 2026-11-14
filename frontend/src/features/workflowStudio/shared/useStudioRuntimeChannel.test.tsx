@@ -207,6 +207,7 @@ describe('useStudioRuntimeChannel（M48 运行通道）', () => {
     expect(ok).toBe(false)
     expect(useUiStore.getState().toast?.type).toBe('error')
     expect(useUiStore.getState().toast?.message).toContain('刷新后重试')
+    expect(result.current.runtimeError).toContain('刷新后重试')
     expect(setDraftYaml).not.toHaveBeenCalled()
   })
 
@@ -233,6 +234,21 @@ describe('useStudioRuntimeChannel（M48 运行通道）', () => {
 
     const [, body] = mocks.save.mock.calls[0]
     expect(body).toContain('model: gpt-5.3')
+  })
+
+  it('含顶层 execution 的 agent 建议整份拒绝，不静默应用节点修改', async () => {
+    const proposal = `execution:\n  provider: openai\n  model: gpt-5.3\n${BASELINE.replace('model: gpt-5.1', 'model: gpt-5.3')}`
+    const { result } = setup({ draftYaml: BASELINE })
+
+    let ok = true
+    await act(async () => {
+      ok = await result.current.saveRuntimeConfig(proposal)
+    })
+
+    expect(ok).toBe(false)
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(result.current.runtimeError).toContain('未应用 agent 建议')
+    expect(result.current.runtimeError).toContain('本次未保存任何修改')
   })
 
   it('M49 连续编辑：两次「应用并生效」各发一次 PATCH（每次生效一条配置版本）', async () => {

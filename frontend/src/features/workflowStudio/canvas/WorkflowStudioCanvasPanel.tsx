@@ -5,6 +5,7 @@ import { WorkflowStudioCanvasToolbar } from './WorkflowStudioCanvasToolbar'
 import { useStudioView } from '../shared/studioStateContext'
 import { StudioCanvasIslands } from '../shared/StudioCanvasIslands'
 import { useCanvasIslandOffset } from '../shared/useCanvasIslandOffset'
+import { WorkflowStudioSaveWarningBanner } from '../shared/WorkflowStudioSaveWarningBanner'
 import canvasStyles from '../../../pages/WorkflowStudioPageCanvas.module.css'
 import canvasToolbarStyles from '../../../pages/WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../../../pages/WorkflowStudioPageResponsive.module.css'
@@ -44,6 +45,7 @@ export function WorkflowStudioCanvasPanel({ mobileActive }: Props) {
           详情列打开时岛自然不越界；窄屏非画布页签的隐藏由画布列 CSS
           承担（data-mobile-panel display:none）。 */}
       <StudioCanvasIslands />
+      <WorkflowStudioSaveWarningBanner floating />
     </main>
   )
 }

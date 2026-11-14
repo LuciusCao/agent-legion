@@ -1,0 +1,29 @@
+.banner {
+  background: #fdecea;
+  border: 1px solid #f5c2c0;
+  padding: 8px 12px;
+}
+
+.banner:not(.floating) {
+  border-width: 0;
+  border-bottom-width: 1px;
+}
+
+.banner > span {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+.banner > span > p {
+  white-space: normal !important;
+}
+
+.floating {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  right: 12px;
+  z-index: 900;
+  max-height: 45%;
+  overflow: auto;
+}

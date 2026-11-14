@@ -54,6 +54,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     requestNodeFocus,
     validationErrors: actions.validationErrors,
     validationMessage: actions.validationMessage,
+    publishError: actions.publishError,
     dirty: draft.dirty,
     canSubmit: draft.canSubmit,
     draftSave: draft.draftSave,
