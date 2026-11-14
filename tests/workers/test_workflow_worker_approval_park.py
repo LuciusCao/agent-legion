@@ -357,6 +357,97 @@ def test_workspace_pause_after_evaluation_blocks_park(
     worker.stop()
 
 
+def test_first_park_carries_current_execution_generation(tmp_path: Path) -> None:
+    definition = _definition()
+    worker = _worker(tmp_path, definition)
+    job = _create_job(worker.job_db, definition, "first-generation", upstream_status="completed")
+    job_id = str(job["id"])
+    with worker.job_db.connect() as conn:
+        conn.execute("update jobs set execution_generation=1 where id=%s", (job_id,))
+
+    assert worker._poll() is True
+    assert _status(worker, job_id, "gate") == "awaiting_approval"
+    assert worker.job_db.get_job_node(job_id, "gate")["execution_generation"] == 1
+    worker.stop()
+
+
+def test_job_pause_between_evaluation_and_park_is_rechecked_in_transaction(
+    tmp_path: Path,
+) -> None:
+    definition = _definition()
+    worker = _worker(tmp_path, definition)
+    job = _create_job(worker.job_db, definition, "pause-before-park", upstream_status="completed")
+    job_id = str(job["id"])
+    original = worker.leases.park_awaiting_approval
+    paused = False
+
+    def pause_then_park(job_id_arg: str, node_key: str, **kwargs):
+        nonlocal paused
+        if not paused:
+            paused = worker.job_db.mark_execution_paused(job_id_arg, "operator") is True
+            assert paused is True
+        return original(job_id_arg, node_key, **kwargs)
+
+    worker.leases.park_awaiting_approval = pause_then_park
+
+    assert worker._poll() is False
+    assert worker.job_db.get_job(job_id)["execution_paused"] == 1
+    assert _status(worker, job_id, "gate") == "pending"
+    assert worker.job_db.clear_execution_paused(job_id) is True
+    assert worker._poll() is True
+    assert _status(worker, job_id, "gate") == "awaiting_approval"
+    worker.stop()
+
+
+def test_until_node_change_between_evaluation_and_park_is_rechecked_in_transaction(
+    tmp_path: Path,
+) -> None:
+    definition = _definition()
+    worker = _worker(tmp_path, definition)
+    job = _create_job(worker.job_db, definition, "until-before-park", upstream_status="completed")
+    job_id = str(job["id"])
+    original = worker.leases.park_awaiting_approval
+    changed = False
+
+    def retarget_then_park(job_id_arg: str, node_key: str, **kwargs):
+        nonlocal changed
+        if not changed:
+            worker.job_db.set_job_execution_mode(job_id_arg, "until_node", target_node_key="run")
+            changed = True
+        return original(job_id_arg, node_key, **kwargs)
+
+    worker.leases.park_awaiting_approval = retarget_then_park
+
+    assert worker._poll() is False
+    assert changed is True
+    assert _status(worker, job_id, "gate") == "pending"
+    worker.job_db.clear_job_execution_target(job_id)
+    assert worker._poll() is True
+    assert _status(worker, job_id, "gate") == "awaiting_approval"
+    worker.stop()
+
+
+def test_terminal_cache_cleanup_retains_active_full_evaluation(tmp_path: Path) -> None:
+    definition = _definition()
+    worker = _worker(tmp_path, definition)
+    terminal = _create_job(worker.job_db, definition, "terminal", upstream_status="completed")
+    active = _create_job(worker.job_db, definition, "active", upstream_status="completed")
+    terminal_id = str(terminal["id"])
+    active_id = str(active["id"])
+
+    assert worker._poll() is True
+    active_evaluation = worker.state.job_evals[active_id]
+    assert terminal_id in worker.state.job_evals
+    worker.job_db.update_job_status(terminal_id, "completed")
+
+    assert worker._poll() is False
+
+    assert terminal_id not in worker.state.job_evals
+    assert worker.state.job_evals[active_id] == active_evaluation
+    assert {candidate.node.key for candidate in active_evaluation[1]} == {"gate", "other"}
+    worker.stop()
+
+
 def test_upgrade_between_evaluation_and_park_rejects_old_generation(tmp_path: Path) -> None:
     definition = _definition()
     worker = _worker(tmp_path, definition)
@@ -366,7 +457,7 @@ def test_upgrade_between_evaluation_and_park_rejects_old_generation(tmp_path: Pa
     original = worker.leases.park_awaiting_approval
     upgraded = False
 
-    def upgrade_then_park(job_id_arg: str, node_key: str, *, execution_generation: int = 0):
+    def upgrade_then_park(job_id_arg: str, node_key: str, **kwargs):
         nonlocal upgraded
         if not upgraded:
             upgraded = True
@@ -382,7 +473,7 @@ def test_upgrade_between_evaluation_and_park_rejects_old_generation(tmp_path: Pa
                     workflow_definition_snapshot_json=snapshot,
                     node_keys=list(definition.executable_nodes),
                 )
-        return original(job_id_arg, node_key, execution_generation=execution_generation)
+        return original(job_id_arg, node_key, **kwargs)
 
     worker.leases.park_awaiting_approval = upgrade_then_park
 

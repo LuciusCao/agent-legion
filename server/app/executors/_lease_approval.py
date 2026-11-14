@@ -10,9 +10,10 @@ in one poll pass), and job status re-derives via ``sync_job_status``.
 EXEC-GENERATION-001: the park transaction takes the per-job mutation
 advisory lock and CAS-checks the candidate's epoch against
 jobs.execution_generation (a reset since evaluation skips the park — the
-next poll pass re-parks against the new epoch). A successful park also
-stamps the job_nodes row with the current epoch (provenance for which
-epoch parked it; park itself never bumps it). Decisions on the parked
+next poll pass re-parks against the new epoch). The same lock also re-reads
+execution control: paused or terminal jobs and stale mode/target scopes skip
+the write. A successful park stamps the job_nodes row with the current epoch
+(provenance for which epoch parked it; park itself never bumps it). Decisions on the parked
 gate are guarded by status alone (``_guard_awaiting``): a reset of the
 gate flips it out of awaiting_approval before any decision can land,
 while a bump from an untouched sibling branch must not brick the gate.
@@ -20,22 +21,22 @@ while a bump from an untouched sibling branch must not brick the gate.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.db.transaction import write_transaction
-from server.app.executors._lease_control import (
-    lock_job_mutation_and_read_generation,
-    sync_job_status,
-)
+from server.app.executors._approval_control import lock_and_validate_approval_park
+from server.app.executors._lease_control import sync_job_status
 from server.app.workflows.approval_node import AWAITING_APPROVAL_STATUS
-
-logger = logging.getLogger(__name__)
 
 
 def park_awaiting_approval(
-    conn: DatabaseConnection, job_id: str, node_key: str, *, execution_generation: int = 0
+    conn: DatabaseConnection,
+    job_id: str,
+    node_key: str,
+    *,
+    execution_generation: int = 0,
+    control_snapshot: dict[str, Any] | None = None,
+    allowed_node_keys: frozenset[str] | None = None,
 ) -> bool:
     """Transition a runnable approval node to awaiting_approval.
 
@@ -44,16 +45,17 @@ def park_awaiting_approval(
     concurrently) — the caller treats that as "nothing to do", never an
     error.
     """
-    current_generation = lock_job_mutation_and_read_generation(conn, job_id)
-    if current_generation != execution_generation:
-        logger.info(
-            "approval park skipped (stale generation): job=%s node=%s expected=%s current=%s",
-            job_id,
-            node_key,
-            execution_generation,
-            current_generation,
-        )
+    current = lock_and_validate_approval_park(
+        conn,
+        job_id,
+        node_key,
+        execution_generation=execution_generation,
+        control_snapshot=control_snapshot,
+        allowed_node_keys=allowed_node_keys,
+    )
+    if current is None:
         return False
+    current_generation = int(current["execution_generation"])
     cursor = conn.execute(
         """
         update job_nodes
@@ -68,13 +70,3 @@ def park_awaiting_approval(
         return False
     sync_job_status(conn, job_id)
     return True
-
-
-def park_awaiting_approval_repo(
-    repo: Any, job_id: str, node_key: str, *, execution_generation: int = 0
-) -> bool:
-    """Repository write path: one transaction per park (leases.py delegate)."""
-    with write_transaction(repo.path) as conn:
-        return park_awaiting_approval(
-            conn, job_id, node_key, execution_generation=execution_generation
-        )

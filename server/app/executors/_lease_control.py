@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
+from server.app.executors._execution_control_guard import execution_control_rejects_node
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import LeaseClaimRequest
 
@@ -45,18 +46,13 @@ def _execution_control_rejects_claim(
     current_control: dict[str, Any],
 ) -> bool:
     """Return True when the claim snapshot no longer authorizes the node."""
-    if current_control["execution_paused"]:
-        return True
-    if current_control["execution_mode"] != request.execution_mode:
-        return True
-    if request.execution_mode == "full":
-        return False
-    if request.execution_mode == "until_node":
-        if current_control["execution_mode"] != "until_node":
-            return True
-        if current_control["target_node_key"] != request.target_node_key:
-            return True
-        return request.node_key not in request.allowed_node_keys
+    return execution_control_rejects_node(
+        node_key=request.node_key,
+        execution_mode=request.execution_mode,
+        target_node_key=request.target_node_key,
+        allowed_node_keys=request.allowed_node_keys,
+        current_control=current_control,
+    )
 
 
 def lock_job_mutation_and_read_generation(conn: DatabaseConnection, job_id: str) -> int | None:

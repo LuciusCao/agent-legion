@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
@@ -25,3 +26,14 @@ class JobApprovalParkQueriesMixin(ConnectionQueriesMixin):
         with self._connect_read() as conn:
             rows = conn.execute(APPROVAL_PARK_CANDIDATES_SQL).fetchall()
         return [dict(row) for row in rows]
+
+    def list_terminal_job_ids(self, job_ids: Sequence[str]) -> set[str]:
+        if not job_ids:
+            return set()
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select id from jobs where id=any(%s::text[])"
+                " and status in ('completed', 'failed')",
+                (list(job_ids),),
+            ).fetchall()
+        return {str(row["id"]) for row in rows}
