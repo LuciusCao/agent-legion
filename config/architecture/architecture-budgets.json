@@ -2400,6 +2400,7 @@
     "worker/stale_sweep.py": 55,
     "worker/state_evidence.py": 214,
     "worker/state_evidence_cleanup.py": 61,
+    "worker/state_evidence_copies.py": 29,
     "worker/state_evidence_lines.py": 55,
     "worker/state_evidence_sink.py": 59,
     "worker/status/__init__.py": 88,

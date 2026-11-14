@@ -7,6 +7,8 @@ import pytest
 
 from worker.host.client import Client
 from worker.host.errors import HostResponseError
+from worker.host.transfer_lease import apply_lease_ttl, update_heartbeat_interval
+from worker.transfer_controls import load_transfer_controls
 from worker.transfer_lease_controls import transfer_timeout_cap, validate_transfer_timeout
 
 pytestmark = pytest.mark.no_db
@@ -110,3 +112,36 @@ def test_short_ttl_clamp_is_logged_once(capsys: pytest.CaptureFixture[str]) -> N
     output = capsys.readouterr().out
     assert "leaves no safe transfer window" in output
     assert output.count("clamping transfer_timeout_seconds") == 1
+
+
+def test_relay_heartbeat_hot_update_reclamps_current_transfer_timeout(tmp_path: Path) -> None:
+    config = tmp_path / "worker.yaml"
+    config.write_text("transfer_timeout_seconds: 120\nheartbeat_interval_seconds: 15\n")
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    apply_lease_ttl(client, 30)
+    assert client.transfer_timeout == 45
+    initial = load_transfer_controls(config)
+    assert initial.heartbeat_interval_seconds == 15
+
+    config.write_text("transfer_timeout_seconds: 120\nheartbeat_interval_seconds: 45\n")
+    updated = load_transfer_controls(config)
+    assert updated.heartbeat_interval_seconds == 45
+    update_heartbeat_interval(client, updated.heartbeat_interval_seconds)
+
+    assert client.heartbeat_interval == 45
+    assert client.transfer_timeout == 15
+    update_heartbeat_interval(client, 15)
+    assert client.transfer_timeout == 15  # 在途值只能收紧，不能随周期回落放宽
+
+
+def test_larger_ttl_does_not_relax_in_flight_claims(capsys: pytest.CaptureFixture[str]) -> None:
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    apply_lease_ttl(client, 30)
+    assert client.transfer_timeout == 45
+
+    apply_lease_ttl(client, 90)
+
+    assert client.transfer_timeout == 45
+    output = capsys.readouterr().out
+    assert "constrained to 45s" in output
+    assert "current claim cap 165s" in output

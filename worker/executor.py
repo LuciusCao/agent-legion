@@ -33,6 +33,7 @@ from worker.executor_reap import reap_completed
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import HOST_UNAVAILABLE_ERRORS, Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
+from worker.host.transfer_lease import sync_transfer_heartbeat
 from worker.hot_controls import DynamicControls, reload_controls
 from worker.lease_snapshot import open_lease_channel
 from worker.load_shedding import LoadShedder
@@ -259,9 +260,11 @@ def main() -> int:
                     )
                     control_error = load_error
             else:
-                # 全部加载成功才统一生效（语义收口在 hot_controls）。
-                controls = reloaded
-                control_error = None
+                # 全部加载成功才统一生效（语义收口在 hot_controls）。relay 的
+                # 实际心跳周期热更也同步进 transfer clamp；裸跑的心跳周期
+                # 仍是启动值，不用新配置冒充已生效的线程周期。
+                sync_transfer_heartbeat(client, reloaded.transfer, lease_snapshot_path is not None)
+                controls, control_error = reloaded, None
             max_concurrency, claim_enabled = controls.max_concurrency, controls.claim_enabled
             max_code_concurrency = controls.max_code_concurrency
             claim_batch_limit = controls.claim_batch_limit
