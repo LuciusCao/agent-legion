@@ -231,10 +231,15 @@ run_rust_round() {
     return 0
   fi
   cd "$ROOT_DIR/velites"
-  # Cargo defaults to one rustc job per core; keep the gate polite on machines
-  # running several worktrees (AGENT_LEGION_RUST_WORKERS overrides; CI 4-vCPU
-  # runners are unaffected).
+  # The test-rest round shares one machine budget between Vitest and Cargo;
+  # static rounds and explicit lane overrides keep their independent limits.
   rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$(detect_gate_default_jobs_worktree_aware)}"
+  if [[ "$round" == "test-rest" && -z "${AGENT_LEGION_RUST_WORKERS:-}" && -z "${CI:-}" ]] \
+    && lane_enabled frontend; then
+    shared_budget="$(detect_gate_default_jobs_worktree_aware)"
+    rust_jobs=$((shared_budget - ${frontend_workers:-4}))
+    [[ "$rust_jobs" -lt 2 ]] && rust_jobs=2
+  fi
   if [[ "$round" == "static-check" ]]; then
     cargo fmt --all -- --check
     cargo clippy --all-targets --locked -j "$rust_jobs" -- -D warnings
@@ -270,12 +275,18 @@ run_round() {
   fi
   if lane_enabled frontend; then
     if [[ -n "$frontend_phase" ]]; then
+      frontend_workers="${AGENT_LEGION_FRONTEND_TEST_WORKERS:-}"
+      if [[ -z "$frontend_workers" && -z "${CI:-}" ]]; then
+        frontend_workers="$(detect_gate_default_jobs_worktree_aware)"
+        [[ "$frontend_workers" -lt 4 ]] && frontend_workers=4
+      fi
       frontend_api_check="${FRONTEND_API_CHECK:-1}"
       if [[ "$round" == "static-check" && -z "${FRONTEND_API_CHECK:-}" ]] && lane_enabled backend; then
         # api:check boots the backend app; the integration step below runs it once.
         frontend_api_check=0
       fi
-      FRONTEND_GATE_PHASE="$frontend_phase" \
+      AGENT_LEGION_FRONTEND_TEST_WORKERS="$frontend_workers" \
+        FRONTEND_GATE_PHASE="$frontend_phase" \
         FRONTEND_API_CHECK="$frontend_api_check" \
         FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" \
         "$ROOT_DIR/scripts/check-quick-frontend.sh" >"$frontend_log" 2>&1 &

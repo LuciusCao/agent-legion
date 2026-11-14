@@ -70,7 +70,12 @@ fallback probes sibling `.quick-gate.lock` directories through
 `git worktree list`: `min(4, cores)` while a sibling worktree runs a gate,
 `cores-2` otherwise. Per-lane env overrides
 (`AGENT_LEGION_TEST_WORKERS`, `AGENT_LEGION_FRONTEND_TEST_WORKERS`,
-`AGENT_LEGION_RUST_WORKERS`) still win.
+`AGENT_LEGION_RUST_WORKERS`) still win. Vitest uses `max(4, shared budget)`
+inside `check-quick.sh`, so smaller machines do not regress below the old
+four-worker default; standalone frontend-script and CI invocations stay at four.
+In the `test-rest` round Cargo receives the remaining shared budget (minimum
+two jobs) instead of a second full-machine allocation; an explicit
+`AGENT_LEGION_RUST_WORKERS` still wins.
 
 ## Machine-Wide Gate Queue
 
@@ -131,9 +136,11 @@ complete gate's wall time.
 
 `tests/conftest.py` marks a collected test as smoke when its path is in
 `config/architecture/smoke-test-files.json` or its basename starts with
-`test_architecture_`; pytest then selects those items with `-m "smoke"`. At
-SHA `dfd129c1399a2a40662fd7d3b45a0188e3410b72`, the manifest's behavioral
-files are:
+`test_architecture_`. `scripts/pytest_smoke_selection.py` resolves that same
+file set up front and the gate passes only those files plus `-m "smoke"` to
+pytest, avoiding a whole-tree collection merely to deselect it. Missing files
+and empty selections fail fast. At SHA
+`dfd129c1399a2a40662fd7d3b45a0188e3410b72`, the manifest's behavioral files are:
 
 - `tests/db/test_retry.py`
 - `tests/executors/leases/test_claim_basics.py`
@@ -147,6 +154,27 @@ When adding coverage for a new subsystem, prefer one core behavioral file in
 the manifest over weakening the backend smoke time target. Membership changes
 must be reviewed against the actual selection rather than assuming that the
 manifest alone lists every smoke test.
+
+### Measured local smoke: current baseline and optimized
+
+These are same-worktree observations from 2026-11-13, not an SLA. The baseline
+was `0d79a675c47fc839e8a7f6945ec3a55e8b281fc2`; the optimized run added the
+smoke selection and worker-budget changes in this guide. The host was a Mac14,13
+(12 cores, 32 GiB) running macOS 26.6.2, uv 0.12.9, Node 26.8.1 and cargo
+1.98.0. Both runs used the complete backend+frontend+Rust smoke command, had no
+queue wait, and kept backend coverage off. The baseline used four Vitest workers;
+the optimized default used eight Vitest workers and two remaining Rust jobs.
+
+| Step | Baseline | Optimized |
+| --- | ---: | ---: |
+| Backend curated pytest (674 tests, no coverage) | 45.36s | 29.41s |
+| Frontend Vitest (3,342 tests) | 212.99s | 125.71s |
+| Complete smoke gate (`/usr/bin/time`) | 301.98s | 186.15s |
+
+The optimized wall time is 38.37% lower. Both runs passed every test and all
+static, API-contract and architecture checks. The earlier independent-lane
+sample below remains a historical cold/warm reference, not the baseline for
+this comparison.
 
 ### Measured local smoke: one cold/warm pair
 
@@ -251,7 +279,7 @@ layer, selected with `-m "not postgres"` against an
 unreachable loopback database URL, so an accidental database dependency fails
 the gate instead of silently using a developer database. CI runs it as the
 `backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
-runs in the `backend-postgres` matrix job (checks `backend-postgres-a/b/c`)
+runs in the `backend-postgres` matrix job (checks `backend-postgres-a/b/c/d/e`)
 described below.
 
 The full tier (`GATE_TIER=full`, the default for `check-quick.sh` without a
@@ -370,12 +398,16 @@ release-train `HEAD`-only exception.
   node_modules) and the worker UI node:test suite. Its own lightweight job
   (issue #193): it runs on the frontend lane too, so frontend-only PRs no
   longer drag a postgres-test job along just for the contract check.
-- **backend-postgres-a/b/c** — the postgres tier's three hash shards as one
-  matrix job (`backend-postgres`, issue #193): each leg runs its
-  `GATE_SHARD=i/n` tier slice and uploads coverage data + telemetry as 1-day
-  artifacts. Shard b additionally runs the velites sandbox integration check
-  and the `tests/full -m full_gate` evidence layer. `fail-fast` is off, so a
-  failing shard does not cancel its peers' evidence.
+- **backend-postgres-a/b/c/d/e** — the postgres tier's five duration-weighted,
+  whole-file shards as one matrix job (`backend-postgres`, #1511): each leg runs
+  its `GATE_SHARD=i/5` tier slice and uploads coverage data + telemetry as
+  1-day artifacts. The deterministic LPT plan reads
+  `config/architecture/postgres-test-durations.json`; new files fall back to the
+  manifest's average per-test cost, and malformed manifests fail fast. Shard b
+  additionally runs the velites sandbox integration check and the
+  `tests/full -m full_gate` evidence layer, with 95 seconds reserved in every
+  shard's plan so this extra work does not unbalance the critical path.
+  `fail-fast` is off, so a failing shard does not cancel its peers' evidence.
 - **backend-coverage** — downloads every shard's coverage artifact, merges
   them with `coverage combine`, and enforces the 85% floor once on the
   combined report. The needs-DAG (`backend-unit` + `backend-postgres`)
@@ -387,8 +419,9 @@ release-train `HEAD`-only exception.
   artifacts / worker execution plane / job log raw, #275+#295). Local
   `check.sh` keeps partitions report-only — its coverage file may hold a
   partial tier, and floors on partial data produce false reds. It also runs
-  `check_reruns.py` against every shard report: a retry-pass is merge-blocking
-  unless its exact nodeid has a registry entry. Untouched pre-existing expired
+  `check_reruns.py --require-reports` against every shard report: missing or
+  unreadable JSON fails the job, and a retry-pass is merge-blocking unless its
+  exact nodeid has a registry entry. Untouched pre-existing expired
   deadlines are only listed here (#941: a calendar date must not red unrelated
   PRs); the nightly `exemption-expiry` job enforces them. Every PR /
   merge-group run (any target branch; scheduled jobs only see the default
@@ -399,10 +432,10 @@ release-train `HEAD`-only exception.
   strictly, while the base is read leniently so pre-#941 entries without
   `registered_on` remain comparable; backfilling anchor dates on such an
   old-schema entry is a schema migration, not a touch.
-- **frontend-logic / frontend-component-a/b / frontend-coverage** — frontend
+- **frontend-logic / frontend-component-a/b/c / frontend-coverage** — frontend
   static checks and the two Vitest projects (node / jsdom) as parallel jobs;
-  the slower component project is split again with Vitest's deterministic
-  native `--shard=1/2` partition;
+  the slower component project is split into three deterministic native
+  `--shard=i/3` partitions (#1516);
   the coverage job merges the shard blob reports and enforces the frontend
   coverage thresholds plus the production bundle (`npm run build:bundle`),
   and enforces the frontend coverage partitions (auth/bootstrap / api
@@ -438,8 +471,8 @@ release-train `HEAD`-only exception.
 In `nightly-gate.yml`:
 
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios, with the
-  unregistered-rerun (flaky governance) check. Runs only on the weekly
-  schedule and manual dispatch.
+  unregistered-rerun (flaky governance) check and the same strict required-report
+  preflight as PR CI. Runs only on the weekly schedule and manual dispatch.
 - **deps-audit** — dependency vulnerability audit via `make audit`
   (`scripts/check-deps-audit.sh`: pip-audit over the frozen `uv.lock` export
   plus `npm audit --omit=dev --audit-level=high`; #969). It queries live
@@ -499,10 +532,11 @@ review checks them like a boundary rule:
 The postgres tier's CI `-n 1` pin (above) removes the resource contention
 that produced the family; these rules keep new tests from reintroducing it.
 
-The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
-filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard
-writes its own `COVERAGE_FILE` with `--cov-fail-under=0`, so only the
-combined report in backend-coverage enforces the 85% floor.
+The CI postgres tier uses duration-weighted whole-file shards
+(`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`); the plugin retains the old
+`md5(nodeid) % n` behavior only when `GATE_SHARD_DURATIONS` is unset. Every
+pytest shard writes its own `COVERAGE_FILE` with `--cov-fail-under=0`, so only
+the combined report in backend-coverage enforces the 85% floor.
 
 CI environment notes:
 
@@ -521,24 +555,45 @@ CI environment notes:
 
 ## Test Telemetry
 
-CI test lanes emit lightweight, aggregate telemetry without retaining raw
-failure or source context as downloadable artifacts:
+CI test lanes publish aggregate job summaries and retain only short-lived
+backend evidence for downstream checks:
 
 - each backend unit, PostgreSQL, and full pytest layer prints its 30 slowest
-  tests, writes ephemeral JUnit XML, and records pytest-rerunfailures attempts
+  tests and writes JUnit XML + pytest-rerunfailures reports as 1-day artifacts
   through `scripts.pytest_telemetry`;
 - frontend Vitest writes ephemeral JUnit and JSON reports alongside its normal
   console and coverage reporters;
 - `scripts/summarize_test_results.py` adds aggregate counts, case time, rerun
   counts, commit, platform, CPU, and tool versions to the GitHub job summary;
-- raw JUnit, Vitest JSON, and HTML coverage remain on the temporary runner and
-  are not uploaded, because they can contain private test names, failure data,
-  or source context.
+- Vitest JSON and HTML coverage remain on the temporary runner. Backend JUnit
+  artifacts also feed timing-manifest generation; they are never committed to
+  the repository.
 
 The gate scripts only enable file reporters when
 `AGENT_LEGION_TEST_RESULTS_DIR` is set, so ordinary local runs keep their
 existing output and overhead. `AGENT_LEGION_TEST_DURATIONS` controls the pytest
 slow-test count and defaults to 30 in telemetry mode.
+
+Refresh the PostgreSQL timing manifest from a successful full run when measured
+shard durations drift. The generator rejects duplicate or unmapped JUnit cases;
+unknown future files are handled by the sharder's average-cost fallback rather
+than by silently dropping them.
+
+```bash
+gh run download <run-id> \
+  --name backend-postgres-a-telemetry --name backend-postgres-b-telemetry \
+  --name backend-postgres-c-telemetry --name backend-postgres-d-telemetry \
+  --name backend-postgres-e-telemetry \
+  --dir data/analysis/<run-id>
+uv run --frozen python scripts/pytest_duration_manifest.py \
+  --junit data/analysis/<run-id>/backend-postgres-a-telemetry/backend-postgres-a-junit.xml \
+  --junit data/analysis/<run-id>/backend-postgres-b-telemetry/backend-postgres-b-junit.xml \
+  --junit data/analysis/<run-id>/backend-postgres-c-telemetry/backend-postgres-c-junit.xml \
+  --junit data/analysis/<run-id>/backend-postgres-d-telemetry/backend-postgres-d-junit.xml \
+  --junit data/analysis/<run-id>/backend-postgres-e-telemetry/backend-postgres-e-junit.xml \
+  --source-run <run-id> \
+  --output config/architecture/postgres-test-durations.json
+```
 
 ## Exact-Commit Evidence (Local)
 

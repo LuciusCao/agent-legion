@@ -277,6 +277,55 @@ def test_main_tolerates_missing_reports(tmp_path: Path) -> None:
     assert exit_code == 0
 
 
+@pytest.mark.parametrize(
+    "contents",
+    [None, '{"attempts": 1, "tests": [', "{}", '{"attempts": 1}', '{"tests": {}}'],
+)
+def test_main_require_reports_rejects_missing_or_truncated_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], contents: str | None
+) -> None:
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry()])
+    report = tmp_path / "reruns.json"
+    if contents is not None:
+        report.write_text(contents, encoding="utf-8")
+
+    exit_code = main(
+        [
+            "--registry",
+            str(registry),
+            "--require-reports",
+            "--rerun-report",
+            str(report),
+            "--today",
+            "2026-08-03",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "required rerun report is missing or unreadable" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("tests", [[], ["tests/x/test_a.py::test_a"]])
+def test_main_require_reports_accepts_valid_json(tmp_path: Path, tests: list[str]) -> None:
+    registry = _write_registry(tmp_path / "registry.yaml", [_entry()])
+    report = _write_report(tmp_path / "reruns.json", tests)
+
+    assert (
+        main(
+            [
+                "--registry",
+                str(registry),
+                "--require-reports",
+                "--rerun-report",
+                str(report),
+                "--today",
+                "2026-08-03",
+            ]
+        )
+        == 0
+    )
+
+
 def test_deadline_only_mode_requires_no_report(tmp_path: Path) -> None:
     # #295: nightly exemption-expiry runs the deadline check without any
     # rerun evidence — the mode must stand alone.
@@ -399,3 +448,20 @@ def test_pr_gate_passes_base_registry_for_every_target_branch() -> None:
     assert "default_branch" not in str(step) and "base_ref" not in str(step)
     assert 'if [ -n "$BASE_SHA" ]; then' in step["run"]
     assert "--base-registry" in step["run"]
+    assert "--require-reports" in step["run"]
+
+
+def test_nightly_extended_reruns_require_readable_report() -> None:
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / ".github/workflows/nightly-gate.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["ci-extended"]["steps"]
+        if step.get("name") == "Fail on unregistered reruns"
+    )
+
+    assert "--require-reports" in step["run"]
+    assert "ci-extended-reruns.json" in step["run"]

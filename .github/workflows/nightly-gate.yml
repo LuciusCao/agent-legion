@@ -200,6 +200,7 @@ jobs:
         if: always()
         run: >-
           uv run python scripts/check_reruns.py
+          --require-reports
           --rerun-report test-results/ci-extended-reruns.json
 
   # Weekly exemption expiry governance (issue #270): refresh the tracked

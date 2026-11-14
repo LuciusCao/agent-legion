@@ -46,6 +46,9 @@ _SUPERSET_UV_STUB = (
     'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n'
     'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n'
     'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n'
+    'if [[ " $* " == *" scripts.pytest_smoke_selection "* ]]; then\n'
+    '  printf "tests/test_fake.py\\n"\n'
+    "fi\n"
 )
 
 
@@ -123,6 +126,8 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_SHARD",
+        "GATE_SHARD_DURATIONS",
+        "GATE_SHARD_RESERVED_SECONDS",
         "GATE_SKIP_GOVERNANCE",
         "GATE_SKIP_STATIC",
         "GATE_TIER",
@@ -539,6 +544,24 @@ def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(
     assert "scripts.pytest_gate_shard" not in calls
     assert "shard:unset" in calls
     assert "-m postgres" in calls
+
+
+def test_backend_postgres_tier_reports_duration_weighted_sharding(
+    backend_gate_layout: tuple[Path, Path, Path], tmp_path: Path
+) -> None:
+    calls, stdout = _run_shared_backend_gate(
+        backend_gate_layout,
+        tmp_path,
+        {
+            "GATE_SHARD": "2/4",
+            "GATE_SHARD_DURATIONS": "config/architecture/postgres-test-durations.json",
+        },
+        capture="both",
+    )
+
+    assert "duration-weighted" in stdout
+    assert "shard:2/4" in calls
+    assert "-p scripts.pytest_gate_shard" in calls
 
 
 def test_backend_test_workers_default_is_capped(

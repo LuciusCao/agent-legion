@@ -1,11 +1,8 @@
 """Deterministic GATE_SHARD=i/n hash sharding for pytest (CI postgres tier).
 
-Loaded via ``-p scripts.pytest_gate_shard`` (scripts/check-quick-backend.sh
-adds it when GATE_SHARD is set). After collection, each item is kept only
-when ``md5(nodeid) % n == i - 1``, so the shards partition the collected set
-deterministically across runs and machines. Filtering happens at collection
-time on the xdist controller, so workers simply receive their share. Without
-GATE_SHARD the plugin registers nothing and behavior is unchanged.
+The optional duration-weighted implementation lives in
+``scripts/pytest_gate_shard_durations.py``; without that configuration this
+module preserves the original md5(nodeid) partition and filter behavior.
 """
 
 from __future__ import annotations
@@ -15,6 +12,8 @@ import os
 from typing import Any
 
 import pytest
+
+from scripts.pytest_gate_shard_durations import configure_duration_shard
 
 SHARD_ENV_VAR = "GATE_SHARD"
 
@@ -66,4 +65,6 @@ def pytest_configure(config: Any) -> None:
         index, count = parse_shard_spec(value)
     except ValueError as exc:
         raise pytest.UsageError(str(exc)) from exc
+    if configure_duration_shard(config, index, count):
+        return
     config.pluginmanager.register(GateShardFilter(index, count), name="gate-shard-filter")

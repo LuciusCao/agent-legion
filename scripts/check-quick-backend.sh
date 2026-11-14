@@ -147,9 +147,16 @@ run_tests() {
   case "${GATE_TIER:-full}" in
     smoke)
       echo "=== Python Smoke Tests (curated, no coverage) ==="
+      # Resolve the same manifest + architecture-name rule up front instead of
+      # importing the whole tests tree merely to deselect almost all of it.
+      smoke_selection="$(UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen python -m scripts.pytest_smoke_selection)"
+      smoke_files=()
+      while IFS= read -r smoke_file; do
+        [[ -z "$smoke_file" ]] || smoke_files+=("$smoke_file")
+      done <<<"$smoke_selection"
+      echo "=== Smoke collection: ${#smoke_files[@]} files (direct) ==="
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run --frozen pytest -q \
-        --ignore=tests/full \
-        --ignore=tests/ci \
+        "${smoke_files[@]}" \
         -m "smoke" \
         -n "$workers" --dist worksteal \
         --reruns 1 \
@@ -299,11 +306,16 @@ run_tests() {
       ;;
     postgres)
       echo "=== Python PostgreSQL Tests ==="
-      # GATE_SHARD=i/n (CI only) hash-shards the tier via a collection filter;
-      # unset locally, where the tier keeps running as one unsplit suite.
+      # GATE_SHARD=i/n (CI only) uses the duration manifest when configured;
+      # without one it retains deterministic hash sharding. Unset locally, the
+      # tier keeps running as one unsplit suite.
       shard_args=()
       if [[ -n "${GATE_SHARD:-}" ]]; then
-        echo "=== GATE_SHARD=${GATE_SHARD} (deterministic hash shard) ==="
+        if [[ -n "${GATE_SHARD_DURATIONS:-}" ]]; then
+          echo "=== GATE_SHARD=${GATE_SHARD} (duration-weighted: ${GATE_SHARD_DURATIONS}) ==="
+        else
+          echo "=== GATE_SHARD=${GATE_SHARD} (deterministic hash shard) ==="
+        fi
         shard_args=(-p scripts.pytest_gate_shard)
       fi
       # #1150 D2: CI postgres shards run on 2-core runners where xdist -n 2
@@ -335,7 +347,7 @@ run_tests() {
       # The PostgreSQL layer (~3900 of ~9000 quick-suite tests, ~2.2x the unit
       # tier's wall clock — 302s vs 140s measured 2026-10-09) moved out of the
       # local default: CI re-runs all of it on
-      # every PR (backend-postgres-a/b/c), so paying it on every local gate
+      # every PR (backend-postgres-a/b/c/d/e), so paying it on every local gate
       # bought little. Run GATE_TIER=postgres explicitly before handing off
       # database-touching work, or rely on CI; scripts/check.sh (the local
       # full-gate substitute) pins unit + postgres itself and stays whole.
