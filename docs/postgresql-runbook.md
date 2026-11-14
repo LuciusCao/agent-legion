@@ -82,7 +82,9 @@ The source is fixed to the prod database/bucket. The target database and bucket
 must exactly match the current worktree's derived names (a tower child reuses
 its parent's names), and database/S3 endpoints must be loopback. Every libpq
 `host` / `hostaddr` candidate (including query overrides, comma-separated
-fallbacks, and environment fallbacks) must be loopback. psql error output is
+fallbacks, and environment fallbacks) must be loopback. Any non-empty
+`service` / `PGSERVICE` is rejected instead of reading a service file; use an
+explicit loopback DSN. psql error output is
 redacted because it can echo the DSN. The two S3 endpoints must identify the
 same local instance because the copy uses S3
 `CopyObject`; no bytes are downloaded and re-uploaded. A missing target bucket,

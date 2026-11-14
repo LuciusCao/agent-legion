@@ -85,6 +85,22 @@ class TestGuardTargetDsn:
         with pytest.raises(SeedError, match="不是本机回环地址"):
             guard_target_dsn("postgresql://127.0.0.1/agent_legion_develop")
 
+    def test_service_conninfo_is_fail_closed(self):
+        with pytest.raises(SeedError, match="service/PGSERVICE"):
+            guard_target_dsn("postgresql://127.0.0.1/agent_legion_develop?service=remote_seed")
+
+    def test_pgservice_environment_is_fail_closed(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("PGSERVICE", "remote_seed")
+        with pytest.raises(SeedError, match="service/PGSERVICE"):
+            guard_target_dsn("postgresql://127.0.0.1/agent_legion_develop?service=")
+
+    def test_empty_service_and_host_environment_are_unset(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("PGSERVICE", "")
+        monkeypatch.setenv("PGHOST", "")
+        monkeypatch.setenv("PGHOSTADDR", "")
+        guard_target_dsn("postgresql://127.0.0.1/agent_legion_develop?service=")
+        guard_target_dsn("postgresql://localhost/agent_legion_develop")
+
 
 class TestResolveTargetDsn:
     def test_env_var_wins_over_env_file(self, tmp_path: Path):

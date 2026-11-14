@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import urllib.parse
 from pathlib import Path
 
-import psycopg.conninfo
-
 from scripts.seed_from_prod_db import SeedError
+from scripts.seed_from_prod_libpq import guard_loopback_conninfo
 from scripts.seed_from_prod_objects import expected_dev_resource_names
 from server.app.db.schema_guard import dsn_database_name
 
 PROD_DB_NAME = "agent_legion"
-LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def parse_dsn(dsn: str) -> urllib.parse.ParseResult:
@@ -23,27 +20,13 @@ def parse_dsn(dsn: str) -> urllib.parse.ParseResult:
     return parsed
 
 
-def _target_hosts(dsn: str) -> list[str]:
-    params = psycopg.conninfo.conninfo_to_dict(dsn)
-    hosts: list[str] = []
-    for key, env in (("host", "PGHOST"), ("hostaddr", "PGHOSTADDR")):
-        value = params.get(key, os.environ.get(env))
-        if value is not None:
-            hosts.extend(str(value).split(","))
-    return hosts
-
-
 def guard_target_dsn(dsn: str) -> None:
     """Refuse prod names and every non-loopback libpq connection candidate."""
     parse_dsn(dsn)
     dbname = dsn_database_name(dsn)
     if dbname == PROD_DB_NAME:
         raise SeedError(f"拒绝执行：目标库名 {dbname!r} 与生产库同名，疑似指向生产。")
-    hosts = _target_hosts(dsn)
-    if not hosts or any(host not in LOOPBACK_HOSTS for host in hosts):
-        raise SeedError(
-            f"拒绝执行：目标 host/hostaddr 不是本机回环地址，必须全部为 {sorted(LOOPBACK_HOSTS)}。"
-        )
+    guard_loopback_conninfo(dsn)
 
 
 def guard_target_repo(dsn: str, repo_root: Path) -> tuple[str, str]:
