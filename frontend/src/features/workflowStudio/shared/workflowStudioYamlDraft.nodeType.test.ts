@@ -113,19 +113,12 @@ describe('patchWorkflowNodeType', () => {
     })
   })
 
-  it('refuses approval→code/agent without a capability (no half-applied state)', () => {
-    // approval 节点按契约无 capability；loader 对 code/agent 要求非空。
-    // 前置校验必须拦下，否则草稿落入「type 已改、capability 缺失」的
-    // 不可发布半应用态（AGENTS.md L88）。被拦截时草稿原样保留——审批
-    // config 键的剥除因此只发生在「补 capability 再切」的路径上。
+  it('refuses approval→code without a capability (no half-applied state)', () => {
+    // code 仍要求非空 capability；前置校验必须拦下，避免自动保存不可发布
+    // 的半应用态。手写「approval + capability」仍是合法直通路径。
     expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'code')).toThrow(
       WorkflowNodeTypeSwitchError
     )
-    expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'agent')).toThrow(
-      WorkflowNodeTypeSwitchError
-    )
-    // 手写「approval + capability」的中间态 YAML 仍是合法直通路径
-    // （已有 capability 优先于补能力通道）。
     const withCapability = midDagYaml.replace(
       '    type: approval',
       '    type: approval\n    capability: gate_cap'
@@ -134,6 +127,18 @@ describe('patchWorkflowNodeType', () => {
     const node = parseNodes(out).nodes?.gate
     expect(node?.type).toBe('code')
     expect(node?.capability).toBe('gate_cap')
+    expect(node).not.toHaveProperty('config')
+  })
+
+  it('switches approval→agent with an explicitly empty optional capability', () => {
+    const out = patchWorkflowNodeType(midDagYaml, 'gate', 'agent')
+    const node = parseNodes(out).nodes?.gate
+
+    expect(node?.type).toBe('agent')
+    expect(node?.capability).toBe('')
+    expect(node?.label).toBeUndefined()
+    expect(parseNodes(out).nodes).toHaveProperty('gate')
+    expect(node?.execution).toEqual({ runtime: 'velites' })
     expect(node).not.toHaveProperty('config')
   })
 

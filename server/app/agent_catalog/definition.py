@@ -23,7 +23,10 @@ class AgentDefinition(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    capability: str = Field(min_length=1)
+    # Empty is the optional label of a self-contained node projection (#936).
+    # Legacy definition resolution still requires the node's original non-empty
+    # capability at workflow load; historical definition rows are not rewritten.
+    capability: str
     runtime: Literal["pi", "velites"]
     # Legacy fallback for the node's skill binding (issue #76): "" means the
     # definition binds no skill and the workflow node must declare one.

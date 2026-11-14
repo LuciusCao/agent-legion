@@ -28,6 +28,7 @@ from server.app.workflows.schema import (
     WorkflowIntakeMode,
     WorkflowNode,
 )
+from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -252,7 +253,11 @@ def _diff_nodes(
                         "code": "capability_changed",
                         "severity": "breaking",
                         "message": (
-                            f"节点 {key} 的能力从 {base_node.capability} "
+                            f"节点 {key} 的能力标签从 {base_node.capability or '（空）'} "
+                            f"改为 {draft_node.capability or '（空）'}，将产生新的 workflow revision；"
+                            "该自含 agent 节点不依赖 capability 路由。"
+                            if is_self_contained_agent_node(draft_node)
+                            else f"节点 {key} 的能力从 {base_node.capability} "
                             f"改为 {draft_node.capability}，执行器绑定可能失效。"
                         ),
                     }

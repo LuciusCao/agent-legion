@@ -59,3 +59,11 @@ def test_catalog_matches_worker_side_runtime_sets() -> None:
 def test_get_adapter_unknown_runtime_lists_full_catalog() -> None:
     with pytest.raises(ValueError, match=r"unknown agent runtime 'rust'.*pi, velites"):
         get_adapter("rust")
+
+
+def test_definition_capability_is_required_with_explicit_empty_allowed() -> None:
+    """Only a node projection may explicitly use the empty optional label."""
+    with pytest.raises(ValueError, match="capability"):
+        AgentDefinition.model_validate({"runtime": "velites"})
+
+    assert AgentDefinition(capability="", runtime="velites").capability == ""

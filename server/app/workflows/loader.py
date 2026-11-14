@@ -13,6 +13,7 @@ from server.app.workflows.schema import (
     WorkflowDefinitionError,
     WorkflowEdge,
     WorkflowNode,
+    WorkflowNodeExecution,
     WorkflowReduceSpec,
     WorkflowShardSpec,
     WorkflowTerminal,
@@ -189,9 +190,10 @@ def _load_nodes(
 
         node_type, accepted_item_types, text_input = load_start_fields(raw_node, node_key)
         capability = raw_node.get("capability", "")
-        # start and approval nodes never dispatch, so they carry no capability.
+        # Self-contained agent nodes may omit this optional label; legacy agents
+        # are checked after the effective runtime default has been merged.
         if not isinstance(capability, str) or (
-            not capability and node_type not in ("start", "approval")
+            not capability and node_type not in ("start", "approval", "agent")
         ):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
@@ -258,6 +260,24 @@ def _load_nodes(
     return nodes
 
 
+def load_workflow_nodes_with_execution(
+    raw: dict[str, Any], raw_nodes: dict[str, Any]
+) -> tuple[WorkflowNodeExecution, dict[str, WorkflowNode]]:
+    """Load node declarations and validate capability after runtime merging.
+
+    Shared with the built-in DAG lint so both accept exactly the same
+    self-contained agent, code, and legacy declaration shapes (#936).
+    """
+    execution, nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
+    for node in nodes.values():
+        if node.node_type == "agent" and not node.execution.runtime and not node.capability:
+            raise WorkflowDefinitionError(
+                f"Node {node.key} legacy agent capability must be a non-empty string;"
+                " declare execution.runtime for a self-contained agent node"
+            )
+    return execution, nodes
+
+
 def workflow_definition_from_mapping(
     raw: dict[str, Any],
 ) -> WorkflowDefinition:
@@ -282,7 +302,7 @@ def workflow_definition_from_mapping(
         raise WorkflowDefinitionError("Workflow schema_version must be an integer")
 
     intake = load_intake(raw)
-    execution, nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
+    execution, nodes = load_workflow_nodes_with_execution(raw, raw_nodes)
     edges = _load_edges(raw, nodes, schema_version)
     nodes, edges = ensure_start_node(nodes, edges)
     validate_approval_edges(nodes, edges)
