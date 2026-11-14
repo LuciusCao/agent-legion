@@ -396,9 +396,9 @@ def test_publish_rejects_legacy_agent_node_even_when_agent_binds_skill(
 
     assert errors == [
         "Agent node do_thing must declare its own execution profile: set execution.runtime"
-        " (pi | velites) on the node or as the workflow top-level execution.runtime default,"
-        " plus tools / requires_labels / config_schema / skill as needed — Agent definitions"
-        " no longer supply node profiles (#440)"
+        " (pi | velites) directly on this Agent node, plus tools / requires_labels /"
+        " config_schema / skill as needed — workflow-level defaults are retired (#805)"
+        " and Agent definitions no longer supply node profiles (#440)"
     ]
 
 

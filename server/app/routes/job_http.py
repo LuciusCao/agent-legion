@@ -9,6 +9,7 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     JobServiceError,
     NotFoundError,
+    RetiredWorkflowExecutionError,
     UnsupportedOperationError,
 )
 from server.app.services.job_log_raw import PayloadTooLargeError
@@ -34,8 +35,8 @@ def raise_job_http_error(error: JobServiceError) -> Never:
         raise HTTPException(status_code=501, detail=str(error)) from error
     if isinstance(error, PayloadTooLargeError):
         raise HTTPException(status_code=413, detail=str(error)) from error
-    # key-mismatch 是 422，先于 InvalidOperationError 的 400。
-    if isinstance(error, DraftWorkflowKeyMismatchError):
+    # key-mismatch / 退役顶层 execution 是 422，先于 InvalidOperationError 的 400。
+    if isinstance(error, (DraftWorkflowKeyMismatchError, RetiredWorkflowExecutionError)):
         raise HTTPException(status_code=422, detail=str(error)) from error
     if isinstance(error, PartialRunCreationError):
         # #467 A3：分块提交下失败可能已创建部分 job——进度必须可见。

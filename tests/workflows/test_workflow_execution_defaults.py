@@ -62,23 +62,28 @@ def _mapping(raw: dict | None = None):
     return workflow_definition_from_mapping(_authoring(raw))
 
 
-@pytest.mark.parametrize("execution", [{"runtime": "velites"}, None], ids=["dict", "null"])
-def test_mapping_authoring_rejects_top_level_execution(execution) -> None:
+@pytest.mark.parametrize("execution", [{"provider": "p"}, {}, None, "invalid"])
+def test_mapping_authoring_rejects_any_top_level_execution(execution) -> None:
     raw = _authoring()
     raw["execution"] = execution
 
-    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+    with pytest.raises(WorkflowDefinitionError) as caught:
         _mapping(raw)
 
+    message = str(caught.value)
+    assert "#805" in message
+    assert "nodes.agent_node.execution" in message
+    assert "nodes.empty_agent.execution" in message
+    assert "do not re-add" in message
 
-@pytest.mark.parametrize("execution", [{"runtime": "velites"}, None], ids=["dict", "null"])
-def test_yaml_file_authoring_rejects_top_level_execution(tmp_path: Path, execution) -> None:
+
+def test_yaml_file_authoring_uses_the_same_strict_rejection(tmp_path: Path) -> None:
     raw = _authoring()
-    raw["execution"] = execution
+    raw["execution"] = None
     path = tmp_path / "workflow.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+    with pytest.raises(WorkflowDefinitionError, match="#805"):
         load_workflow_definition(path)
 
 

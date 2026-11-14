@@ -53,13 +53,17 @@ _NODE_EXECUTION_KEYS = ("provider", "model", "thinking", "prompt", "prompt_mode"
 
 
 def _runtime_config_nodes(config: dict[str, Any]) -> dict[str, Any]:
-    """Read new and historical runtime rows through one nodes-only adapter.
-
-    Pre-#805 rows also contain top-level execution defaults. Their node slice
-    already records every effective value, so rollback deliberately ignores
-    only the retired duplicate rather than rewriting or reapplying history.
-    """
     return config.get("nodes") or {}
+
+
+def _legacy_runtime_config_for_rollback(config: dict[str, Any]) -> dict[str, Any]:
+    """Project a historical row onto nodes without reviving its top-level duplicate.
+
+    Pre-#805 rows recorded complete effective values on every node, so dropping
+    only the retired duplicate loses no execution configuration. History itself
+    remains untouched, including its old changed_keys display.
+    """
+    return {"nodes": _runtime_config_nodes(config)}
 
 
 def embed_node_code_pins(definition_json: str, pins: dict) -> str:
@@ -278,7 +282,8 @@ def rollback_workflow_runtime_config(
     if active is None:
         raise NotFoundError(f"No active workflow revision for {workspace_id}")
     current = workflow_definition_from_dict(json.loads(str(active["definition_json"])))
-    rolled_back = apply_runtime_config(current, json.loads(str(target["config_json"])))
+    historical = json.loads(str(target["config_json"]))
+    rolled_back = apply_runtime_config(current, _legacy_runtime_config_for_rollback(historical))
     revision, version_row = update_active_revision_runtime_in_place(
         job_db, workspace_id, rolled_back, active=active, created_by=created_by
     )

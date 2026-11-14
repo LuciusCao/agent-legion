@@ -37,6 +37,23 @@ def test_validate_reports_unresolvable_code_errors(client, job_db) -> None:
     assert job_db.get_active_workflow_revision("test_validate_flow", "test_validate_flow") is None
 
 
+def test_validate_rejects_retired_top_level_execution_with_migration_guidance(
+    client, job_db
+) -> None:
+    job_db.create_workspace("ws-validate-retired", workspace_id="test_validate_flow")
+    validate_url, _ = _urls("test_validate_flow")
+    retired = _DRAFT_YAML + "execution: null\n"
+
+    response = client.post(validate_url, json={"definition_yaml": retired})
+
+    assert response.status_code == 200
+    assert response.json()["valid"] is False
+    assert response.json()["definition_hash"] is None
+    assert any("#805" in error for error in response.json()["errors"])
+    assert any("do not re-add" in error for error in response.json()["errors"])
+    assert job_db.get_active_workflow_revision("test_validate_flow", "test_validate_flow") is None
+
+
 def test_validate_clean_with_published_node_code(client, job_db) -> None:
     workspace = job_db.create_workspace("ws-validate-ok", workspace_id="test_validate_flow")
     codes = NodeCodeService(TEST_DATABASE_URL)

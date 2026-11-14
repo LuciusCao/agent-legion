@@ -283,12 +283,17 @@ def test_draft_choice_freezes_the_draft_profile(job_db) -> None:
     assert replay["revision_id"] is None
 
 
-def test_draft_choice_materializes_stored_legacy_profile(job_db) -> None:
+def test_draft_choice_materializes_legacy_profile_and_preserves_overrides(job_db) -> None:
     env = _Env(job_db, _definition(_ORIGINAL))
     draft = {
         "key": "test",
         "label": "Test",
-        "execution": {"runtime": "velites", "provider": "top-provider", "model": "m3"},
+        "execution": {
+            "runtime": "velites",
+            "provider": "top-provider",
+            "model": "top-model",
+            "thinking": "low",
+        },
         "nodes": {
             "intake": {"capability": "intake_items", "outputs": ["question.json"]},
             "generate": {
@@ -297,7 +302,7 @@ def test_draft_choice_materializes_stored_legacy_profile(job_db) -> None:
                 "after": ["intake"],
                 "inputs": ["question.json"],
                 "outputs": ["key_info.json"],
-                "execution": {"provider": "node-provider"},
+                "execution": {"runtime": "pi", "provider": "node-provider"},
             },
         },
     }
@@ -307,9 +312,10 @@ def test_draft_choice_materializes_stored_legacy_profile(job_db) -> None:
 
     copy_job, _pins = env.copy(replay)
     execution = _copy_node(copy_job).execution
-    assert execution.runtime == "velites"
+    assert execution.runtime == "pi"
     assert execution.provider == "node-provider"
-    assert execution.model == "m3"
+    assert execution.model == "top-model"
+    assert execution.thinking == "low"
 
 
 def test_replay_profile_choice_errors(job_db, tmp_path: Path) -> None:

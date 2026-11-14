@@ -88,6 +88,27 @@ def test_patch_runtime_rejects_invalid_yaml(client, job_db) -> None:
     assert response.status_code == 422
 
 
+def test_patch_runtime_rejects_retired_execution_without_revision_or_history_changes(
+    client, job_db
+) -> None:
+    workspace_id = _workspace(job_db)
+    before = job_db.get_active_workflow_revision(workspace_id, workspace_id)
+    raw = yaml.safe_load(_draft_yaml(model="must-not-land"))
+
+    for execution in ({}, None, {"provider": "retired"}):
+        raw["execution"] = execution
+        response = client.patch(
+            f"/api/workspaces/{workspace_id}/workflow-runtime",
+            json={"definition_yaml": yaml.safe_dump(raw, allow_unicode=True)},
+        )
+
+        assert response.status_code == 422
+        assert any("#805" in error for error in response.json()["detail"])
+        assert any("nodes.write_script.execution" in error for error in response.json()["detail"])
+        assert job_db.get_active_workflow_revision(workspace_id, workspace_id) == before
+        assert job_db.list_runtime_config_versions(workspace_id) == []
+
+
 def test_patch_runtime_rejects_foreign_workflow_key(client, job_db) -> None:
     workspace_id = _workspace(job_db)
     foreign = _draft_yaml().replace(_WORKSPACE, "foreign_flow", 1)

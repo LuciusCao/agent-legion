@@ -20,6 +20,7 @@ from server.app.services.workflow_drafts import (
     migrate_stored_draft_yaml,
     workflow_draft_identity_hash,
 )
+from server.app.workflows.definition import reject_retired_workflow_execution_yaml
 
 __all__ = [
     "attach_draft_identity_hash",
@@ -48,9 +49,7 @@ def get_workflow_draft_state(job_db: JobQueries, workspace_id: str) -> dict[str,
     state = job_db.get_workspace_workflow_draft_state(workspace_id)
     if state["definition_yaml"] is not None:
         state["definition_yaml"] = migrate_stored_draft_yaml(str(state["definition_yaml"]))
-    attached = attach_draft_identity_hash(state)
-    assert attached is not None  # the state read always returns one row
-    return attached
+    return attach_draft_identity_hash(state) or state
 
 
 def save_workflow_draft(
@@ -58,6 +57,7 @@ def save_workflow_draft(
 ) -> dict[str, Any]:
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
+    reject_retired_workflow_execution_yaml(definition_yaml)
     draft = attach_draft_identity_hash(
         job_db.upsert_workspace_workflow_draft(workspace_id, definition_yaml)
     )

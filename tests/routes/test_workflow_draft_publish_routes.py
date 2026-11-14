@@ -141,3 +141,48 @@ def test_publish_validation_failure_keeps_the_stored_draft_row(tmp_path):
 
     assert response.status_code == 200 and response.json()["valid"] is False
     assert draft.json()["definition_yaml"] == _DRAFT_YAML
+
+
+def test_publish_retired_execution_preserves_draft_revision_history_and_routes(tmp_path):
+    app, workspace_id = _app_and_workspace(tmp_path)
+    _seed_node_code(app, workspace_id)
+    job_db = app.state.job_db
+
+    with authenticate_client(TestClient(app)) as client:
+        response = _publish(client, workspace_id, _DRAFT_YAML)
+        assert response.json()["valid"] is True
+        saved = client.put(
+            f"/api/workspaces/{workspace_id}/workflow-draft",
+            json={"definition_yaml": _DRAFT_YAML},
+        )
+        assert saved.status_code == 200
+        before_draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft").json()
+        before_active = job_db.get_active_workflow_revision(workspace_id, workspace_id)
+        before_revisions = job_db.list_workflow_revisions(workspace_id, workspace_id)
+        with job_db.connect() as conn:
+            before_routes = [
+                dict(row)
+                for row in conn.execute(
+                    "select * from workspace_node_routes where workspace_id=%s", (workspace_id,)
+                ).fetchall()
+            ]
+
+        response = _publish(client, workspace_id, _DRAFT_YAML + "execution: {}\n")
+
+        assert response.status_code == 200
+        assert response.json()["valid"] is False
+        assert response.json()["definition_hash"] is None
+        assert any("#805" in error for error in response.json()["errors"])
+        assert client.get(f"/api/workspaces/{workspace_id}/workflow-draft").json() == before_draft
+
+    assert job_db.get_active_workflow_revision(workspace_id, workspace_id) == before_active
+    assert job_db.list_workflow_revisions(workspace_id, workspace_id) == before_revisions
+    assert job_db.list_runtime_config_versions(workspace_id) == []
+    with job_db.connect() as conn:
+        after_routes = [
+            dict(row)
+            for row in conn.execute(
+                "select * from workspace_node_routes where workspace_id=%s", (workspace_id,)
+            ).fetchall()
+        ]
+    assert after_routes == before_routes

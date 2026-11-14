@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import yaml
+
 _DRAFT_YAML = "key: wf\nlabel: Draft\nnodes:\n  intake:\n    capability: intake\n"
 
 
@@ -114,6 +116,56 @@ def test_unparseable_draft_carries_null_identity(client, job_db) -> None:
     assert put.json()["definition_yaml"] == "key: [unclosed"
     assert put.json()["definition_hash"] is None
     assert client.get(_url(workspace["id"])).json()["definition_hash"] is None
+
+
+def test_stored_legacy_read_migration_does_not_bypass_write_rejection(client, job_db) -> None:
+    workspace = job_db.create_workspace("ws-store-stored-legacy", workspace_id="wf")
+    legacy_yaml = (
+        "key: wf\nlabel: Draft\nexecution: {provider: legacy-provider, model: legacy-model}\n"
+        "nodes:\n  intake:\n    capability: intake\n"
+    )
+    job_db.upsert_workspace_workflow_draft(workspace["id"], legacy_yaml)
+
+    before = client.get(_url(workspace["id"]))
+    assert before.status_code == 200
+    migrated = yaml.safe_load(before.json()["definition_yaml"])
+    assert "execution" not in migrated
+    assert migrated["nodes"]["intake"]["execution"]["provider"] == "legacy-provider"
+    assert migrated["nodes"]["intake"]["execution"]["model"] == "legacy-model"
+
+    rejected = client.put(_url(workspace["id"]), json={"definition_yaml": legacy_yaml})
+
+    assert rejected.status_code == 422
+    assert "#805" in rejected.json()["detail"]
+    assert client.get(_url(workspace["id"])).json() == before.json()
+    assert job_db.get_workspace_workflow_draft(workspace["id"])["definition_yaml"] == legacy_yaml
+
+
+def test_put_rejects_retired_top_level_execution_without_row_or_generation_changes(
+    client, job_db
+) -> None:
+    workspace = job_db.create_workspace("ws-store-retired-execution")
+    saved = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    assert saved.status_code == 200
+    before = client.get(_url(workspace["id"])).json()
+    retired_yaml = (
+        "key: wf\nlabel: Draft\nexecution: {}\nnodes:\n  intake:\n    capability: intake\n"
+    )
+
+    legacy_lww = client.put(_url(workspace["id"]), json={"definition_yaml": retired_yaml})
+    cas = client.put(
+        _url(workspace["id"]),
+        json={
+            "definition_yaml": retired_yaml.replace("execution: {}", "execution: null"),
+            "base_generation": before["generation"],
+        },
+    )
+
+    for response in (legacy_lww, cas):
+        assert response.status_code == 422
+        assert "#805" in response.json()["detail"]
+        assert "nodes.<agent_key>.execution" in response.json()["detail"]
+    assert client.get(_url(workspace["id"])).json() == before
 
 
 def test_put_overwrites_the_previous_draft(client, job_db) -> None:

@@ -25,10 +25,8 @@ def structural_payload(definition: WorkflowDefinition) -> dict[str, Any]:
     # snapshot, so changing it must publish a new revision (in-flight jobs
     # keep the old one — PR #1039 codex R5). Only the remaining keys
     # (provider/model/thinking/prompt/prompt_mode) stay editable in place.
-    # The loader already merged the top-level runtime default into every
-    # agent node, so ``profile_runtime`` is the node's EFFECTIVE runtime: a
-    # top-level default change is structural exactly when it moves some
-    # node's effective runtime.
+    # Stored legacy defaults are materialized into Agent nodes by the stored
+    # loader; new authoring has no workflow-level execution block (#805).
     for node in payload["nodes"].values():
         execution = node.pop("execution", None) or {}
         node["profile_runtime"] = execution.get("runtime", "")
@@ -37,11 +35,6 @@ def structural_payload(definition: WorkflowDefinition) -> dict[str, Any]:
         # 判定——改它们不再发布新 revision。
         node.pop("tools", None)
         node.pop("requires_labels", None)
-    # Top-level execution defaults are runtime settings like the node-level
-    # block: editing them updates the active revision in place instead of
-    # publishing a structural revision (its runtime default is already baked
-    # into every agent node above).
-    payload.pop("execution", None)
     return payload
 
 
