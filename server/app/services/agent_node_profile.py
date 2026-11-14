@@ -8,9 +8,9 @@ authoritative (EXEC-AGENT-PROFILE-001, #440 P3); the two sources are:
 - ``node`` — the normal path: the node is self-contained
   (``execution.runtime`` declared, ``workflow_node_profile``): the profile
   is the node's own runtime / tools / requires_labels / config_schema; no
-  Agent definition, no route. Provider/model/thinking resolve separately
-  (node ``execution.*`` → workflow top-level ``execution``) and are checked
-  against the runtime's ``ExecutionContract`` (EXEC-RUNTIME-DISPATCH-001).
+  Agent definition, no route. Provider/model/thinking resolve only from the
+  node's ``execution.*`` and are checked against the runtime's
+  ``ExecutionContract`` (EXEC-RUNTIME-DISPATCH-001, #805).
 - ``agent_definition`` — the legacy path, served only for legacy agent
   nodes: those in job snapshots frozen before the schema v93 inlining, and
   those of an active revision v93 could not inline that still lack a

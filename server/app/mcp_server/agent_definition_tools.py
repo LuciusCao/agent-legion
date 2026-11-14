@@ -14,8 +14,9 @@ AGENT_DEFINITION_RETIRED = (
     "DEPRECATED (#440): Agent definitions no longer supply node execution"
     " profiles — nothing was written. Declare the profile on the workflow agent"
     " node itself and save it with save_workflow_draft: execution.runtime"
-    " (pi | velites; or the workflow top-level execution.runtime default),"
-    " tools, requires_labels, config_schema and skill (key + ref) on the node."
+    " (pi | velites), provider/model/thinking, tools, requires_labels,"
+    " config_schema and skill (key + ref) on that same node. Workflow-level"
+    " execution defaults are retired (#805) and rejected on save."
     " See get_authoring_guide §5 (node execution profile). get_agent_definitions"
     " stays available read-only for the historical definitions."
 )

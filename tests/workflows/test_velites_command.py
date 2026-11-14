@@ -204,8 +204,8 @@ def _node(provider: str = "", model: str = "", thinking: str = "") -> WorkflowNo
 
 @pytest.mark.no_db
 def test_resolve_execution_node_values_win() -> None:
-    # schema v64：workspace 默认已退役，节点 execution（含 loader 合并的
-    # workflow 顶层默认）是唯一来源。
+    # #805：新 dispatch 唯一来源是当前 Agent 节点的 execution；stored
+    # legacy 默认只在读取历史时物化到节点。
     block = resolve_execution_block(_node("node-provider", "node-model", "low"), "velites")
     assert block == {
         "binary": "velites",
@@ -229,8 +229,8 @@ def test_resolve_execution_requires_provider_and_model() -> None:
 
 
 @pytest.mark.no_db
-def test_resolve_execution_error_points_at_studio_and_top_level_defaults() -> None:
-    with pytest.raises(ValueError, match="workflow top-level execution default"):
+def test_resolve_execution_error_points_only_at_the_agent_node() -> None:
+    with pytest.raises(ValueError, match="set execution.provider on this Agent node"):
         resolve_execution_block(_node(), "velites")
 
 

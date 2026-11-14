@@ -50,14 +50,13 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
     # resolve exactly as enqueued.
     defaults = manifest.get("execution_defaults") or {}
     # Revisions are immutable: "live" means a job upgraded to a new revision
-    # pin gets that revision's node execution at claim time. The revision's
-    # node execution already carries the workflow top-level defaults merged
-    # by the loader, so it is the effective value. Resolution chain per key:
-    # current node execution -> enqueue-time workspace defaults (legacy
-    # manifests only) -> the fully resolved execution frozen at enqueue.
-    # Removing a node override therefore falls back to the workflow top-level
-    # default (merged into the revision) or, when neither exists, to the
-    # frozen enqueue-time value. The re-fetched key set is the runtime
+    # pin gets that revision's node execution at claim time. Stored legacy
+    # revisions materialize their old workflow defaults into nodes when read;
+    # new revisions are node-only (#805). The legacy manifest fallback chain is
+    # deliberately unchanged for already-queued work: current node execution ->
+    # enqueue-time workspace defaults -> fully resolved execution frozen at
+    # enqueue. New dispatch never adds those fallback sources. The re-fetched
+    # key set is the runtime
     # adapter's execution contract (EXEC-RUNTIME-DISPATCH-001), not a
     # hardcoded list.
     runtime = str(manifest.get("runtime") or row.get("runtime") or "")

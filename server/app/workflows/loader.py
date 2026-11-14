@@ -5,6 +5,10 @@ from typing import Any
 
 import yaml
 
+from server.app.services.job_errors import (
+    RETIRED_WORKFLOW_EXECUTION_GUIDANCE,
+    RetiredWorkflowExecutionError,
+)
 from server.app.workflows.approval_node import validate_approval_edges
 from server.app.workflows.node_config_schema import load_node_config_schema
 from server.app.workflows.schema import (
@@ -296,8 +300,29 @@ def _load_workflow_definition(raw: dict[str, Any]) -> WorkflowDefinition:
     )
 
 
+def reject_retired_workflow_execution(raw: dict[str, Any]) -> None:
+    """Fail new authoring on key presence, including an empty or null block (#805)."""
+    if "execution" not in raw:
+        return
+    raw_nodes = raw.get("nodes")
+    agent_keys = sorted(
+        str(key)
+        for key, node in (raw_nodes if isinstance(raw_nodes, dict) else {}).items()
+        if isinstance(node, dict) and node.get("type") == "agent"
+    )
+    targets = ", ".join(f"nodes.{key}.execution" for key in agent_keys)
+    detail = f" This draft's Agent targets: {targets}." if targets else ""
+    raise RetiredWorkflowExecutionError(RETIRED_WORKFLOW_EXECUTION_GUIDANCE + detail)
+
+
+def workflow_definition_from_legacy_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
+    """Load a historical mapping, materializing its retired defaults into nodes."""
+    return _load_workflow_definition(raw)
+
+
 def workflow_definition_from_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
-    """Load mapping/YAML input; legacy defaults materialize until M201 rejects them."""
+    """Load strict mapping/YAML authoring input; stored data uses the legacy entry."""
+    reject_retired_workflow_execution(raw)
     return _load_workflow_definition(raw)
 
 
@@ -305,7 +330,7 @@ def workflow_definition_from_dict(
     payload: dict[str, Any],
 ) -> WorkflowDefinition:
     """Load a stored revision/job snapshot, including legacy default materialization."""
-    return _load_workflow_definition(snapshot_to_mapping(payload))
+    return workflow_definition_from_legacy_mapping(snapshot_to_mapping(payload))
 
 
 def load_workflow_definition(

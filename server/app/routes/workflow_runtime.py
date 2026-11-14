@@ -4,10 +4,11 @@ Mounted under the studio_secured() surface via create_workflow_revisions_router
 (require_workspace_access + require_studio_authoring), alongside
 workflow-drafts/* — the Studio separation: structural edits go through the
 draft channel (compare → publish → new revision); runtime settings
-(provider/model/thinking/prompt/prompt_mode/tools/requires_labels + the
-top-level execution defaults of the same family) save directly here, taking
-effect in place on the active revision with an appended immutable config
-version (audit + rollback source). The PATCH/POST writes mount
+(provider/model/thinking/prompt/prompt_mode/tools/requires_labels on each
+node) save directly here, taking effect in place on the active revision with
+an appended immutable config version (audit + rollback source). New authoring
+rejects the retired workflow-level execution block (#805); old runtime history
+still rolls back through a nodes-only legacy adapter. The PATCH/POST writes mount
 reject_studio_agent_scope (STUDIO-AGENT-001), same convention as the draft
 PUT: a scoped run token has no business mutating runtime config; the GET
 stays readable to it (it authenticates as the initiating user).

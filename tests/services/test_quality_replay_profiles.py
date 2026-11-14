@@ -283,6 +283,36 @@ def test_draft_choice_freezes_the_draft_profile(job_db) -> None:
     assert replay["revision_id"] is None
 
 
+def test_legacy_draft_choice_preserves_mixed_node_overrides(job_db) -> None:
+    env = _Env(job_db, _definition(_ORIGINAL))
+    draft = {
+        "key": "test",
+        "label": "Test",
+        "execution": {"provider": "top-provider", "model": "top-model", "thinking": "low"},
+        "nodes": {
+            "intake": {"capability": "intake_items", "outputs": ["question.json"]},
+            "generate": {
+                "type": "agent",
+                "capability": "write_script",
+                "after": ["intake"],
+                "inputs": ["question.json"],
+                "outputs": ["key_info.json"],
+                "execution": {"runtime": "pi", "provider": "node-provider"},
+            },
+        },
+    }
+    job_db.upsert_workspace_workflow_draft(env.workspace_id, yaml.safe_dump(draft))
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", use_draft=True)
+
+    copy_job, _pins = env.copy(replay)
+    execution = _copy_node(copy_job).execution
+    assert execution.runtime == "pi"
+    assert execution.provider == "node-provider"
+    assert execution.model == "top-model"
+    assert execution.thinking == "low"
+
+
 def test_replay_profile_choice_errors(job_db, tmp_path: Path) -> None:
     env = _Env(job_db, _definition(_ORIGINAL))
     legacy_rev = env.add_revision(2, _definition(None), "archived")

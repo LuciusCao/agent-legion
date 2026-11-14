@@ -14,7 +14,7 @@ from typing import Any
 
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION, DEMO_WORKFLOW_KEY
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.loader import workflow_definition_from_dict
+from server.app.workflows.loader import workflow_definition_from_mapping
 
 BUILTIN_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     DEMO_WORKFLOW_KEY: DEMO_WORKFLOW_DEFINITION,
@@ -26,7 +26,7 @@ def load_builtin_workflow(workflow_key: str) -> WorkflowDefinition:
     raw = BUILTIN_WORKFLOW_DEFINITIONS.get(workflow_key)
     if raw is None:
         raise KeyError(workflow_key)
-    return workflow_definition_from_dict(raw)
+    return workflow_definition_from_mapping(raw)
 
 
 def list_builtin_workflows() -> list[WorkflowDefinition]:

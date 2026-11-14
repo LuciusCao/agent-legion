@@ -243,8 +243,8 @@ nodes:                      # mapping, declaration order = presentation order
       outcome: done
     type: agent             # agent node: carries its own execution profile
     skill: {key: reports/summary, ref: latest}
-    execution:              # agent nodes: runtime (REQUIRED, or the top-level
-      runtime: velites      # default) + provider/model/thinking/prompt
+    execution:              # agent nodes: runtime (REQUIRED on this node)
+      runtime: velites      # + provider/model/thinking/prompt; no workflow default
       model: gpt-5.2        # prompt: empty = auto-assembled default instructions;
                             # non-empty = replaces the default wholesale
     config: {}              # optional per-node tunables (see section 5)
@@ -260,9 +260,11 @@ Hard rules enforced at parse/validate time:
 - Edge conditions: `when.path` must start with `$.`; `artifact`/`equals`
   required.
 - Removed fields fail loudly: `runner`, `agent`, `resources` on nodes and
-  `concurrency` at top level are rejected with migration messages. Nodes
-  never declare commands or runners; an agent node's runtime goes ONLY in
-  `execution.runtime` (section 5).
+  `concurrency` at top level are rejected with migration messages. Any
+  workflow top-level `execution` key (including `{}` or `null`) is also
+  rejected (#805): configure every Agent node under `nodes.<key>.execution`.
+  Nodes never declare commands or runners; an agent node's runtime goes ONLY
+  in its own `execution.runtime` (section 5).
 
 ## 4. Capabilities and node kinds
 
@@ -270,9 +272,9 @@ A capability is a snake_case verb_noun (`fetch_data`, `review_questions`).
 The node's kind is its explicit `type`:
 
 - AGENT node (`type: agent`): runs an LLM agent with the node's own
-  execution profile (section 5). Publish validation requires the profile —
-  `execution.runtime` on the node or as the workflow top-level default —
-  and a node `skill` binding; no Agent definition is involved.
+  execution profile (section 5). Publish validation requires
+  `execution.runtime` on that node and a node `skill` binding; no Agent
+  definition or workflow-level default is involved.
 - CODE node (`type: code`, the default): runs on the implicit code
   pool (P-0.5); publish validation requires a published workspace node-code
   version. Otherwise validation reports
@@ -310,9 +312,9 @@ each job's snapshot: a changed profile reaches an in-flight job only after
      runtime → provider → models view, so node `execution.model` values you
      draft correspond to models an online worker can actually claim.
 2. Write the profile fields on the agent node:
-   - `execution.runtime`: `pi` or `velites` (REQUIRED; a workflow top-level
-     `execution.runtime` is the default for every agent node). Publish
-     rejects an agent node without one.
+   - `execution.runtime`: `pi` or `velites` (REQUIRED on every agent node).
+     Publish rejects an agent node without one; workflow-level defaults are
+     retired (#805).
    - `skill`: `{key: group/skill-name, ref: latest | <tag>}` — required on
      the node (there is no definition-level fallback any more).
    - `tools`: allowlist; omitted = the runtime's default tier
@@ -351,9 +353,9 @@ each job's snapshot: a changed profile reaches an in-flight job only after
   connection key in the draft, or tell the human an administrator must
   configure it there — never claim external service connections are
   configured in Studio or in a workflow.
-- Agent execution (`provider`/`model`/`thinking`) resolves node
-  `execution.*` overrides → workflow top-level `execution:` defaults →
-  validation error if unset.
+- Agent execution (`provider`/`model`/`thinking`) resolves only from the
+  current node's `execution.*`; a required value left unset is a dispatch
+  error (#805, EXEC-RUNTIME-DISPATCH-001).
 - Node prompt (`execution.prompt`): the run prompt is a fixed platform
   envelope (job/skill paths, declared inputs/outputs, output discipline)
   plus one node-instructions section. Empty `execution.prompt` means the
@@ -364,29 +366,25 @@ each job's snapshot: a changed profile reaches an in-flight job only after
 
 ### 5.1 Configuring execution (provider/model/thinking)
 
-An agent node's `execution:` block carries `provider`, `model`, `thinking`
-(the only keys; `prompt`/`prompt_mode` are node-level extras — see §5). The
-effective value resolves at definition-load time:
-
-- node `execution:` override first; empty keys fall through to
-- the workflow's top-level `execution:` default block, which the loader
-  merges into every non-start node (workspace-level defaults retired at
-  schema v64 — the top-level block is the only fallback).
-
-A REQUIRED key still empty after the merge fails fast at dispatch
-(EXEC-RUNTIME-DISPATCH-001): both runtimes require `provider` and `model`
-(`thinking` is optional — empty means the runtime decides). Pick values
-from `get_runtime_models(workspace_id)`: the view aggregates the ONLINE
-workers' declarations, so a typed value corresponds to a worker that can
-actually claim the execution. `*` wildcards may appear in the list — a
-worker declared `*` accepts whatever the node types.
+Each agent node's own `execution:` block carries `provider`, `model`,
+`thinking`, `prompt`, and `prompt_mode` alongside its `runtime`. There is no
+workflow-level fallback (#805): a REQUIRED key left empty on the node fails
+fast at dispatch (EXEC-RUNTIME-DISPATCH-001). Both runtimes require
+`provider` and `model`; `thinking` is optional — empty means the runtime
+decides. Pick values from `get_runtime_models(workspace_id)`: the view
+aggregates the ONLINE workers' declarations, so a typed value corresponds to
+a worker that can actually claim the execution. `*` wildcards may appear in
+the list — a worker declared `*` accepts whatever the node types.
 
 Edit execution blocks through the workflow draft round-trip:
-`get_workflow_draft` / `get_active_workflow` → edit the YAML (top-level
-`execution:` and/or per-node overrides) → `validate_workflow` →
-`save_workflow_draft` with the CAS flow (`base_generation` from your
-last read; a 409 carries `current_draft` for rebasing) →
-`compare_workflow` to preview.
+`get_workflow_draft` / `get_active_workflow` → edit each Agent node's
+`execution:` → `validate_workflow` → `save_workflow_draft` with the CAS flow
+(`base_generation` from your last read; a 409 carries `current_draft` for
+rebasing) → `compare_workflow` to preview. If an older draft contains a
+workflow top-level `execution:` block, copy its values into every Agent node
+without overwriting non-empty node values, remove the top-level key, and save
+the nodes-only YAML. The save is rejected without changing the draft or its
+generation until you do so.
 
 ### 5.2 Configuring tools
 
@@ -402,17 +400,13 @@ runtime with `get_agent_runtimes(workspace_id)`: e.g. for velites, `read`/
 select it yourself — listing it is a silent no-op). pi offers the
 `read`/`write`/`bash` trio only.
 
-Concrete example — one workflow with a top-level execution default (runtime
-included), an agent node overriding the model and selecting tools:
+Concrete example — a self-contained agent node selecting its runtime, model,
+and tools (there is no workflow-level execution block):
 
 ```yaml
 key: education_video_problems_generation
 label: 教学视频出题
 schema_version: 2
-execution:                  # workflow-level default for every agent node
-  runtime: velites
-  provider: deepseek
-  model: v4-flash
 nodes:
   intake:
     label: 拉取数据
@@ -426,8 +420,10 @@ nodes:
     skill: {key: keywords/review, ref: latest}
     inputs: [data.json]
     outputs: [review.json]
-    execution:              # node override beats the top-level default
-      model: v4-pro         # runtime/provider fall through to the default
+    execution:              # every value belongs to this Agent node
+      runtime: velites
+      provider: deepseek
+      model: v4-pro
     tools: [read, write, json]
     requires_labels: {gpu: a100}
   report:
@@ -606,13 +602,16 @@ workspace's shared materials instead of copying it into every skill:
   stale base.
 - `no published node code for ...` — publish the node code first
   (`save_node_code_draft` with `expected_capability`, then publish).
+- `Workflow top-level execution is retired (#805)` — copy the old values into
+  every `nodes.<agent_key>.execution` block, preserve non-empty node values,
+  remove the top-level key, and retry. Draft rejection does not advance its
+  generation; stored revisions and frozen jobs need no manual rewrite.
 - `Agent node X must declare its own execution profile` — set
-  `execution.runtime` on node X (or a workflow top-level
-  `execution.runtime` default) plus its `skill` binding (section 5).
+  `execution.runtime` directly on node X plus its `skill` binding (section 5).
 - `Agent node X declares no skill` — bind `skill: {key, ref}` on node X.
-- `node X requires a provider/model ...` at dispatch — a required
-  `execution` key resolved empty: set it on the node's `execution:` block
-  or the workflow's top-level `execution:` default (EXEC-RUNTIME-DISPATCH-001).
+- `node X requires a provider/model ...` at dispatch — set the missing value
+  on that node's `execution:` block; there is no workflow-level fallback
+  (#805, EXEC-RUNTIME-DISPATCH-001).
 - `node X selects tools not offered by agent runtime ...` — the node lists
   a tool the runtime's catalog does not offer;
   pick names from `get_agent_runtimes` (§5.2).

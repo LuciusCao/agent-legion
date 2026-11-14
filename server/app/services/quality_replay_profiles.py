@@ -42,7 +42,7 @@ from server.app.workflows.definition import (
     WorkflowNode,
     workflow_definition_from_dict,
 )
-from server.app.workflows.loader import workflow_definition_from_mapping
+from server.app.workflows.loader import workflow_definition_from_legacy_mapping
 from server.app.workflows.revision_format import definition_from_job_snapshot, definition_hash
 from server.app.workflows.workflow_node_profile import is_self_contained_agent_node
 
@@ -218,7 +218,7 @@ class ReplayProfileResolver:
             raw = yaml.safe_load(str(draft.get("definition_yaml") or ""))
             if not isinstance(raw, dict):
                 raise ValueError("the draft YAML is not a mapping")
-            return workflow_definition_from_mapping(raw)
+            return workflow_definition_from_legacy_mapping(raw)
         except (yaml.YAMLError, ValueError) as exc:
             if strict:
                 raise InvalidOperationError(f"the workflow draft does not load: {exc}") from exc

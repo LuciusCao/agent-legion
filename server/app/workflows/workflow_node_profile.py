@@ -5,9 +5,8 @@ every published ``agent`` node carries its own execution profile — publish
 rejects one without a runtime; resolving a published Agent definition by
 capability survives only for legacy snapshots / nodes v93 could not inline —
 
-- ``execution.runtime`` (one of ``AGENT_RUNTIMES``; the workflow top-level
-  ``execution.runtime`` is the default, merged in by
-  ``workflow_execution_defaults``);
+- ``execution.runtime`` (one of ``AGENT_RUNTIMES``, declared on the node;
+  stored legacy defaults are materialized only by the historical loader #805);
 - node top-level ``requires_labels`` (Worker labels ⊇ these at claim);
 - the existing node ``tools`` / ``config_schema`` / ``skill`` fields.
 

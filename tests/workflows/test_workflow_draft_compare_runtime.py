@@ -113,9 +113,6 @@ def _top_level_execution(**values: str):
             set(),
             id="node-prompt-mode",
         ),
-        pytest.param(
-            _top_level_execution(model="gpt-x"), False, set(), id="legacy-top-level-model"
-        ),
     ],
 )
 def test_compare_creates_revision_matches_publish_path(
@@ -152,3 +149,25 @@ def test_compare_creates_revision_matches_publish_path(
         workspace_id, workflow_definition_from_yaml_string(draft_yaml)
     )
     assert (int(after["version"]) != int(before["version"])) is creates_revision
+
+
+def test_compare_rejects_retired_top_level_execution_without_side_effects(baseline) -> None:
+    app, workspace_id, definition = baseline
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    _top_level_execution(model="must-not-land")(raw)
+    before = app.state.job_db.get_active_workflow_revision(workspace_id, workspace_id)
+
+    with authenticate_client(TestClient(app)) as client:
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": yaml.safe_dump(raw, allow_unicode=True)},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["valid"] is False
+    assert result["summary"] is None
+    assert "#805" in result["errors"][0]["message"]
+    assert f"nodes.{_AGENT_NODE}.execution" in result["errors"][0]["message"]
+    after = app.state.job_db.get_active_workflow_revision(workspace_id, workspace_id)
+    assert after == before

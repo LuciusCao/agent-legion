@@ -1,6 +1,8 @@
 from server.app.workflows.loader import (
     load_workflow_definition,
+    reject_retired_workflow_execution,
     workflow_definition_from_dict,
+    workflow_definition_from_legacy_mapping,
     workflow_definition_from_mapping,
 )
 from server.app.workflows.schema import (
@@ -28,6 +30,8 @@ __all__ = [
     "WorkflowTerminal",
     "_validate_acyclic",
     "load_workflow_definition",
+    "reject_retired_workflow_execution",
     "workflow_definition_from_dict",
+    "workflow_definition_from_legacy_mapping",
     "workflow_definition_from_mapping",
 ]

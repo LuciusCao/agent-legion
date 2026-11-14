@@ -112,9 +112,9 @@ def test_missing_revision_keeps_defaults_then_frozen() -> None:
 
 @pytest.mark.no_db
 def test_new_manifest_without_defaults_resolves_revision_then_frozen() -> None:
-    # schema v64 后的新 manifest 没有 execution_defaults：revision 的节点
-    # execution（已含合并的顶层默认）优先，节点覆盖被删且顶层无默认时落回
-    # enqueue 冻结的 execution。
+    # 新 manifest 没有 execution_defaults：revision 的节点 execution 优先；
+    # 旧 stored revision 的顶层默认只在读取时物化到节点，节点无值时仍按旧
+    # queued-work 兼容契约落回 enqueue 冻结的 execution。
     manifest = _manifest()
     del manifest["execution_defaults"]
     row = _row(

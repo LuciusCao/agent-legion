@@ -27,6 +27,7 @@ from server.app.services.workflow_draft_store import (
     attach_draft_identity_hash,
     get_workflow_draft_state,
 )
+from server.app.services.workflow_drafts import reject_retired_workflow_execution_yaml
 
 
 def _conflict_payload(
@@ -72,6 +73,7 @@ def save_workflow_draft_if_unchanged(
     """
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
+    reject_retired_workflow_execution_yaml(definition_yaml)
     try:
         draft = attach_draft_identity_hash(
             job_db.upsert_workspace_workflow_draft_if_unchanged(

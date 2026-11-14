@@ -1,10 +1,11 @@
 """Legacy workflow-level execution defaults, materialized into node profiles.
 
-Persisted revisions, intake-frozen job snapshots and pre-M201 mapping/YAML input
-may still contain the top-level block. Loading fills empty fields on Agent nodes
-and non-runtime fields on pre-explicit-type aliases, preserving node overrides
-and legacy nodes whose runtime was never declared. Explicit non-Agent nodes are
-left untouched; M201 owns the separate authoring-write rejection.
+Persisted revisions, intake-frozen job snapshots and historical draft mappings
+may still contain the top-level block. The explicit legacy loader fills empty
+fields on Agent nodes and non-runtime fields on pre-explicit-type aliases,
+preserving node overrides and legacy nodes whose runtime was never declared.
+Explicit non-Agent nodes are left untouched; strict authoring rejects the block
+on every new write (#805).
 """
 
 from __future__ import annotations

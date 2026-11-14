@@ -119,7 +119,7 @@ def node_profile_error(node: Any) -> str | None:
     if getattr(node, "requires_labels", None):
         return (
             f"Agent node {node.key} declares requires_labels but no execution.runtime:"
-            " a self-contained profile needs execution.runtime (or a workflow top-level"
-            " execution.runtime default); remove requires_labels to keep the Agent definition"
+            " set execution.runtime directly on this Agent node; workflow-level defaults"
+            " are retired (#805), or remove requires_labels to keep the legacy definition"
         )
     return None

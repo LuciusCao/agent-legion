@@ -139,10 +139,10 @@ def _load_catalog(conn: Any, workspace_id: str) -> LegacyCatalog:
 
 
 def _loads(kind: str, payload: dict[str, Any]) -> bool:
-    """True when *payload* loads through the current workflow loader."""
+    """Validate historical rows through the stored/legacy loader, never strict authoring."""
     from server.app.workflows.loader import (
         workflow_definition_from_dict,
-        workflow_definition_from_mapping,
+        workflow_definition_from_legacy_mapping,
     )
     from server.app.workflows.schema import WorkflowDefinitionError
 
@@ -150,7 +150,7 @@ def _loads(kind: str, payload: dict[str, Any]) -> bool:
         if kind == "active_revision":
             workflow_definition_from_dict(copy.deepcopy(payload))
         else:
-            workflow_definition_from_mapping(copy.deepcopy(payload))
+            workflow_definition_from_legacy_mapping(copy.deepcopy(payload))
     except (WorkflowDefinitionError, ValueError):
         return False
     return True

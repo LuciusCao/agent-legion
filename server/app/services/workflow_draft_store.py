@@ -16,7 +16,10 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
-from server.app.services.workflow_drafts import workflow_draft_identity_hash
+from server.app.services.workflow_drafts import (
+    reject_retired_workflow_execution_yaml,
+    workflow_draft_identity_hash,
+)
 
 __all__ = [
     "attach_draft_identity_hash",
@@ -52,6 +55,7 @@ def save_workflow_draft(
 ) -> dict[str, Any]:
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
+    reject_retired_workflow_execution_yaml(definition_yaml)
     draft = attach_draft_identity_hash(
         job_db.upsert_workspace_workflow_draft(workspace_id, definition_yaml)
     )

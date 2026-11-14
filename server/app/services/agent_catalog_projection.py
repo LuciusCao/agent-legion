@@ -22,8 +22,8 @@ def agent_catalog(
     The Agent half is workspace-scoped (schema v46): Studio shows the
     workspace's own published definitions, with no global fallback. The
     executors half retired with the executor concept (schema v47). Execution
-    defaults are workflow-scoped: the Studio default hints read the workflow
-    top-level ``execution`` block (workspace agentDefaults retired at v64).
+    values live only on Agent nodes (#805); these historical definitions do
+    not supply provider/model/thinking defaults.
     """
     if agent_definitions is None:
         agent_definitions = legacy_agent_catalog(

@@ -37,8 +37,8 @@ def test_catalog_exposes_published_agent_definitions(
     assert "skill_ref" not in agent
     assert "skill_commit" not in agent
     assert agent["tools"] == ["read", "write", "bash"]
-    # 全局 provider/model/thinking 投影已退役：执行默认走 workflow 顶层
-    # execution 块（workspace agentDefaults 已随 schema v64 退役）。
+    # provider/model/thinking 只配置在各 Agent 节点（#805），历史 catalog
+    # 定义不携带这些执行值。
     assert "provider" not in agent
     assert "model" not in agent
     assert "thinking" not in agent

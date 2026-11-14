@@ -15,9 +15,9 @@ from server.app.db.transaction import read_connection
 #: job may still dispatch from: the workspace's ACTIVE revision, or any
 #: revision a runnable job is pinned to (the profile is frozen with the job
 #: snapshot, so publishing a later legacy-only revision must not strand the
-#: in-flight self-contained nodes — PR #1039 codex R1). The loader bakes the
-#: workflow top-level ``execution.runtime`` default into every agent node, so
-#: the persisted snapshot's per-node runtime is the effective one. Malformed
+#: in-flight self-contained nodes — PR #1039 codex R1). New revisions declare
+#: runtime on each agent node (#805); the stored loader materializes that same
+#: per-node effective value for historical snapshots. Malformed
 #: JSON / a non-object ``nodes`` read as "none" (the CASE guards keep the
 #: cast and jsonb_each total; no jsonpath filter — its ``?`` would trip the
 #: legacy-placeholder guard).

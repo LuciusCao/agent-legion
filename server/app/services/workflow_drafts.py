@@ -13,16 +13,28 @@ from server.app.services.workflow_draft_publish_gates import validate_workflow_f
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowDefinitionError,
+    reject_retired_workflow_execution,
     workflow_definition_from_mapping,
 )
 from server.app.workflows.revision_format import definition_hash, serialize_definition
 
 __all__ = [
+    "reject_retired_workflow_execution_yaml",
     "validate_workflow_definition",
     "validate_workflow_for_publish",
     "workflow_definition_from_yaml_string",
     "workflow_draft_identity_hash",
 ]
+
+
+def reject_retired_workflow_execution_yaml(raw_yaml: str) -> None:
+    """Draft stores accept broken YAML, but never a parseable retired block (#805)."""
+    try:
+        raw = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError:
+        return
+    if isinstance(raw, dict):
+        reject_retired_workflow_execution(raw)
 
 
 def workflow_definition_from_yaml_string(raw_yaml: str) -> WorkflowDefinition:

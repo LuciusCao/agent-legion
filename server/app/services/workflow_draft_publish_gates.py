@@ -39,8 +39,8 @@ def validate_workflow_for_publish(
     """Publish validation, driven by each node's explicit ``type``.
 
     ``type: agent`` nodes must be self-contained (#935, #440 P3 gate flip:
-    ``execution.runtime`` declared on the node or as the workflow top-level
-    default) — Agent definitions are retired as a profile source, so a node
+    ``execution.runtime`` declared on the node; workflow defaults retired in
+    #805) — Agent definitions are retired as a profile source, so a node
     resolving its profile by capability no longer publishes; ``requires_labels``
     without a runtime is a half-filled profile and fails. Their skill must be
     bound on the node (a self-contained profile has no definition fallback).
@@ -73,10 +73,10 @@ def validate_workflow_for_publish(
         if is_agent and not is_self_contained_agent_node(node):
             errors.append(
                 f"Agent node {node.key} must declare its own execution profile:"
-                " set execution.runtime (pi | velites) on the node or as the workflow"
-                " top-level execution.runtime default, plus tools / requires_labels /"
-                " config_schema / skill as needed — Agent definitions no longer supply"
-                " node profiles (#440)"
+                " set execution.runtime (pi | velites) directly on this Agent node,"
+                " plus tools / requires_labels / config_schema / skill as needed —"
+                " workflow-level defaults are retired (#805) and Agent definitions"
+                " no longer supply node profiles (#440)"
             )
             continue
         profile = resolve_agent_node_profile(node, agents, index=index)

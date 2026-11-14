@@ -21,7 +21,10 @@ from server.app.db.migrations.agent_profile_backfill import migrate_agent_profil
 from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.workflows.definition import workflow_definition_from_dict
-from server.app.workflows.loader import workflow_definition_from_mapping
+from server.app.workflows.loader import (
+    workflow_definition_from_legacy_mapping,
+    workflow_definition_from_mapping,
+)
 from server.app.workflows.revision_format import serialize_definition
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -269,6 +272,27 @@ def test_draft_is_rewritten_sparsely_and_loads() -> None:
     definition = workflow_definition_from_mapping(draft)
     assert definition.nodes["gen"].config_schema == _GEN.config_schema
     assert {b["source"] for b in backups} == {"active_revision", "draft"}
+
+
+def test_legacy_draft_with_top_level_execution_uses_the_v93_legacy_loader() -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed(conn)
+        legacy = yaml.safe_load(_WORKFLOW_YAML)
+        legacy["execution"] = {"provider": "legacy-provider", "model": "legacy-model"}
+        conn.execute(
+            "update workspace_workflow_drafts set definition_yaml=%s where workspace_id=%s",
+            (yaml.safe_dump(legacy), _WS),
+        )
+        migrate_agent_profile_backfill(conn)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        draft = yaml.safe_load(_draft(conn))
+    loaded = workflow_definition_from_legacy_mapping(draft)
+    assert loaded.nodes["gen"].execution.runtime == "velites"
+    assert loaded.nodes["gen"].execution.provider == "legacy-provider"
+    assert loaded.nodes["gen"].execution.model == "legacy-model"
+    with pytest.raises(ValueError, match="#805"):
+        workflow_definition_from_mapping(draft)
 
 
 def test_replay_is_a_no_op() -> None:

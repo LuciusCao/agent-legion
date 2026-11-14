@@ -51,8 +51,10 @@ def register_draft_tools(mcp: FastMCP, client_factory: ClientFactory) -> None:
         current_draft.definition_hash): rebase onto it and retry with its
         generation. The response echoes {"definition_yaml", "updated_at",
         "definition_hash", "generation"} — the semantic identity and new
-        generation of what you just saved (#1143). Draft only — the human
-        confirms every publish."""
+        generation of what you just saved (#1143). Agent execution belongs on
+        each nodes.<key>.execution block; any workflow top-level execution key
+        (including {} or null) is rejected with #805 migration guidance and no
+        draft/generation change. Draft only — the human confirms every publish."""
         _, client = await client_factory()
         body: dict[str, Any] = {
             "definition_yaml": definition_yaml,

@@ -75,6 +75,33 @@ def test_unparseable_draft_carries_null_identity(client, job_db) -> None:
     assert client.get(_url(workspace["id"])).json()["definition_hash"] is None
 
 
+def test_put_rejects_retired_top_level_execution_without_row_or_generation_changes(
+    client, job_db
+) -> None:
+    workspace = job_db.create_workspace("ws-store-retired-execution")
+    saved = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
+    assert saved.status_code == 200
+    before = client.get(_url(workspace["id"])).json()
+    retired_yaml = (
+        "key: wf\nlabel: Draft\nexecution: {}\nnodes:\n  intake:\n    capability: intake\n"
+    )
+
+    legacy_lww = client.put(_url(workspace["id"]), json={"definition_yaml": retired_yaml})
+    cas = client.put(
+        _url(workspace["id"]),
+        json={
+            "definition_yaml": retired_yaml.replace("execution: {}", "execution: null"),
+            "base_generation": before["generation"],
+        },
+    )
+
+    for response in (legacy_lww, cas):
+        assert response.status_code == 422
+        assert "#805" in response.json()["detail"]
+        assert "nodes.<agent_key>.execution" in response.json()["detail"]
+    assert client.get(_url(workspace["id"])).json() == before
+
+
 def test_put_overwrites_the_previous_draft(client, job_db) -> None:
     workspace = job_db.create_workspace("ws-store-overwrite")
     client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})

@@ -4,9 +4,9 @@ Workspace-scoped versioned entities sharing the draft → published → archived
 lifecycle engine with custom node codes; the v46 migration deleted the global
 rows, so resolution never falls back to a global scope. Execution
 configuration (provider/model/thinking) is not part of the definition: it
-resolves strictly from the node ``execution`` override, then the workflow
-top-level ``execution`` default, else fails — no workspace/global fallback
-(EXEC-RUNTIME-DISPATCH-001; AGENTS.md §6). Self-contained agent nodes
+resolves strictly from the node ``execution`` block, else fails — there is no
+workflow/workspace/global fallback (EXEC-RUNTIME-DISPATCH-001; #805).
+Self-contained agent nodes
 (``execution.runtime``) bypass this catalog entirely (EXEC-AGENT-PROFILE-001).
 Hot read paths go through the short-TTL module cache below.
 """

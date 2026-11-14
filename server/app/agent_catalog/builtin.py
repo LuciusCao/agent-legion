@@ -8,10 +8,9 @@ workspace that binds the demo workflow, seed-if-absent, so admin edits and
 archivals inside the workspace are never overwritten or resurrected.
 
 Execution configuration (provider/model/thinking) is deliberately NOT part of
-these definitions — the loader merges the workflow top-level ``execution``
-defaults into every non-start node (code nodes simply never read them) and
-node ``execution.*`` overrides win; workspace-level defaults were retired at
-schema v64. The demo expects the operator to configure execution in Studio.
+these definitions — every Agent node declares its own ``execution`` values;
+workflow/workspace defaults are retired (#805). The demo expects the operator
+to configure execution on each Agent node in Studio.
 Skill bindings live on the demo DAG nodes (issue #76), not on these
 definitions; the referenced skills resolve to the in-place repos imported by
 ``make import-demo`` under the skills root.
