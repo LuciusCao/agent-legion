@@ -10,6 +10,9 @@ from server.app.db.migrations.approval_batch import migrate_approval_batch
 from server.app.db.migrations.job_batch_operations import (
     migrate_job_batch_operations_archive,
 )
+from server.app.db.migrations.workflow_execution_defaults_retirement import (
+    migrate_workflow_execution_defaults_retirement,
+)
 from server.app.db.migrations.workflow_runtime_config_versions import (
     migrate_workflow_runtime_config_versions,
 )
@@ -37,4 +40,11 @@ LATEST_MIGRATIONS: list[SchemaMigration] = [
     # v104 (#1363): approval decision payload + batch audit context, and the
     # approve/reject job-batch operation kinds.
     SchemaMigration(104, "approval_batch", migrate_approval_batch),
+    # v105 (#805): retire stored workflow-level execution defaults. #402 also
+    # reserved v105 on its branch; the later merge must renumber that entry.
+    SchemaMigration(
+        105,
+        "workflow_execution_defaults_retirement",
+        migrate_workflow_execution_defaults_retirement,
+    ),
 ]

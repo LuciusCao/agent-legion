@@ -266,9 +266,24 @@ def test_draft_is_rewritten_sparsely_and_loads() -> None:
     assert "requires_labels" not in nodes["review_b"]
     assert "config_schema" not in nodes["review_b"]
     assert "execution" not in nodes["ghost"]
-    definition = workflow_definition_from_mapping(draft)
+    definition = workflow_definition_from_dict(draft)
     assert definition.nodes["gen"].config_schema == _GEN.config_schema
     assert {b["source"] for b in backups} == {"active_revision", "draft"}
+
+
+def test_historical_draft_backfill_does_not_depend_on_authoring_loader(monkeypatch) -> None:
+    def reject_authoring(_payload):
+        raise AssertionError("v93 must use the explicit stored legacy loader")
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed(conn)
+        monkeypatch.setattr(
+            "server.app.workflows.loader.workflow_definition_from_mapping", reject_authoring
+        )
+        migrate_agent_profile_backfill(conn)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        draft = yaml.safe_load(_draft(conn))
+    assert draft["nodes"]["gen"]["execution"]["runtime"] == "velites"
 
 
 def test_replay_is_a_no_op() -> None:

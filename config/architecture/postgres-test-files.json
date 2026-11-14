@@ -84,6 +84,7 @@
     "tests/db/test_versioned_entities_migration.py",
     "tests/db/test_workflow_catalog_retirement.py",
     "tests/db/test_workflow_draft_generation_migration.py",
+    "tests/db/test_workflow_execution_retirement_migration.py",
     "tests/db/test_workflow_node_explicit_types_migration.py",
     "tests/db/test_workflow_upgrade_mutation.py",
     "tests/db/test_workspace_api_tokens_migration.py",
