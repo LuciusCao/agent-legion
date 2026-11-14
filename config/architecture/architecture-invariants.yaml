@@ -415,6 +415,9 @@ invariants:
         target: tests/workflows/test_workflow_loader.py
         gate: quick
       - kind: integration
+        target: tests/workflows/test_workflow_draft_compare.py
+        gate: quick
+      - kind: integration
         target: tests/services/test_workflow_draft_publish_gates.py
         gate: quick
       - kind: contract
