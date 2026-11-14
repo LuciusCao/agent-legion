@@ -265,6 +265,7 @@ describe('useWorkflowStudioActions（发布）', () => {
     expect(result.current.publishing).toBe(false)
     expect(result.current.validationMessage).toBe('校验通过')
     expect(result.current.canPublish).toBe(true)
+    expect(result.current.publishError).toBe('保存失败：network error')
     // toast 仍报失败（用户可见）。
     expect(useUiStore.getState().toast).toEqual({
       message: '保存失败：network error',

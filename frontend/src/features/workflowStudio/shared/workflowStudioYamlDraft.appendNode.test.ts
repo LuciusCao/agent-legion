@@ -64,7 +64,7 @@ describe('appendWorkflowNode', () => {
     })
   })
 
-  it('lets a new agent node inherit the workflow top-level runtime (#935)', () => {
+  it('leaves a new agent runtime empty for legacy completion instead of inventing velites', () => {
     const out = appendWorkflowNode(`execution:\n  runtime: pi\n${baseYaml}`, {
       nodeType: 'agent',
       key: 'gen',

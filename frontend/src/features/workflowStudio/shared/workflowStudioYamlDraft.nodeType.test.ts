@@ -416,7 +416,7 @@ describe('patchWorkflowNodeType agent profile fields (#935)', () => {
     })
   })
 
-  it('lets a node turned agent inherit the workflow top-level runtime', () => {
+  it('keeps a node turned agent in legacy completion instead of inventing velites', () => {
     const out = patchWorkflowNodeType(
       `execution:\n  runtime: pi\n${baseYaml}`,
       'intake',

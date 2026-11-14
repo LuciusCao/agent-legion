@@ -353,9 +353,7 @@ describe('workflowYamlToDefinitionRecord', () => {
     ).toBeNull()
   })
 
-  it('merges top-level execution defaults into non-start nodes (#333)', () => {
-    // 对齐后端 loader：顶层 execution 默认合并进每个非 start 节点（节点值
-    // 优先），草稿记录的节点 execution 即有效值，与 published 快照同形。
+  it('keeps mixed node overrides nodes-only and ignores top-level execution', () => {
     const record = workflowYamlToDefinitionRecord(`key: demo
 execution:
   provider: openai
@@ -374,16 +372,10 @@ nodes:
     const nodes = Object.fromEntries(
       (record?.nodes ?? []).map((node) => [node.key, node])
     )
-    expect(nodes.review?.execution).toEqual({
-      provider: 'openai',
-      model: 'gpt-5',
-      thinking: '',
-      prompt: '',
-      prompt_mode: '',
-    })
+    expect(nodes.review?.execution).toBeUndefined()
     expect(nodes.fetch?.execution).toEqual({
       provider: 'pi',
-      model: 'gpt-5',
+      model: '',
       thinking: '',
       prompt: '',
       prompt_mode: '',
@@ -391,9 +383,7 @@ nodes:
     expect(nodes._start?.execution).toBeUndefined()
   })
 
-  it('carries execution runtime into the draft record (#1180 草稿画布徽标口径)', () => {
-    // r3 评审回归：runtime 丢失会让草稿画布的 agent·runtime 类型徽标恒无
-    // runtime；顶层 runtime 默认只达 agent 节点（#933，对齐后端 loader）。
+  it('carries only node-declared runtime and leaves legacy nodes for profile completion', () => {
     const record = workflowYamlToDefinitionRecord(`key: demo
 execution:
   provider: openai
@@ -416,14 +406,10 @@ nodes:
     const nodes = Object.fromEntries(
       (record?.nodes ?? []).map((node) => [node.key, node])
     )
-    // 顶层默认落到未声明的 agent 节点。
-    expect(nodes.review?.execution?.runtime).toBe('pi')
-    // 节点声明值优先。
+    expect(nodes.review?.execution).toBeUndefined()
     expect(nodes.classify?.execution?.runtime).toBe('velites')
-    // code 节点不携带 runtime。
-    expect(nodes.fetch?.execution && 'runtime' in nodes.fetch.execution).toBe(
-      false
-    )
+    // 未声明 execution 的节点保持空记录，不补顶层 runtime。
+    expect(nodes.fetch?.execution).toBeUndefined()
     expect(nodes._start?.execution).toBeUndefined()
   })
 

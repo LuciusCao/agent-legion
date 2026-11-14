@@ -19,8 +19,8 @@ type Props = {
 // 再需要类型分叉。
 export function WorkflowNodeExecutionSection(props: Props) {
   const { node } = props
-  // #935（#440 P3）：节点（或 workflow 顶层）声明了 execution.runtime 即
-  // 自含执行档案——编辑全部写进节点草稿。#1079（#440 P3b）：Agent 定义
+  // 节点自身声明 execution.runtime 即自含执行档案；缺失时保留 legacy
+  // 补档入口，不回读 workflow 顶层。Agent 定义
   // 不再参与节点编辑（不解析 capability → Agent、不渲染 AgentEditor）。
   const runtimeInfo = useNodeRuntimeInfo(node, props.definitionYaml)
   // 防御：#392 Phase 2 起注册表只把本 section 挂在 code/agent 类型上，

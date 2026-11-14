@@ -4,6 +4,7 @@ import {
   diffRuntimeSliceKeys,
   extractRuntimeSlice,
   hasStructuralYamlChanges,
+  hasTopLevelExecution,
 } from './workflowRuntimeSlice'
 
 const BASELINE = `key: ws1
@@ -36,14 +37,24 @@ edges:
     to: write_script
 `
 
+describe('hasTopLevelExecution', () => {
+  it('检测顶层块而不误判节点 execution', () => {
+    expect(hasTopLevelExecution(BASELINE)).toBe(true)
+    expect(
+      hasTopLevelExecution(
+        BASELINE.replace(
+          'execution:\n  provider: openai\n  model: gpt-5.1\n',
+          ''
+        )
+      )
+    ).toBe(false)
+  })
+})
+
 describe('extractRuntimeSlice', () => {
-  it('归一化节点与顶层 runtime 键（含空值）', () => {
+  it('只归一化节点 runtime 键（含空值），忽略顶层 execution', () => {
     const slice = extractRuntimeSlice(BASELINE)
-    expect(slice.execution).toEqual({
-      provider: 'openai',
-      model: 'gpt-5.1',
-      thinking: '',
-    })
+    expect(slice).toEqual({ nodes: expect.any(Object) })
     expect(slice.nodes.write_script).toEqual({
       provider: '',
       model: 'gpt-5.1',
@@ -75,7 +86,7 @@ describe('extractRuntimeSlice', () => {
 })
 
 describe('diffRuntimeSliceKeys', () => {
-  it('报节点级与顶层差异的点路径', () => {
+  it('只报节点级差异的点路径，顶层变化不进入运行通道', () => {
     const draft = BASELINE.replace(
       'model: gpt-5.1\n      thinking: low',
       'model: gpt-5.2\n      thinking: low'
@@ -87,7 +98,6 @@ describe('diffRuntimeSliceKeys', () => {
       extractRuntimeSlice(draft)
     )
     expect(keys).toEqual([
-      'execution.provider',
       'nodes.write_script.model',
       'nodes.write_script.tools',
     ])
@@ -144,7 +154,7 @@ describe('combineYamlStructureRuntime', () => {
     )
   })
 
-  it('runtime 侧空值 = 清除（声明回到继承）', () => {
+  it('runtime 侧空值 = 清除节点声明', () => {
     const draft = BASELINE.replace(
       '      model: gpt-5.1\n      thinking: low\n',
       ''
@@ -170,15 +180,11 @@ describe('combineYamlStructureRuntime', () => {
     )
   })
 
-  it('顶层 execution 默认块只搬 provider/model/thinking，保留顶层 runtime', () => {
-    const structure = BASELINE.replace(
-      'execution:\n  provider: openai\n  model: gpt-5.1',
-      'execution:\n  runtime: velites\n  provider: openai\n  model: gpt-5.1'
-    )
-    const draft = structure.replace('provider: openai', 'provider: google')
-    const merged = combineYamlStructureRuntime(structure, draft)
-    expect(merged).toContain('provider: google')
-    expect(merged).toContain('runtime: velites')
+  it('顶层 execution 不搬值、不删除结构侧原文', () => {
+    const draft = BASELINE.replace('provider: openai', 'provider: google')
+    const merged = combineYamlStructureRuntime(BASELINE, draft)
+    expect(merged).toContain('provider: openai')
+    expect(merged).not.toContain('provider: google')
   })
 })
 
@@ -208,7 +214,7 @@ describe('hasStructuralYamlChanges', () => {
     ).toBe(true)
   })
 
-  it('execution.runtime 切换 = 结构改动（含顶层默认换算到节点有效值）', () => {
+  it('节点 execution.runtime 切换 = 结构改动', () => {
     expect(
       hasStructuralYamlChanges(
         BASELINE,
@@ -217,27 +223,7 @@ describe('hasStructuralYamlChanges', () => {
     ).toBe(true)
   })
 
-  it('#1353：纯 code 节点 workflow 改顶层 execution.runtime 非结构改动（后端默认只合并进 agent 节点）', () => {
-    const base = `key: ws1
-execution:
-  runtime: velites
-nodes:
-  _start:
-    type: start
-  intake:
-    type: code
-    capability: intake
-    after: [_start]
-`
-    expect(
-      hasStructuralYamlChanges(
-        base,
-        base.replace('runtime: velites', 'runtime: pi')
-      )
-    ).toBe(false)
-  })
-
-  it('#1353：agent 节点继承顶层 runtime 默认，顶层变化仍是结构改动', () => {
+  it('顶层 execution.runtime 不换算成节点结构值', () => {
     const base = `key: ws1
 execution:
   runtime: velites
@@ -254,7 +240,7 @@ nodes:
         base,
         base.replace('runtime: velites', 'runtime: pi')
       )
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it('键序不同的同义 YAML 不误判', () => {

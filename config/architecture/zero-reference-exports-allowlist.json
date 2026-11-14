@@ -42,11 +42,6 @@
       "reason": "确认死代码（零引用类型导出）；同上，转 follow-up 清理"
     },
     {
-      "path": "frontend/src/features/workflowStudio/shared/workflowStudioYamlDraft.runtime.ts",
-      "symbol": "workflowDefaultRuntime",
-      "reason": "确认死代码（零引用函数）；同上，转 follow-up 清理"
-    },
-    {
       "path": "frontend/src/hooks/jobArtifactJson.ts",
       "symbol": "fetchJobArtifactJson",
       "reason": "确认死代码——#732 四个样本同型：#980（#328 影子层清理）删调用方漏删实现方；同上，转 follow-up 清理"

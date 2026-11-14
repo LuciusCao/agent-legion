@@ -25,8 +25,7 @@ vi.mock('../../../components/SkillSelector', () => ({
   SkillSelector: () => <div data-testid="skill-selector-stub" />,
 }))
 
-// 「继承默认」提示来自草稿 YAML 顶层 execution 块；datalist 选项来自
-// useWorkspaceRuntimeModels（在线 Worker 声明的 runtime/provider/model）。
+// datalist 选项来自 useWorkspaceRuntimeModels（在线 Worker 声明的目录）。
 vi.mock('../shared/useWorkspaceRuntimeModels', () => ({
   useWorkspaceRuntimeModels: () => ({
     data: {
@@ -49,7 +48,7 @@ const node: WorkflowNodeRecord = {
   terminal: null,
 }
 
-// 自含节点（节点级 execution.runtime）+ workflow 顶层执行默认。
+// 自含节点（节点级 execution.runtime）+ 应被忽略的 legacy 顶层执行块。
 const selfContainedYaml = `execution:\n  provider: deepseek\n  model: your-model-b\n  thinking: low\nnodes:\n  generate_key_info:\n    type: agent\n    capability: generate_key_info\n    execution:\n      runtime: pi\n`
 
 // legacy 节点：节点与 workflow 顶层都没有 runtime（v93 未能内联）。
@@ -99,15 +98,16 @@ describe('WorkflowNodeExecutionSection node profile (#935 / #1079)', () => {
     expect(screen.queryByText(/Agent 默认/)).not.toBeInTheDocument()
   })
 
-  it('treats the workflow top-level runtime as a self-contained profile', () => {
+  it('keeps a node without its own runtime in legacy completion despite a top-level runtime', () => {
     renderSection({
       node,
       definitionYaml: `execution:\n  runtime: pi\n  provider: deepseek\nnodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
       setDefinitionYaml: () => {},
     })
 
-    expect(screen.queryByText(/尚未内联执行档案/)).not.toBeInTheDocument()
-    expect(screen.getByText(/继承 workflow 默认（pi）/)).toBeInTheDocument()
+    expect(screen.getByText(/尚未内联执行档案/)).toBeInTheDocument()
+    expect(screen.queryByText(/继承 workflow 默认/)).not.toBeInTheDocument()
+    expect(screen.getByText('未设置（发布前必须选择）')).toBeInTheDocument()
   })
 
   it('writes the selected runtime onto the node execution block', () => {

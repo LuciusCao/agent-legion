@@ -602,7 +602,10 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     // 4xx 是确定性的请求侧拒绝（如前后端空白判定口径差导致的 422）——
     // 走退避重试必然同样失败，只产生误导性的「将自动重试」与无效流量。
     mocks.putWorkflowDraft.mockRejectedValue(
-      Object.assign(new Error('HTTP 422'), { status: 422 })
+      Object.assign(
+        new Error('顶层 execution 已退役；请把各字段移到每个 agent 节点'),
+        { status: 422 }
+      )
     )
     const { result } = renderEdited()
 
@@ -627,8 +630,11 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
     })
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(1)
     expect(result.current.state.status).toBe('error')
-    // 终态文案不得承诺自动重试（#1204 codex P2）。
+    // 终态文案不得承诺自动重试（#1204 codex P2），服务端迁移详情持续保留。
     expect(result.current.state.saveError).toBe('terminal')
+    expect(result.current.state.saveErrorMessage).toContain(
+      '请把各字段移到每个 agent 节点'
+    )
   })
 
   it('recovers to saved when a retry succeeds', async () => {
@@ -646,6 +652,7 @@ describe('useWorkflowDraftPersistence PUT retry', () => {
 
     expect(mocks.putWorkflowDraft).toHaveBeenCalledTimes(2)
     await waitFor(() => expect(result.current.state.status).toBe('saved'))
+    expect(result.current.state.saveErrorMessage).toBeNull()
   })
 
   it('lets a newer edit supersede a pending retry', async () => {

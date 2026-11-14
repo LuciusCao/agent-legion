@@ -1,6 +1,12 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Button, Chip, ToggleButton, ToggleButtonGroup } from '@mui/material'
+import {
+  Alert,
+  Button,
+  Chip,
+  ToggleButton,
+  ToggleButtonGroup,
+} from '@mui/material'
 import type { WorkflowNodeRecord } from '../../../types'
 import { MaterialIcon } from '../../../components/MaterialIcon'
 import { useStudioStateOptional } from '../shared/studioStateContext'
@@ -14,7 +20,6 @@ import {
   patchWorkflowNodeExecution,
 } from '../shared/workflowStudioYamlDraft.execution'
 import { normalizeStringList } from '../shared/workflowStudioYamlDraft.parse'
-import { parseWorkflowExecutionDefaults } from '../shared/workflowStudioYamlDraft.executionDefaults'
 import { useWorkspaceRuntimeModels } from '../shared/useWorkspaceRuntimeModels'
 import { useRuntimeModelOptions } from './runtimeModelOptions'
 import { useRuntimeToolEntries } from './useAgentRuntimes'
@@ -22,7 +27,7 @@ import { useNodeRuntimeInfo } from './WorkflowNodeProfileBody'
 import { WorkflowChannelBadge } from './WorkflowChannelBadge'
 import { WorkflowChipEditor } from './WorkflowChipEditor'
 import { WorkflowNodeThinkingField } from './WorkflowNodeThinkingField'
-import { WorkflowRuntimeInheritedField } from './WorkflowRuntimeInheritedField'
+import { WorkflowRuntimeField } from './WorkflowRuntimeField'
 import { WorkflowRuntimeVersionsDialog } from './WorkflowRuntimeVersionsDialog'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeRuntimeChannelSection.module.css'
@@ -96,11 +101,6 @@ export function WorkflowNodeRuntimeChannelSection(props: {
       originalYaml ? parseWorkflowNode(originalYaml, node.key) : undefined,
     [originalYaml, node.key]
   )
-  const defaults = useMemo(
-    () => parseWorkflowExecutionDefaults(props.definitionYaml),
-    [props.definitionYaml]
-  )
-
   const execution = draftNode?.execution ?? node.execution ?? {}
   const baselineExecution = baselineNode?.execution ?? {}
 
@@ -294,10 +294,9 @@ export function WorkflowNodeRuntimeChannelSection(props: {
         </p>
 
         <div className={styles.fields}>
-          <WorkflowRuntimeInheritedField
+          <WorkflowRuntimeField
             label="Provider"
             value={currentValue('provider')}
-            inherited={defaults.provider ?? ''}
             options={providerOptions}
             listId={`${datalistPrefix}-provider`}
             readOnly={props.readOnly}
@@ -310,10 +309,9 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             }
             onChange={(value) => patch('provider', value)}
           />
-          <WorkflowRuntimeInheritedField
+          <WorkflowRuntimeField
             label="Model"
             value={currentValue('model')}
-            inherited={defaults.model ?? ''}
             options={modelOptions}
             listId={`${datalistPrefix}-model`}
             readOnly={props.readOnly}
@@ -328,7 +326,6 @@ export function WorkflowNodeRuntimeChannelSection(props: {
           />
           <WorkflowNodeThinkingField
             value={currentValue('thinking')}
-            inherited={defaults.thinking ?? ''}
             readOnly={props.readOnly}
             labelSuffix={
               <FieldDot
@@ -477,6 +474,11 @@ export function WorkflowNodeRuntimeChannelSection(props: {
           </div>
         </div>
 
+        {studio?.runtimeError && (
+          <Alert severity="error" role="alert">
+            {studio.runtimeError}
+          </Alert>
+        )}
         {studio && (
           <div className={styles.saveBar}>
             <div className={styles.saveHint}>
@@ -501,8 +503,8 @@ export function WorkflowNodeRuntimeChannelSection(props: {
           </div>
         )}
         <div className={styles.topNote}>
-          提示：workflow 顶层 <code>execution</code> 默认块（provider / model /
-          thinking）同属运行通道，同样即改即存。
+          每个 agent 节点独立声明运行配置；workflow 顶层
+          <code>execution</code> 不提供默认值。
         </div>
       </div>
       {workspaceId && (

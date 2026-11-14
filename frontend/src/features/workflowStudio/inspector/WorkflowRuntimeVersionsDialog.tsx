@@ -1,4 +1,5 @@
 import {
+  Alert,
   Button,
   Dialog,
   DialogActions,
@@ -59,6 +60,11 @@ export function WorkflowRuntimeVersionsDialog(props: {
     <Dialog open={props.open} onClose={props.onClose} maxWidth="sm" fullWidth>
       <DialogTitle>运行配置版本历史</DialogTitle>
       <DialogContent dividers>
+        {studio?.runtimeError && (
+          <Alert severity="error" role="alert">
+            {studio.runtimeError}
+          </Alert>
+        )}
         {versionsQuery.isPending && <p className={styles.meta}>加载中…</p>}
         {versionsQuery.isError && (
           <p className={styles.meta} role="alert">

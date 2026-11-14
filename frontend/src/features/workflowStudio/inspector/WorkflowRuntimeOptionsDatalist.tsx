@@ -1,5 +1,5 @@
 /** provider/model 候选 datalist：在线 Worker 实际声明的取值，自由输入
- * 仍然可用（自 WorkflowRuntimeInheritedField 拆出，文件预算）。 */
+ * 仍然可用（自 WorkflowRuntimeField 拆出，文件预算）。 */
 export function WorkflowRuntimeOptionsDatalist(props: {
   id?: string
   options?: string[]

@@ -50,10 +50,6 @@ export function computeDraftChannels(args: {
 /** runtime diff 键在建议切片上的新值（diff 行「field → value」展示用）。 */
 export function runtimeValueAt(slice: RuntimeSlice, key: string): string {
   const parts = key.split('.')
-  if (parts[0] === 'execution') {
-    const field = parts[1] as keyof RuntimeSlice['execution']
-    return slice.execution[field] || '（清除）'
-  }
   const node = slice.nodes[parts[1]]
   if (!node) return ''
   const field = parts[2]

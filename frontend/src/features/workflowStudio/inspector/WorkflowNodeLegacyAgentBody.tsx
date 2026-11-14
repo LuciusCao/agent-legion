@@ -24,7 +24,6 @@ export function WorkflowNodeLegacyAgentBody(props: {
       <WorkflowNodeRuntimeSelect
         node={props.node}
         nodeRuntime=""
-        defaultRuntime=""
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

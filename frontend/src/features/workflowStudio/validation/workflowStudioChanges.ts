@@ -227,7 +227,7 @@ export type ErrorGroup = {
 }
 
 /* M48 双通道：runtime 字段（节点 execution 除 runtime 键 + tools /
- * requires_labels + 顶层 execution 默认）走运行通道即改即存，不属
+ * requires_labels）走运行通道即改即存，不属
  * 「未发布变更」。compare 把 execution-only 的节点变更单独标出
  * （fields 全为 'execution'；execution.runtime 变化另带 'runtime' 字段、
  * 属结构），tools/requires_labels 自 M47 起根本不进 compare——这些变更

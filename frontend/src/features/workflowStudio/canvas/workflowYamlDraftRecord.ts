@@ -8,14 +8,10 @@ import {
   type WorkflowYamlNode,
   type WorkflowYamlObject,
 } from '../shared/workflowStudioYamlDraft.parse'
-import {
-  parseWorkflowExecutionDefaults,
-  type WorkflowYamlExecutionDefaults,
-} from '../shared/workflowStudioYamlDraft.executionDefaults'
 import { normalizeNodeSkill } from '../shared/workflowStudioYamlDraft.skill'
 import { normalizeTextInput } from '../shared/workflowStudioYamlDraft.textInput'
 import { readDraftStartTypes } from '../shared/workflowStudioTextInputEditable'
-import { mergeNodeExecution } from './workflowStudioExecutionWarnings'
+import { asConfigValue } from '../shared/workflowStudioYamlDraft.execution'
 import { materializeDraftEdges } from './workflowStudioDraftEdges'
 
 /** 草稿 YAML → WorkflowDefinitionRecord：让画布/inspector 直接以草稿为数据
@@ -23,9 +19,8 @@ import { materializeDraftEdges } from './workflowStudioDraftEdges'
  * 由调用方回退已发布 workflow 并给出低噪提示，不得报错卡死或清空画布。
  * 字段归一化与 ghostDraftNodeDetails 一致：显式类型 start/agent/approval
  * 各自还原，遗留 `type: node` 与缺失一律按 code（同后端 loader）。
- * 节点 execution 还原为有效值：顶层 execution 默认合并进非 start 节点
- * （节点值优先，#333——对齐后端 loader，published 快照同形），使画布的
- * 执行配置警报（workflowStudioExecutionWarnings）直接读节点值即可。 */
+ * 节点 execution 只还原自身声明；legacy 顶层 execution 不合并进节点，
+ * 缺 runtime 的 agent 节点由 Inspector 的补档界面承接。 */
 export function workflowYamlToDefinitionRecord(
   rawYaml: string
 ): WorkflowDefinitionRecord | null {
@@ -53,12 +48,11 @@ export function workflowYamlToDefinitionRecord(
     return null
   const rawEdges = parsed.edges ?? []
   if (rawEdges.some((edge) => !isPlainObject(edge))) return null
-  const defaults = parseWorkflowExecutionDefaults(rawYaml)
   return {
     key: parsed.key ?? '',
     label: parsed.label ?? parsed.key ?? '',
     intake: mapIntake(parsed.intake),
-    nodes: rawNodes.map(([key, node]) => mapNode(key, node, defaults)),
+    nodes: rawNodes.map(([key, node]) => mapNode(key, node)),
     edges: materializeDraftEdges(parsed),
   }
 }
@@ -67,13 +61,20 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function mapNode(
-  key: string,
-  node: WorkflowYamlNode,
-  defaults: WorkflowYamlExecutionDefaults
-): WorkflowNodeRecord {
+function mapNode(key: string, node: WorkflowYamlNode): WorkflowNodeRecord {
   const skill = normalizeNodeSkill(node.skill)
-  const execution = mergeNodeExecution(node, defaults)
+  const declared = node.execution
+  const runtime = asConfigValue(declared?.runtime)
+  const execution = declared
+    ? {
+        provider: asConfigValue(declared.provider),
+        model: asConfigValue(declared.model),
+        thinking: asConfigValue(declared.thinking),
+        prompt: asConfigValue(declared.prompt),
+        prompt_mode: asConfigValue(declared.prompt_mode),
+        ...(runtime ? { runtime } : {}),
+      }
+    : undefined
   return {
     key,
     label: node.label ?? key,
