@@ -2353,6 +2353,7 @@
     "worker/stale_sweep.py": 55,
     "worker/state_evidence.py": 232,
     "worker/state_evidence_cleanup.py": 61,
+    "worker/state_evidence_copies.py": 29,
     "worker/state_evidence_lines.py": 55,
     "worker/status/__init__.py": 88,
     "worker/status/aggregates.py": 27,

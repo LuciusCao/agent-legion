@@ -88,7 +88,6 @@ import json
 import re
 import shutil
 import time
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -257,41 +256,48 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
     was chmod'd unreadable) degrades to an ``unreadable`` note with the
     errno — distinct from the ENOENT family's plain ``absent``.
 
-    评审 P3-2（收口轮，防御加固）：两个失败臂的副本删除各自 suppress——
+    评审 P3-2（收口轮，防御加固）：两个失败臂分别记录副本删除 OSError——
     unlink 再抛（同进程相邻 syscall 双 EACCES 的理论形态）时降级为「raw
-    副本滞留 + 状态照常返回」，而不是逃出到 dump_prep_evidence 的 broad
+    副本滞留 + cleanup failed 状态」，而不是逃出到 dump_prep_evidence 的 broad
     except 炸掉其余取证 arm。滞留副本的残留面：``_dump_incident_record``
     照常落盘（其 error/incident 字段已脱敏）；滞留文件有显式 .raw 名，
     由启动时年龄 + upload-pending 归属双重门槛的有界清扫回收。"""
+    from worker.state_evidence_copies import (
+        RAW_EVENTS_FILENAME,
+        discard_event_copies,
+        with_copy_cleanup_errors,
+    )
+
+    # Every return path starts by invalidating the previous attempt's copies;
+    # otherwise a missing/unreadable source would coexist with stale evidence.
+    cleanup_errors = discard_event_copies(target, include_processed=True)
     try:
         present = events.is_file()
     except OSError as probe_exc:
-        return f"unreadable: {probe_exc}", b""
+        return with_copy_cleanup_errors(f"unreadable: {probe_exc}", cleanup_errors), b""
     if not present:
-        return "absent", b""
-    from worker.state_evidence_cleanup import RAW_EVENTS_FILENAME
+        return with_copy_cleanup_errors("absent", cleanup_errors), b""
 
     raw_copy = target / RAW_EVENTS_FILENAME
     copy = target / "events.jsonl"
     try:
-        copy.unlink(missing_ok=True)
         shutil.copyfile(events, raw_copy)
         size = raw_copy.stat().st_size
         _, original, _, tail = scan_and_compress_pi_events(raw_copy, redactor=redactor)
     except OSError as copy_exc:
-        with suppress(OSError):
-            raw_copy.unlink(missing_ok=True)
-        return f"unreadable: {copy_exc}", b""
+        cleanup_errors += discard_event_copies(target, include_processed=False)
+        return with_copy_cleanup_errors(f"unreadable: {copy_exc}", cleanup_errors), b""
     if size > 0 and original == 0:
-        with suppress(OSError):
-            raw_copy.unlink(missing_ok=True)
-        return f"scan failed (source was {size} bytes; raw copy discarded)", b""
+        cleanup_errors += discard_event_copies(target, include_processed=False)
+        state = f"scan failed (source was {size} bytes)"
+        if not cleanup_errors:
+            state = f"{state}; raw copy discarded"
+        return with_copy_cleanup_errors(state, cleanup_errors), b""
     try:
         raw_copy.replace(copy)
     except OSError as rename_exc:
-        with suppress(OSError):
-            raw_copy.unlink(missing_ok=True)
-        return f"unreadable: {rename_exc}", b""
+        cleanup_errors += discard_event_copies(target, include_processed=False)
+        return with_copy_cleanup_errors(f"unreadable: {rename_exc}", cleanup_errors), b""
     return "dumped", tail
 
 

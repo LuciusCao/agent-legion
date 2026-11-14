@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from shared.redaction import SecretRedactor
+from worker import state_evidence
 from worker.state_evidence_cleanup import RAW_EVENTS_FILENAME, sweep_raw_event_copies
 from worker.upload.constants import PENDING_FILENAME
 
@@ -109,3 +111,79 @@ def test_sweep_ignores_raw_symlinks(tmp_path: Path) -> None:
     assert sweep_raw_event_copies(root, tmp_path / "work", now=_NOW, min_age_seconds=0) == 0
     assert raw.is_symlink()
     assert outside.is_file()
+
+
+def _stale_incident(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
+    target = tmp_path / "incident"
+    target.mkdir()
+    processed = target / "events.jsonl"
+    raw = target / RAW_EVENTS_FILENAME
+    emergency = target / "events-emergency.jsonl"
+    recovered = target / "recovered" / "events.jsonl"
+    recovered.parent.mkdir()
+    for path in (processed, raw, emergency, recovered):
+        path.write_text("evidence", encoding="utf-8")
+    return target, processed, raw, emergency, recovered
+
+
+def test_missing_source_invalidates_stale_copies_but_preserves_recovery(
+    tmp_path: Path,
+) -> None:
+    target, processed, raw, emergency, recovered = _stale_incident(tmp_path)
+
+    state, _ = state_evidence._dump_events_copy(
+        target, tmp_path / "missing-events", SecretRedactor(lambda _text: [], 0)
+    )
+
+    assert state == "absent"
+    assert not processed.exists()
+    assert not raw.exists()
+    assert emergency.is_file()
+    assert recovered.is_file()
+
+
+def test_probe_failure_also_invalidates_stale_copies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target, processed, raw, emergency, recovered = _stale_incident(tmp_path)
+    source = tmp_path / "unreadable-events"
+    real_is_file = Path.is_file
+
+    def failing_is_file(path: Path) -> bool:
+        if path == source:
+            raise PermissionError(13, "Permission denied", str(source))
+        return real_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", failing_is_file)
+    state, _ = state_evidence._dump_events_copy(target, source, SecretRedactor(lambda _text: [], 0))
+
+    assert state.startswith("unreadable:")
+    assert not processed.exists()
+    assert not raw.exists()
+    assert emergency.is_file()
+    assert recovered.is_file()
+
+
+@pytest.mark.parametrize("failing_name", ["events.jsonl", RAW_EVENTS_FILENAME])
+def test_cleanup_unlink_failure_is_explicit_and_never_reports_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failing_name: str
+) -> None:
+    target, processed, raw, emergency, recovered = _stale_incident(tmp_path)
+    real_unlink = Path.unlink
+
+    def failing_unlink(path: Path, missing_ok: bool = False):
+        if path.parent == target and path.name == failing_name:
+            raise OSError(13, "Permission denied", str(path))
+        return real_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    state, _ = state_evidence._dump_events_copy(
+        target, tmp_path / "missing-events", SecretRedactor(lambda _text: [], 0)
+    )
+
+    assert state.startswith("absent; evidence copy cleanup failed:")
+    assert failing_name in state
+    assert (failing_name == "events.jsonl") == processed.exists()
+    assert (failing_name == RAW_EVENTS_FILENAME) == raw.exists()
+    assert emergency.is_file()
+    assert recovered.is_file()

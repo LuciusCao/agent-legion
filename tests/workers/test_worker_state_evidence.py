@@ -279,6 +279,8 @@ def test_events_copy_unlink_failure_does_not_escape(
     incident = evidence_root / "exec-1__node_a"
     record = json.loads((incident / "incident.json").read_text(encoding="utf-8"))
     assert record["events"].startswith("scan failed")  # 状态如实（非 unreadable）
+    assert "evidence copy cleanup failed" in record["events"]
+    assert "raw copy discarded" not in record["events"]
     assert (incident / "listing.txt").is_file()  # 其余 arm 未被连坐
     raw_copy = incident / "events.jsonl.raw"  # 显式 raw 名，等待启动有界清扫
     assert raw_copy.is_file()

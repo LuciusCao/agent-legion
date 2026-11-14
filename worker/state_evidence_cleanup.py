@@ -8,9 +8,9 @@ import stat
 import time
 from pathlib import Path
 
+from worker.state_evidence_copies import RAW_EVENTS_FILENAME
 from worker.upload.constants import PENDING_FILENAME
 
-RAW_EVENTS_FILENAME = "events.jsonl.raw"
 RAW_COPY_MIN_AGE_SECONDS = 24 * 60 * 60
 STARTUP_SCAN_LIMIT = 256
 
