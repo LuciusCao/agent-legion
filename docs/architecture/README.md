@@ -32,11 +32,13 @@ agent nodes → velites / Pi CLI → skills (local in-place git, pins in DB skil
 [architecture-evidence-matrix.md](architecture-evidence-matrix.md)）：
 
 - Workflow 节点声明 `capability` 与显式执行类型（`type: code | agent`，另有
-  `start` / `approval`）。agent 节点的执行档案优先取节点自含的
-  `execution.runtime`（workflow 顶层 `execution` 可给默认，EXEC-AGENT-PROFILE-001）；
-  未声明 runtime 的 agent 节点在 #440 过渡期内仍按 capability 解析到 published
-  Agent 定义。agent 节点可声明 `skill` 内容绑定（`key` + 可选 `ref`，#76）；code
-  节点解析到已发布的 `node_code`。
+  `start` / `approval`）。agent 节点自含的 `execution.runtime` 是执行档案唯一的
+  authoring 来源（EXEC-AGENT-PROFILE-001）；#805 / schema v105 把存量 active
+  revision 与有效 draft 的默认值逐字段物化到 agent 节点，旧 stored snapshot 与
+  queued manifest 只经显式只读兼容层保留原冻结语义。未声明 runtime 的 legacy
+  agent 节点仍按 capability 解析到 published Agent 定义，不得凭空补默认 runtime。
+  agent 节点可声明 `skill` 内容绑定（`key` + 可选 `ref`，#76）；code 节点解析到
+  已发布的 `node_code`。
 - Route 是薄 HTTP 适配层；业务逻辑在 service；执行容量一律经 lease 申请
   （`server/app/executors/leases.py`；executor 定义/绑定概念已随 schema v47 退役）。
 - 前端 transport 类型从后端 OpenAPI schema 生成
