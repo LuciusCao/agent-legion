@@ -2,8 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from scripts.architecture.workflow import check_workflow_raw_definitions
+from scripts.architecture.workflow import check_workflow_definitions, check_workflow_raw_definitions
 from scripts.check_architecture import check_repository, forbidden_imports, is_scheduler_path
+from server.app.workflows.definition import (
+    WorkflowDefinitionError,
+    workflow_definition_from_mapping,
+)
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 pytestmark = pytest.mark.no_db
@@ -332,7 +336,7 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
     [
         (
             {"key": "example", "label": "Example", "nodes": {"fetch": {"label": "Fetch"}}},
-            "non-empty capability",
+            "capability must be a non-empty string",
         ),
         (
             {
@@ -389,3 +393,55 @@ def test_rejects_forbidden_pattern_in_source(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any("forbidden pattern" in error and "node.runner literal" in error for error in errors)
+
+
+def _agent_builtin_declaration(capability: str | None, runtime_location: str) -> dict:
+    node = {
+        "type": "agent",
+        "skill": {"key": "capability_optional/draft"},
+    }
+    if capability is not None:
+        node["capability"] = capability
+    raw = {"key": "ws", "label": "Workspace", "nodes": {"draft": node}}
+    if runtime_location == "node":
+        node["execution"] = {"runtime": "velites"}
+    else:
+        raw["execution"] = {"runtime": "velites"}
+    return raw
+
+
+@pytest.mark.parametrize("capability", [None, ""])
+@pytest.mark.parametrize("runtime_location", ["node", "workflow"])
+def test_builtin_agent_optional_capability_matches_loader(
+    monkeypatch, capability: str | None, runtime_location: str
+):
+    raw = _agent_builtin_declaration(capability, runtime_location)
+
+    loaded = workflow_definition_from_mapping(raw)
+
+    assert loaded.nodes["draft"].capability == ""
+    assert loaded.nodes["draft"].execution.runtime == "velites"
+    # Exercise the actual built-in repository entry, not only a helper: this
+    # is the supported shape the old lint rejected despite loader acceptance.
+    monkeypatch.setattr("scripts.architecture.workflow.BUILTIN_WORKFLOW_DEFINITIONS", {"ws": raw})
+    assert check_workflow_definitions(Path(".")) == []
+
+
+@pytest.mark.parametrize("capability", [None, ""])
+@pytest.mark.parametrize("node_type", ["code", "agent"])
+def test_builtin_empty_capability_still_fails_closed_for_code_and_legacy(
+    capability: str | None, node_type: str
+):
+    node = {"type": node_type}
+    if capability is not None:
+        node["capability"] = capability
+    raw = {"key": "ws", "label": "Workspace", "nodes": {"draft": node}}
+    if node_type == "code":
+        # A workflow runtime default never makes a code node self-contained.
+        raw["execution"] = {"runtime": "velites"}
+
+    errors = check_workflow_raw_definitions({"ws": raw})
+
+    assert any("draft" in error and "capability" in error for error in errors)
+    with pytest.raises(WorkflowDefinitionError, match="capability"):
+        workflow_definition_from_mapping(raw)

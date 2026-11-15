@@ -81,6 +81,31 @@ describe('AddWorkflowNodeDialog', () => {
     })
   })
 
+  it('appends an agent with an empty optional capability and display label', () => {
+    const onAppended = vi.fn()
+    renderDialog({ onAppended })
+
+    fireEvent.change(screen.getByLabelText('节点类型'), {
+      target: { value: 'agent' },
+    })
+    expect(
+      screen.getByText('能力 Key（code 缺省 = 节点 Key；agent 可选标签）')
+    ).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('节点 Key'), {
+      target: { value: 'draft_agent' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    const node = (
+      yaml.load(onAppended.mock.calls[0][0]) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.draft_agent
+    expect(node?.capability).toBe('')
+    expect(node?.label).toBe('draft_agent')
+    expect(node?.execution).toEqual({ runtime: 'velites' })
+  })
+
   it('toasts the reason and keeps the draft untouched on duplicate key', async () => {
     const onAppended = vi.fn()
     renderDialog({ onAppended })

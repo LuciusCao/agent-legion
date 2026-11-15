@@ -2,9 +2,10 @@
 
 Split from ``workflow_drafts`` (at its budget ceiling, AGENTS.md §5 拆分
 纪律): that module keeps the YAML/definition helpers; this one owns the
-per-node publish validation — ``type: agent`` nodes must resolve to exactly
-one published Agent, ``type: code`` nodes must have published workspace
-node code, and (#432) secret field values under a node's ``config:`` are
+per-node publish validation — self-contained ``type: agent`` nodes carry
+their own profile (capability is only an optional label), ``type: code``
+nodes must have a non-empty capability and published workspace node code,
+and (#432) secret field values under a node's ``config:`` are
 rejected fail-fast at publish: the YAML source editor has no vault
 channel, and surfacing the error only at the first job's intake would
 strand a published revision no new job can use (VAULT-SECRET-001).

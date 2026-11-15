@@ -334,34 +334,70 @@ def test_compare_node_removed_returns_breaking_change(app_with_workspace):
     assert result["summary"]["risk_level"] == "breaking"
 
 
-def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
+@pytest.mark.parametrize("node_type", ["code", "legacy_agent"])
+def test_compare_capability_changed_returns_breaking_change(app_with_workspace, node_type):
     app, workspace_id = app_with_workspace
     definition = load_builtin_definition("education_video_problems_generation")
-    node = definition.nodes["intake_knowledge_points"]
-    definition.nodes["intake_knowledge_points"] = node.__class__(
-        key=node.key,
-        label=node.label,
-        capability="different_capability",
-        after=node.after,
-        inputs=node.inputs,
-        outputs=node.outputs,
-        terminal=node.terminal,
-    )
+    if node_type == "legacy_agent":
+        definition = replace(definition, execution=WorkflowNodeExecution())
+        legacy = definition.nodes["write_script"]
+        definition.nodes["write_script"] = replace(legacy, execution=WorkflowNodeExecution())
+        WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
+            workspace_id, definition
+        )
+        node = definition.nodes["write_script"]
+    else:
+        node = definition.nodes["intake_knowledge_points"]
+    definition.nodes[node.key] = replace(node, capability="different_capability")
     raw = definition_to_yaml(definition)
 
     with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
-    change = next(
-        c for c in result["summary"]["node_changes"] if c["node_key"] == "intake_knowledge_points"
-    )
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == node.key)
+    assert result["creates_revision"] is True
     assert change["type"] == "modified"
     assert change["risk"] == "breaking"
     assert "capability" in change["fields"]
     flag = next(
         flag for flag in result["summary"]["risk_flags"] if flag["code"] == "capability_changed"
     )
+    assert flag["severity"] == "breaking"
     assert "different_capability" in flag["message"]
+    assert "执行器绑定可能失效" in flag["message"]
+    assert "能力标签" not in flag["message"]
+
+
+@pytest.mark.parametrize("runtime_source", ["node", "workflow"])
+def test_compare_self_contained_capability_label_is_structural_not_route_warning(
+    app_with_workspace, runtime_source
+):
+    import yaml
+
+    app, workspace_id = app_with_workspace
+    raw_doc = yaml.safe_load(definition_to_yaml(load_builtin_definition(workspace_id)))
+    raw_doc.setdefault("execution", {})["runtime"] = "velites"
+    execution = raw_doc["nodes"]["write_script"].setdefault("execution", {})
+    if runtime_source == "node":
+        execution["runtime"] = "velites"
+    else:
+        execution.pop("runtime", None)
+    raw_doc["nodes"]["write_script"]["capability"] = ""
+
+    with authenticate_client(TestClient(app)) as client:
+        result = _compare(client, workspace_id, yaml.safe_dump(raw_doc, allow_unicode=True))
+
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
+    flag = next(
+        flag for flag in result["summary"]["risk_flags"] if flag["code"] == "capability_changed"
+    )
+    assert result["creates_revision"] is True
+    assert change["risk"] == flag["severity"] == "breaking"
+    assert "capability" in change["fields"]
+    assert "能力标签" in flag["message"]
+    assert "新的 workflow revision" in flag["message"]
+    assert "不依赖 capability 路由" in flag["message"]
+    assert "执行器绑定可能失效" not in flag["message"]
 
 
 def test_compare_output_removed_returns_breaking_change(app_with_workspace):

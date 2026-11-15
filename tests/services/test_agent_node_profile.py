@@ -17,6 +17,7 @@ from server.app.services.node_config import (
     workflow_node_config_schemas,
 )
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from server.app.workflows.schema import WorkflowNodeExecution
 
 pytestmark = pytest.mark.no_db
 
@@ -152,3 +153,41 @@ def test_workflow_config_resolution_scans_the_catalog_once() -> None:
     schemas = workflow_node_config_schemas(definition, catalog)
     assert _CountingCatalog.scans == 1
     assert set(schemas) == set(nodes)
+
+
+def test_self_contained_profile_preserves_empty_capability_as_a_label() -> None:
+    node = WorkflowNode(
+        key="n1",
+        label="Node display",
+        capability="",
+        node_type="agent",
+        outputs=["o.json"],
+        execution=WorkflowNodeExecution(runtime="velites"),
+    )
+    catalog = {"published": _definition("generate")}
+
+    profile = resolve_agent_node_profile(node, catalog)
+
+    assert profile is not None
+    assert profile.source == "node"
+    assert profile.legacy_ref is None
+    assert profile.dispatch_definition.capability == ""
+    assert profile.dispatch_definition.capability != node.key
+    assert profile.runtime == "velites"
+
+
+def test_legacy_empty_capability_never_falls_back_to_node_key_or_current_agent() -> None:
+    node = _node(capability="")
+    catalog = {
+        "n1": _definition("generate"),
+        # Invalid empty catalog rows must not turn the empty node label into
+        # a legacy route, whether resolution scans or uses the shared index.
+        "current": _definition(""),
+    }
+    index = build_capability_index(catalog)
+
+    assert legacy_agent_candidates(node, catalog) == ()
+    assert legacy_agent_candidates(node, catalog, index=index) == ()
+    assert resolve_agent_node_profile(node, catalog) is None
+    assert resolve_agent_node_profile(node, catalog, index=index) is None
+    assert resolve_routed_agent_profile("current", catalog) is None

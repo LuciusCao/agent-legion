@@ -22,9 +22,10 @@ export function confirmDestructiveSwitch(targetType: SwitchableNodeType) {
   return targetType !== 'approval' || window.confirm(APPROVAL_SWITCH_WARNING)
 }
 
-// approval→code/agent 的原子补能力通道（#405）：结构化 UI 对 approval
+// approval→code 的原子补能力通道（#405）：结构化 UI 对 approval
 // 隐藏能力 Key 输入（loader 禁令），「先在基本设置补 capability 再切」
 // 在该形态不可达；切换时在弹窗里一次收齐，取消即放弃切换（草稿不动）。
+// agent 的 capability 是可选标签，不经过本通道。
 // 语义：取消/空输入返回 null（调用侧放弃切换，保持原类型）；已有
 // capability 的节点不经本弹窗（非 approval 源类型本就有该字段）。
 export function promptForSwitchCapability(
