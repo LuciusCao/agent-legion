@@ -529,6 +529,12 @@ review checks them like a boundary rule:
    2-core runner, not the dev machine — or better, anchor on the signal
    and not on time at all (rule 1 subsumes this when achievable).
 
+Integration tests that construct dispatch services own their enqueue pools:
+close each pool in `finally`, and give independent execution paths distinct
+job identities. A fresh workspace is not job-identity isolation when
+`create_job` is an upsert; a prior claimed execution must never become the
+next path's fixture.
+
 The postgres tier's CI `-n 1` pin (above) removes the resource contention
 that produced the family; these rules keep new tests from reintroducing it.
 
