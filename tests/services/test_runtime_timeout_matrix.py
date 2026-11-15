@@ -214,27 +214,31 @@ def _enqueue(
             ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL),
             job_db,
         )
-        assert service.enqueue(
-            capability=node.capability,
-            capability_config=CodeCapabilityConfig(
-                config_schema=schema,
-                timeout_seconds=unresolved["timeout_seconds"],
-                sandbox_network=unresolved["sandbox_network"],
-            ),
-            workspace=workspace,
-            job=job,
-            workflow_key=WS,
-            node=node,
-            job_dir=tmp_path / "jobs" / job["id"],
-            log_path=tmp_path / "logs" / f"{job['id']}.log",
-            inputs=(),
-            code_text="def run(ctx):\n    pass\n",
-            custom_code=True,
-            config=config,
-            secret_config=secret_config,
-            shard_runtime=shard_runtime,
-            timeout_base=base,
-        )
+        try:
+            assert service.enqueue(
+                capability=node.capability,
+                capability_config=CodeCapabilityConfig(
+                    config_schema=schema,
+                    timeout_seconds=unresolved["timeout_seconds"],
+                    sandbox_network=unresolved["sandbox_network"],
+                ),
+                workspace=workspace,
+                job=job,
+                workflow_key=WS,
+                node=node,
+                job_dir=tmp_path / "jobs" / job["id"],
+                log_path=tmp_path / "logs" / f"{job['id']}.log",
+                inputs=(),
+                code_text="def run(ctx):\n    pass\n",
+                custom_code=True,
+                config=config,
+                secret_config=secret_config,
+                shard_runtime=shard_runtime,
+                timeout_base=base,
+            )
+        finally:
+            service.enqueue_pool.close()
+        assert not any(thread.is_alive() for thread in service.enqueue_pool._threads)
         return
     definition = _agent_definition()
     node_config, base = dispatch_config_resolution(
@@ -346,7 +350,7 @@ def _run_remote(job_db, tmp_path, monkeypatch, kind, path, layer, timing) -> dic
     _seed_workspace(job_db, kind)
     if timing == "before_intake":
         _set_override(job_db, kind, l2)
-    job = _intake(job_db, kind, node, "job-1")
+    job = _intake(job_db, kind, node, f"{path}-job-1")
     if timing == "after_intake":
         _set_override(job_db, kind, l2)
     shard_runtime = _materialize_shard(job_db, job["id"], node.key) if node.shard else None
@@ -389,7 +393,7 @@ def _run_local(job_db, tmp_path, path, layer, timing) -> dict[str, Any]:
     codes.publish(WS, WS, node.key)
     if timing == "before_intake":
         _set_override(job_db, "code", l2)
-    job = _intake(job_db, "code", node, "job-1")
+    job = _intake(job_db, "code", node, f"{path}-job-1")
     if timing == "after_intake":
         _set_override(job_db, "code", l2)
     executor = RecordingExecutor("code")
@@ -454,7 +458,7 @@ def test_paths_agree_for_identical_inputs(job_db, tmp_path, monkeypatch, layer) 
     """Every code path (shard executions included) decides identically."""
     results = []
     for path in ("local", "single", "batch", "local_shard", "remote_shard"):
-        # Fresh workspace per path (cascades its jobs/requests/node code).
+        # Fresh workspace and job identity per path keep claimed execution state isolated.
         with job_db.connect() as conn:
             conn.execute("delete from workspaces where id=%s", (WS,))
             conn.execute("delete from agent_workers")
