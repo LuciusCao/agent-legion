@@ -3,12 +3,12 @@
 The executemany shape was N independent INSERT statements server-side, so
 the v77 statement triggers fired once per jobs row — one counter upsert per
 row, the exact per-row cost the statement-level migration meant to remove.
-The unnest rewrite batches a whole run's inserts into one statement per
-1000 rows; these tests pin:
+The unnest rewrite batches each create transaction's inserts into one
+statement; these tests pin:
 
-- large-batch correctness: 2.5k rows (3 batches) land with both counter
-  families (run + workspace) exactly equal to the group-by truth, across
-  the batching boundary (1000-row chunks);
+- large-batch correctness: 2.5k rows land with both counter families
+  (run + workspace) exactly equal to the group-by truth, across the
+  create-chunk boundaries;
 - return-value equivalence: the returned rows keep the executemany
   contract (one row per unique id, in first-seen order, with the
   workflow_key identity shim);
@@ -26,7 +26,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from server.app.db.transaction import read_connection
+import pytest
+
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.jobs.queries import JobQueries
 from server.app.jobs.queries.job_bulk_sql import CREATE_CHUNK_ROWS
 from tests.postgres_support import TEST_DATABASE_URL
@@ -312,36 +314,39 @@ def test_bulk_duplicate_ids_in_one_call_take_the_last_row(tmp_path: Path) -> Non
     assert int(nodes["cnt"]) == len(_NODE_KEYS)
 
 
+@pytest.mark.fresh_schema
 def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> None:
-    # The #441 review's point: with executemany each jobs row was its own
-    # statement and its own trigger firing. The unnest shape must fire the
-    # v77 INSERT trigger once per batch. Measured via pg_stat_user_tables
-    # delta around a 2500-row create (CREATE_CHUNK_ROWS-row chunks) on a fresh
-    # run so the first batch INSERTS the counter row (n_tup_ins) and the
-    # later batches take the ON CONFLICT UPDATE arm (n_tup_upd) — the
-    # firing count is the ins+upd delta, not upd alone. Two measurement
-    # realities (#461 review): pg_stat counters land asynchronously (~1s
-    # behind the writer's commit locally), so poll until the expected
-    # firings appear instead of trusting one fixed sleep; and the counter
-    # row for this run must not pre-exist, or every batch takes the update
-    # arm and the insert delta reads 0. The per-test TRUNCATE isolation
-    # (conftest _isolate_postgres_database) already guarantees an empty
-    # jobs/run_job_status_counts here — jobs is not a seeded table.
-    import time
-
+    # Each jobs INSERT makes the v77 statement trigger upsert one counter row
+    # per (run_id, status). A synchronous observer records those actual writes
+    # in the same transaction; pg_stat_user_tables cannot provide this exact
+    # count because its asynchronous, table-wide deltas admit unrelated writes.
     db = _make_db(tmp_path)
     _seed_workspace(db, "ws-sb2")
-    with read_connection(TEST_DATABASE_URL) as conn:
-        before = conn.execute(
-            "select n_tup_ins, n_tup_upd from pg_stat_user_tables"
-            " where schemaname=current_schema() and relname='run_job_status_counts'"
-        ).fetchone()
-    assert before is not None
-    base_ins = int(before["n_tup_ins"])
-    base_upd = int(before["n_tup_upd"])
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            """
+            create table bulk_counter_write_audit(
+              id bigserial primary key,
+              txid bigint not null,
+              run_id text not null,
+              status text not null,
+              operation text not null
+            );
+            create function record_bulk_counter_write() returns trigger as $$
+            begin
+              insert into bulk_counter_write_audit(txid, run_id, status, operation)
+              values (txid_current(), NEW.run_id, NEW.status, TG_OP);
+              return null;
+            end;
+            $$ language plpgsql;
+            create trigger bulk_counter_write_audit
+              after insert or update on run_job_status_counts
+              for each row execute function record_bulk_counter_write();
+            """
+        )
 
     db.create_jobs_bulk(
-        candidates=[_candidate(i) for i in range(2500)],
+        candidates=[_candidate(i) for i in range(_ROW_COUNT)],
         workflow_key="wf",
         run_id="run-sb-1",
         node_keys=["node_a"],
@@ -349,30 +354,27 @@ def test_bulk_insert_fires_statement_trigger_once_per_batch(tmp_path: Path) -> N
         revision=_REVISION,
     )
 
-    # Stats are async: pg_stat_force_next_flush from this backend asks the
-    # writer's collector to flush, and the counters land up to ~1s later
-    # (measured locally) — poll for the firings instead of trusting one
-    # fixed read. The counter-equality test above remains the hard
-    # correctness check; this is the trigger-economics pin.
-    expected = -(-2500 // CREATE_CHUNK_ROWS)
-    firings = 0
-    for _ in range(30):
-        time.sleep(0.1)
-        with read_connection(TEST_DATABASE_URL) as conn:
-            conn.execute("select pg_stat_force_next_flush()")
-            after = conn.execute(
-                "select n_tup_ins, n_tup_upd from pg_stat_user_tables"
-                " where schemaname=current_schema() and relname='run_job_status_counts'"
-            ).fetchone()
-        assert after is not None
-        firings = (int(after["n_tup_ins"]) - base_ins) + (int(after["n_tup_upd"]) - base_upd)
-        if firings >= expected:
-            break
-    # One statement firing per committed chunk (#1243: create_jobs_bulk
-    # commits per CREATE_CHUNK_ROWS, so 2500 rows = 10 firings at 250), each
-    # upserting one counter row for this run — nowhere near the per-row
-    # count the executemany shape produced. The lower bound pins that every
-    # batch actually fired (at least one counter write per batch); the upper
-    # bound keeps the assertion robust against concurrent stats noise from
-    # other tests' writes to the same shared stats table.
-    assert expected <= firings <= expected + 10, firings
+    expected = -(-_ROW_COUNT // CREATE_CHUNK_ROWS)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        observed = conn.execute(
+            "select count(*) as writes, count(distinct txid) as transactions,"
+            " array_agg(operation order by id) as operations"
+            " from bulk_counter_write_audit where run_id=%s and status='queued'",
+            ("run-sb-1",),
+        ).fetchone()
+        truth = conn.execute(
+            "select status, count(*) from jobs where run_id=%s group by status",
+            ("run-sb-1",),
+        ).fetchall()
+        run_counts = conn.execute(
+            "select status, cnt from run_job_status_counts where run_id=%s",
+            ("run-sb-1",),
+        ).fetchall()
+
+    # The first chunk creates the counter and later chunks update it. Exactly
+    # one write in each distinct chunk transaction rules out both per-row
+    # trigger economics and accidentally coalescing the per-chunk commits.
+    assert int(observed["writes"]) == expected, dict(observed)
+    assert int(observed["transactions"]) == expected, dict(observed)
+    assert list(observed["operations"]) == ["INSERT"] + ["UPDATE"] * (expected - 1)
+    assert _counter_map(run_counts) == _counter_map(truth) == {"queued": _ROW_COUNT}
