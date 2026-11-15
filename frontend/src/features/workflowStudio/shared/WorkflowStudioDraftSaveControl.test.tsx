@@ -119,6 +119,29 @@ describe('WorkflowStudioDraftSaveControl', () => {
     expect(onKeepMine).toHaveBeenCalledOnce()
   })
 
+  it('抽屉横幅中的长警示正常换行并可收缩', () => {
+    const { rerender } = render(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, conflict: true }}
+        readOnly={false}
+        warningsOnly
+      />
+    )
+    expect(screen.getByText(/自动保存已暂停/)).toHaveStyle(
+      'white-space: normal; min-width: 0'
+    )
+    rerender(
+      <WorkflowStudioDraftSaveControl
+        save={{ status: 'idle', savedAt: null, loadError: true }}
+        readOnly={false}
+        warningsOnly
+      />
+    )
+    expect(screen.getByText(/草稿服务不可用/)).toHaveStyle(
+      'white-space: normal; min-width: 0'
+    )
+  })
+
   it('codex 轮 3 P1：窄屏一刀切隐藏只盖瞬态文本，冲突簇（警示 + 操作出口）不挂窄屏隐藏类', () => {
     // jsdom 跑不了 @media——钉结构：冲突长文案挂 island 的 secondary 类
     // （窄屏隐藏），但冲突按钮与 ⚠ 图标不带该类（窄屏恒可见可操作）。
