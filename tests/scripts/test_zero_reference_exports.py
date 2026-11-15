@@ -8,10 +8,12 @@ reference convention (yaml/docstring mentions keep a symbol alive).
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
+from scripts.architecture import zero_reference_exports
 from scripts.architecture.zero_reference_exports import check_zero_reference_exports
 
 pytestmark = pytest.mark.no_db
@@ -222,6 +224,109 @@ def test_missing_allowlist_disables_the_check(tmp_path):
     write(tmp_path / "server/app/dead.py", "def dead_helper():\n    return 1\n")
 
     assert not check_zero_reference_exports(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "skip_dir",
+    [
+        ".git",
+        ".venv",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".uv-cache",
+        ".tower",
+        ".worktrees",
+        "__pycache__",
+        "node_modules",
+        "dist",
+        "coverage",
+        "target",
+        "data",
+    ],
+)
+def test_reference_walk_does_not_enter_or_stat_skip_dirs(tmp_path, monkeypatch, skip_dir):
+    visible = tmp_path / "src/nested/visible.py"
+    hidden = tmp_path / "src/nested" / skip_dir / "deeper/hidden.py"
+    write(visible, "visible_token\n")
+    write(hidden, "hidden_token\n")
+    scanned_dirs = []
+    statted_paths = []
+    real_scandir = os.scandir
+    real_is_file = Path.is_file
+
+    def observing_scandir(path):
+        scanned_dirs.append(Path(path))
+        return real_scandir(path)
+
+    def observing_is_file(path):
+        statted_paths.append(path)
+        return real_is_file(path)
+
+    monkeypatch.setattr(os, "scandir", observing_scandir)
+    monkeypatch.setattr(Path, "is_file", observing_is_file)
+
+    assert list(zero_reference_exports._iter_reference_files(tmp_path)) == [visible]
+    assert not [
+        path
+        for path in [*scanned_dirs, *statted_paths]
+        if skip_dir in path.relative_to(tmp_path).parts
+    ]
+    assert tmp_path / "src/nested" in scanned_dirs
+
+
+def test_reference_files_preserve_global_order_filters_and_similar_names(tmp_path):
+    included = [
+        ".towerlike/keep.py",
+        ".venv-tools/keep.py",
+        ".worktrees-archive/keep.py",
+        "a/inside.py",
+        "a.py",
+        "config/workflow.yaml",
+        "data.py",
+        "database/keep.py",
+        "docs/guide.MD",
+        "nested/data_factory/keep.py",
+        "node_modules_backup/keep.py",
+        "z.py",
+    ]
+    excluded = [
+        "config/architecture/nested-pool-checkout-allowlist.json",
+        "config/architecture/zero-reference-exports-allowlist.json",
+        "docs/ignored.txt",
+        "nested/data/hidden.py",
+    ]
+    for relative in included:
+        write(tmp_path / relative, "included_token\n")
+    for relative in excluded:
+        write(tmp_path / relative, "excluded_token\n")
+
+    paths = list(zero_reference_exports._iter_reference_files(tmp_path))
+
+    assert [path.relative_to(tmp_path).as_posix() for path in paths] == included
+    counts = zero_reference_exports.count_identifier_references(tmp_path)
+    assert counts["included_token"] == len(included)
+    assert counts["excluded_token"] == 0
+
+
+def test_reference_counts_preserve_file_symlinks(tmp_path):
+    source = tmp_path / "server/app/source.py"
+    document = tmp_path / "docs/guide.md"
+    alias = tmp_path / "docs/alias.md"
+    directory_alias = tmp_path / "linked-docs"
+    write(source, "source_token\n")
+    write(document, "shared_doc_token\n")
+    write(tmp_path / "docs/ignored.txt", "ignored_text_token\n")
+    alias.symlink_to(document)
+    directory_alias.symlink_to(tmp_path / "docs", target_is_directory=True)
+
+    paths = list(zero_reference_exports._iter_reference_files(tmp_path))
+    counts = zero_reference_exports.count_identifier_references(tmp_path)
+
+    assert paths == [alias, document, source]
+    assert counts["source_token"] == 1
+    assert counts["shared_doc_token"] == 2
+    assert counts["ignored_text_token"] == 0
 
 
 def test_real_repo_pins_allowlist_config():

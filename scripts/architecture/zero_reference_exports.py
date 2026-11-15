@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -134,17 +135,20 @@ _NON_REFERENCE_FILES = frozenset(
 
 
 def _iter_reference_files(root: Path):
-    for path in sorted(root.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(root)
-        if any(part in _SKIP_DIRS for part in relative.parts):
-            continue
-        if path.suffix.lower() not in _REFERENCE_EXTENSIONS:
-            continue
-        if relative.as_posix() in _NON_REFERENCE_FILES:
-            continue
-        yield path
+    paths = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [dirname for dirname in dirnames if dirname not in _SKIP_DIRS]
+        for filename in filenames:
+            path = Path(dirpath) / filename
+            if not path.is_file():
+                continue
+            relative = path.relative_to(root)
+            if path.suffix.lower() not in _REFERENCE_EXTENSIONS:
+                continue
+            if relative.as_posix() in _NON_REFERENCE_FILES:
+                continue
+            paths.append(path)
+    yield from sorted(paths)
 
 
 def count_identifier_references(root: Path) -> Counter[str]:
