@@ -535,6 +535,13 @@ job identities. A fresh workspace is not job-identity isolation when
 `create_job` is an upsert; a prior claimed execution must never become the
 next path's fixture.
 
+PostgreSQL fault injection that changes session settings must use `SET LOCAL`
+inside the transaction. Returning a pooled connection rolls back transaction
+state, not session settings: a session-level `SET session_replication_role =
+replica` survives commit and can disable FK cascades in unrelated later tests.
+When such a test runs with sufficient privileges, assert that the setting has
+returned to its default before the connection re-enters the pool.
+
 The postgres tier's CI `-n 1` pin (above) removes the resource contention
 that produced the family; these rules keep new tests from reintroducing it.
 
@@ -566,7 +573,11 @@ backend evidence for downstream checks:
 
 - each backend unit, PostgreSQL, and full pytest layer prints its 30 slowest
   tests and writes JUnit XML + pytest-rerunfailures reports as 1-day artifacts
-  through `scripts.pytest_telemetry`;
+  through `scripts.pytest_telemetry`. A rerun entry also retains the first
+  attempt's bounded `longrepr` and standard captured stdout/stderr/log, with
+  PostgreSQL DSNs and common credential forms redacted before truncation;
+  ordinary passing output is not collected, and the existing `attempts`,
+  `tests`, `reports.nodeid`, and `reports.phase` schema is unchanged;
 - frontend Vitest writes ephemeral JUnit and JSON reports alongside its normal
   console and coverage reporters;
 - `scripts/summarize_test_results.py` adds aggregate counts, case time, rerun
