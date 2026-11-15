@@ -274,11 +274,11 @@ def test_resume_with_unavailable_agent_fails_before_spawn(chat) -> None:
 
 def test_build_resume_transcript_filters_and_truncates() -> None:
     messages = [
-        {"kind": "text", "role": "user", "content": {"text": "u1"}},
+        {"id": "u1", "kind": "text", "role": "user", "content": {"text": "u1"}},
         {"kind": "tool_call", "role": "agent", "content": {"toolCallId": "tc"}},
         {"kind": "text", "role": "agent", "content": {"text": "a1"}},
         {"kind": "status", "role": "system", "content": {"event": "turn_end"}},
-        {"kind": "text", "role": "user", "content": {"text": ""}},
+        {"id": "empty", "kind": "text", "role": "user", "content": {"text": ""}},
     ]
     transcript = build_resume_transcript(messages)
     assert transcript.startswith(RESUME_TRANSCRIPT_HEADER)
@@ -290,8 +290,17 @@ def test_build_resume_transcript_filters_and_truncates() -> None:
 
     # 超长历史截断到字符预算内，保留最近对话。
     long_history = [
-        {"kind": "text", "role": "user", "content": {"text": f"q{i} " + "x" * 1000}}
+        message
         for i in range(20)
+        for message in (
+            {
+                "id": f"q{i}",
+                "kind": "text",
+                "role": "user",
+                "content": {"text": f"q{i} " + "x" * 1000},
+            },
+            {"kind": "status", "role": "system", "content": {"event": "turn_end"}},
+        )
     ]
     truncated = build_resume_transcript(long_history)
     assert len(truncated) <= RESUME_TRANSCRIPT_MAX_CHARS + len(RESUME_TRANSCRIPT_HEADER) + len(
@@ -304,12 +313,58 @@ def test_build_resume_transcript_filters_and_truncates() -> None:
     assert build_resume_transcript([messages[1]]) == ""
 
 
+def test_build_resume_transcript_uses_shared_completion_evidence() -> None:
+    def transcript_with(terminal: dict | None) -> str:
+        messages = [{"id": "u", "kind": "text", "role": "user", "content": {"text": "payload"}}]
+        if terminal is not None:
+            messages.append({"kind": "status", "role": "system", "content": terminal})
+        return build_resume_transcript(messages)
+
+    for terminal in (
+        {"event": "turn_end"},
+        {"event": "turn_timeout"},
+        {"event": "error", "message_id": "u", "outcome": "failed"},
+    ):
+        assert "用户：payload" in transcript_with(terminal)
+    for terminal in (
+        None,
+        {"event": "error", "detail": "fatal process exit"},
+        {"event": "error", "message_id": "u", "outcome": "unknown"},
+    ):
+        assert transcript_with(terminal) == ""
+
+    legacy = [
+        {
+            "id": "q",
+            "kind": "text",
+            "role": "user",
+            "content": {"text": "legacy", "queued": True},
+        },
+        {
+            "kind": "status",
+            "role": "system",
+            "content": {"event": "queued_delivered", "message_id": "q"},
+        },
+        {
+            "kind": "status",
+            "role": "system",
+            "content": {"event": "queued_dropped", "message_id": "q"},
+        },
+    ]
+    assert build_resume_transcript(legacy) == ""
+    legacy.append({"kind": "status", "role": "system", "content": {"event": "turn_end"}})
+    assert "用户：legacy" in build_resume_transcript(legacy)
+
+
 def test_build_resume_transcript_hard_truncates_single_oversized_message() -> None:
     """One message larger than the whole budget must not wave through whole:
     it gets hard-cut to the budget (tail kept) with an omission marker."""
     huge = "z" * (RESUME_TRANSCRIPT_MAX_CHARS * 4)
     transcript = build_resume_transcript(
-        [{"kind": "text", "role": "user", "content": {"text": huge}}]
+        [
+            {"id": "huge", "kind": "text", "role": "user", "content": {"text": huge}},
+            {"kind": "status", "role": "system", "content": {"event": "turn_end"}},
+        ]
     )
     assert transcript.startswith(RESUME_TRANSCRIPT_HEADER)
     assert transcript.endswith(RESUME_TRANSCRIPT_FOOTER)

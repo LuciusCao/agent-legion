@@ -2,8 +2,10 @@
 
 Unlike same-generation exit_settlement.py, no runtime state survives here. The
 message timeline is replayed to reconstruct each human input's delivery and
-terminal state. Missing terminals are added idempotently before the session row
-is marked resumable; uncertain completion always fails closed to unknown.
+terminal state. Visible missing terminals are added idempotently before the row
+is marked resumable; uncertain completion always fails closed to unknown. The
+same reconstruction filters fallback resume context even when hidden recovery
+intentionally wrote no terminal.
 """
 
 from __future__ import annotations

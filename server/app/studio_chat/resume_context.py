@@ -4,9 +4,10 @@ When a resumed agent cannot reload its prior ACP session (loadSession not
 advertised, or the load failed), the service prepends this transcript to the
 first post-resume user prompt so the fresh agent regains the conversation
 context. Source of truth is the persisted studio_chat_messages timeline —
-only user/agent text participates; tool calls, plans and status rows are
-noise for context rebuild. Preparation is read-only; prompt admission consumes
-the one-shot marker only after the input has been durably accepted.
+only user/agent text is emitted, while status rows supply the shared durable
+completion evidence that prevents ambiguous user input from auto-resending.
+Preparation is read-only; prompt admission consumes the one-shot marker only
+after the input has been durably accepted.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.studio_chat.restart_settlement import _reconstruct
 from server.app.studio_chat.runtime import SessionRuntime
 
 # Truncation budget: the transcript is prompt payload, so cap it well below
@@ -33,39 +35,17 @@ RESUME_TRANSCRIPT_FOOTER = "[此前对话记录结束。以下是用户的新消
 def build_resume_transcript(messages: list[dict[str, Any]]) -> str:
     """Rebuild a compact user/assistant transcript; "" when nothing usable.
 
-    #882: an inbound-queued user message (``content.queued``) counts only
-    after ``queued_delivered`` proves its before_start claim committed. A
-    dropped/never-started message has no proof; a delivered message whose
-    turn died with unknown outcome is also excluded to prevent auto-resend.
+    #882/#1153: user input requires durable completion evidence, not merely a
+    delivery claim. Sharing restart's reconstruction preserves completed >
+    delivered > dropped and prevents every ambiguous input from auto-resending,
+    including an archived hidden reap that intentionally wrote no terminal.
     """
-    delivered = {
-        (message.get("content") or {}).get("message_id")
-        for message in messages
-        if message.get("kind") == "status"
-        and (message.get("content") or {}).get("event") == "queued_delivered"
-    }
-    # A delivered prompt whose turn died has an unknown result. Reinjecting it
-    # into fallback resume context would be an automatic resend, not recovery.
-    unknown = {
-        (message.get("content") or {}).get("message_id")
-        for message in messages
-        if message.get("kind") == "status"
-        and (message.get("content") or {}).get("event") == "error"
-        and (message.get("content") or {}).get("outcome") == "unknown"
-    }
-    dropped = {
-        (message.get("content") or {}).get("message_id")
-        for message in messages
-        if message.get("kind") == "status"
-        and (message.get("content") or {}).get("event") == "queued_dropped"
-    }
+    states, _resolved_requests = _reconstruct(messages)
     entries: list[str] = []
     for message in messages:
         if message.get("kind") != "text" or message.get("role") not in ("user", "agent"):
             continue
-        if message.get("id") in unknown or message.get("id") in dropped:
-            continue
-        if (message.get("content") or {}).get("queued") and message.get("id") not in delivered:
+        if message.get("role") == "user" and states.get(str(message.get("id"))) != "completed":
             continue
         speaker = "用户" if message["role"] == "user" else "助手"
         text = str((message.get("content") or {}).get("text") or "")

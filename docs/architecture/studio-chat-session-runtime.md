@@ -108,17 +108,28 @@ live/status/error_detail 守卫，starting、closed 或 successor 拥有行时�
 `deny(via=backend_restart)`，未 delivered queued 补 `queued_dropped`，delivered
 但没有完成证据的输入补 `outcome=unknown`。turn_end/turn_timeout 与带
 `message_id+outcome=failed` 的普通 turn error 证明完成；fatal、旧格式或模糊
-错误不能证明完成，宁可标 unknown 也不授权重放。已 unknown/dropped 的消息永不
-进入 fallback transcript，正常已完成历史仍照常注入。终态优先级为 completed >
+错误不能证明完成，宁可标 unknown 也不授权重放。终态优先级为 completed >
 delivered > dropped：legacy `queued_delivered→queued_dropped` 若没有完成证据，仍按
-unknown 补齐一次，不能被后 dropped 覆盖；transcript 则无条件排除 dropped/unknown，
-即使同 id 也有 delivered 行。正常可见 startup 的候选 SQL 与最终 live→error CAS 同时要求
-`deleted_at IS NULL` 和 `archived_at IS NULL`，读取后才隐藏的可见 row 不被改写，
-消息 append 的既有守卫不替代这条 row CAS。delete/archive stamp 后 close 前崩溃的
-hidden live row 则走独立回收：`hidden=True` 读取 hidden 候选，独立回收只对其中
-live row 做最终 CAS，同时要求 hidden 与 archived_at 快照相等，成功后才 teardown 本代 runtime/token；
-只把 row 改为 error 以释放 create/resume 活跃配额，不写隐藏 permission/queued/unknown
-或 error 消息。unarchive 后快照不匹配即跳过，恢复 row 不被误改，重复 reaper 不重复写事件。
+unknown 补齐一次，不能被后 dropped 覆盖；若已有完成证据，dropped/fatal 也不会追溯抹掉
+正常历史。
+
+`resume_context.py` 与 startup 共用 `_reconstruct`，不维护第二套证据状态机。fallback
+transcript 对用户文本只接受 `completed`，因此 direct/queued delivered、unknown、dropped
+和未投递 queued 都不能自动重放；正常 turn_end/timeout/普通 failed 的用户与助手历史仍注入。
+fatal 只使当前 active delivered 保持模糊，不覆盖此前已完成输入。该只读过滤也让
+archive→hidden reap→unarchive→loadSession=False resume 无需在隐藏期补 unknown：unarchive
+与 resume claim 之间不存在可授权重放的写入窗口，不需要新增跨事务锁。相比在 unarchive
+后补终态，它既复用完成证据模型，也避免另一线程先 resume 的竞态。
+
+正常可见 startup 的候选 SQL 与最终 live→error CAS 同时要求 `deleted_at IS NULL` 和
+`archived_at IS NULL`，读取后才隐藏的可见 row 不被改写，消息 append 的既有守卫不替代
+这条 row CAS。delete/archive stamp 后 close 前崩溃的 hidden live row 则走独立回收：
+`hidden=True` 读取 hidden 候选，独立回收只对其中 live row 做最终 CAS，同时要求 hidden
+与 archived_at 快照相等，成功后才 teardown 本代 runtime/token；只把 row 改为 error 以释放
+create/resume 活跃配额，不写隐藏 permission/queued/unknown 或 error 消息。unarchive 后
+快照不匹配即跳过，恢复 row 不被误改，重复 reaper/unarchive 不重复写事件。archived row
+可在 unarchive 后 resume，由上述 transcript 过滤封闭模糊输入；deleted 是不可逆隐藏，
+没有 unarchive 入口，既有 resume/spawn fence 不变。
 
 每次 reaper 都重读持久终态，只补缺项；permission/drop/unknown/status 任一阶段
 在提交后报错，下一次启动仍按 request/message id 跳过已落库行，不重复追加。

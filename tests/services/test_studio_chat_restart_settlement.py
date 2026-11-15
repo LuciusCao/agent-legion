@@ -10,6 +10,8 @@ import pytest
 from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.services.job_errors import ConflictError
+from server.app.studio_chat.background_wakeup import wake_session
+from server.app.studio_chat.resume_context import RESUME_TRANSCRIPT_HEADER
 from server.app.studio_chat.service import StudioChatService
 from tests.helpers import studio_chat_fixtures as fixtures
 from tests.helpers import wait_for_predicate
@@ -418,3 +420,107 @@ def test_hidden_archive_cas_does_not_rewrite_row_restored_after_read(chat, monke
     assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
         "pending"
     ]
+
+
+_ARCHIVE_PERMISSION = {
+    "permission": {
+        "toolCall": {"toolCallId": "archive-pending", "title": "Bash: archive-test"},
+        "options": [{"optionId": "deny", "name": "Deny", "kind": "reject_once"}],
+    }
+}
+
+
+@pytest.mark.parametrize("delivery", ["direct", "queued_delivered"])
+def test_archived_hidden_delivered_is_not_replayed_after_unarchive(chat, delivery: str) -> None:
+    service, _bus, register, workspace, user = chat
+    plans = [
+        fixtures.TEXT_SCRIPT,
+        {"on_prompt": [{"fail": "ordinary agent refusal"}]},
+    ]
+    if delivery == "queued_delivered":
+        plans.append({"on_prompt": [], "wait_for_cancel": True})
+    plans.append({"on_prompt": [_ARCHIVE_PERMISSION], "wait_for_cancel": True})
+    script_path = register({**fixtures.TEXT_SCRIPT, "prompt_plans": plans})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+
+    service.send_message(sid, workspace, "known completed input")
+    wait_for_predicate(lambda: service.get_session(sid)["status"] == "idle", timeout=10)
+    failed = service.send_message(sid, workspace, "known failed input")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and any(
+                event.get("message_id") == failed["id"] and event.get("outcome") == "failed"
+                for event in _events(service.db, sid, "error")
+            )
+        ),
+        timeout=10,
+    )
+
+    if delivery == "direct":
+        unresolved = service.send_message(sid, workspace, "direct hidden unresolved")
+    else:
+        runtime = service.runtime(sid)
+        assert wake_session(service, sid, runtime, ["finished-task"])
+        unresolved = service.send_message(sid, workspace, "queued hidden unresolved")
+        service.cancel(sid, workspace)
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "awaiting_permission"
+            and (
+                delivery == "direct"
+                or any(
+                    event.get("message_id") == unresolved["id"]
+                    for event in _events(service.db, sid, "queued_delivered")
+                )
+            )
+        ),
+        timeout=10,
+    )
+    assert bool(unresolved["content"].get("queued")) == (delivery == "queued_delivered")
+    runtime = service.runtime(sid)
+    process = runtime.handle._process
+    assert process is not None
+
+    assert service.db.set_studio_chat_session_archived(sid, True)
+    service.reap_zombie_sessions()
+    service.reap_zombie_sessions()
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "error" and row["archived_at"] is not None
+    assert not [
+        event for event in _events(service.db, sid, "error") if event.get("outcome") == "unknown"
+    ]
+    wait_for_predicate(
+        lambda: not runtime.handle._thread.is_alive() and process.returncode is not None,
+        timeout=10,
+    )
+
+    script_path.write_text(json.dumps(fixtures.TEXT_SCRIPT), encoding="utf-8")
+    assert service.unarchive_session(sid, workspace)["status"] == "error"
+    assert service.unarchive_session(sid, workspace)["archived_at"] is None
+    assert service.resume_session(sid, workspace, user)["status"] == "idle"
+    previous_prompts = len(_prompt_texts(script_path))
+    service.send_message(sid, workspace, "fresh after unarchive")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and len(_prompt_texts(script_path)) > previous_prompts
+        ),
+        timeout=10,
+    )
+
+    prompt = _prompt_texts(script_path)[-1]
+    assert RESUME_TRANSCRIPT_HEADER in prompt
+    assert "known completed input" in prompt
+    assert "known failed input" in prompt
+    assert "助手：pong" in prompt
+    assert "fresh after unarchive" in prompt
+    assert unresolved["content"]["text"] not in prompt
+    assert not [
+        event for event in _events(service.db, sid, "error") if event.get("outcome") == "unknown"
+    ]
+    assert [
+        m["content"]["status"]
+        for m in service.db.list_studio_chat_messages(sid)
+        if m["kind"] == "permission"
+    ] == ["pending"]
