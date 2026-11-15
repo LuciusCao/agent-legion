@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { StudioPublishRequestRecord } from '../../../api/studioPublishRequestApi'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { useAgentPublishNoticeStore } from './agentPublishNoticeStore'
+
+type DraftSyncEntry = { key: string; owners: number }
+
+/* 每个 QueryClient 只保留当前一条同步记录；不随 workspace/request 累积。 */
+const draftSyncEntries = new WeakMap<QueryClient, DraftSyncEntry>()
 
 /* 发布请求相关查询失效，以及 pending→null 的外部消解观测。主动 confirm/
    cancel 的 resolve 归属由共享 notice store 判定，旁观 hook 实例不得覆盖
@@ -15,6 +20,31 @@ export function useAgentPublishRequestSync(
   const landNotice = useAgentPublishNoticeStore((s) => s.landNotice)
   /** 上一轮见过的 pending id：观测 pending→null 跳变用。 */
   const lastSeenPendingId = useRef<string | null>(null)
+  const pendingRequestId = pendingRequest?.id ?? null
+
+  useEffect(() => {
+    if (!workspaceId || !pendingRequestId) return
+    const key = `${workspaceId}/${pendingRequestId}`
+    const previous = draftSyncEntries.get(queryClient)
+    const entry = previous?.key === key ? previous : { key, owners: 0 }
+    if (entry !== previous) {
+      draftSyncEntries.set(queryClient, entry)
+      // #1198：现有 hydrate 只在画布未触碰时应用，未保存编辑仍走 CAS 冲突。
+      void queryClient.invalidateQueries({
+        queryKey: extraQueryKeys.workflowStudioDraft(workspaceId),
+      })
+    }
+    entry.owners += 1
+    return () => {
+      entry.owners -= 1
+      // r1：局部重挂/StrictMode 共享记录；最后卸载后释放，之后同 id 可重取。
+      queueMicrotask(() => {
+        if (!entry.owners && draftSyncEntries.get(queryClient) === entry) {
+          draftSyncEntries.delete(queryClient)
+        }
+      })
+    }
+  }, [pendingRequestId, queryClient, workspaceId])
 
   const invalidate = useCallback(async () => {
     if (!workspaceId) return

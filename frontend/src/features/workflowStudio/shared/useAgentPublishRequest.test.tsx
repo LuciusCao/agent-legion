@@ -89,6 +89,179 @@ describe('useAgentPublishRequest', () => {
     )
   })
 
+  it('dedups draft refetch across double hooks, polling and remounts (#1198 r1)', async () => {
+    let releaseRequest: ((record: StudioPublishRequestRecord) => void) | null =
+      null
+    mocks.fetchPendingPublishRequest.mockImplementation(
+      () =>
+        new Promise<StudioPublishRequestRecord>((resolve) => {
+          releaseRequest = resolve
+        })
+    )
+    const client = createTestQueryClient()
+    const draftFetch = vi.fn(async () => null)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    renderHook(
+      () =>
+        useQuery({
+          queryKey: extraQueryKeys.workflowStudioDraft('ws1'),
+          queryFn: draftFetch,
+        }),
+      { wrapper }
+    )
+    const mountPublishHook = () =>
+      renderHook(() => useAgentPublishRequest('ws1'), { wrapper })
+    const dialog = mountPublishHook()
+    const aside = mountPublishHook()
+    await waitFor(() => expect(draftFetch).toHaveBeenCalledTimes(1))
+
+    await act(async () => {
+      releaseRequest?.(requestRecord())
+    })
+    await waitFor(() => {
+      expect(dialog.result.current.pendingRequest?.id).toBe('req-1')
+      expect(aside.result.current.pendingRequest?.id).toBe('req-1')
+      expect(draftFetch).toHaveBeenCalledTimes(2)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(draftFetch).toHaveBeenCalledTimes(2)
+
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    await act(async () => {
+      await client.invalidateQueries({
+        queryKey: extraQueryKeys.studioPublishRequest('ws1'),
+      })
+    })
+    expect(draftFetch).toHaveBeenCalledTimes(2)
+
+    mocks.fetchPendingPublishRequest.mockResolvedValue(
+      requestRecord({ id: 'req-2' })
+    )
+    await act(async () => {
+      await client.invalidateQueries({
+        queryKey: extraQueryKeys.studioPublishRequest('ws1'),
+      })
+    })
+    await waitFor(() => {
+      expect(dialog.result.current.pendingRequest?.id).toBe('req-2')
+      expect(aside.result.current.pendingRequest?.id).toBe('req-2')
+      expect(draftFetch).toHaveBeenCalledTimes(3)
+    })
+
+    dialog.unmount()
+    const remountedDialog = mountPublishHook()
+    await waitFor(() =>
+      expect(remountedDialog.result.current.pendingRequest?.id).toBe('req-2')
+    )
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(draftFetch).toHaveBeenCalledTimes(3)
+
+    remountedDialog.unmount()
+    aside.unmount()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    const reloadedDialog = mountPublishHook()
+    const reloadedAside = mountPublishHook()
+    await waitFor(() => {
+      expect(reloadedDialog.result.current.pendingRequest?.id).toBe('req-2')
+      expect(reloadedAside.result.current.pendingRequest?.id).toBe('req-2')
+      expect(draftFetch).toHaveBeenCalledTimes(4)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(draftFetch).toHaveBeenCalledTimes(4)
+  })
+
+  it('scopes request dedup to each QueryClient (#1198 r1)', async () => {
+    mocks.fetchPendingPublishRequest.mockResolvedValue(requestRecord())
+    const mount = (client: ReturnType<typeof createTestQueryClient>) => {
+      const draftFetch = vi.fn(async () => null)
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      )
+      renderHook(
+        () => {
+          useQuery({
+            queryKey: extraQueryKeys.workflowStudioDraft('ws1'),
+            queryFn: draftFetch,
+          })
+          return useAgentPublishRequest('ws1')
+        },
+        { wrapper }
+      )
+      return draftFetch
+    }
+
+    const first = mount(createTestQueryClient())
+    const second = mount(createTestQueryClient())
+
+    await waitFor(() => {
+      expect(first).toHaveBeenCalledTimes(2)
+      expect(second).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('refetches on workspace changes even when the request id is unchanged (#1198 r1)', async () => {
+    const client = createTestQueryClient()
+    const draftFetch = vi.fn(async (workspaceId: string) => {
+      void workspaceId
+      return null
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    )
+    const mountDraft = (workspaceId: string) =>
+      renderHook(
+        () =>
+          useQuery({
+            queryKey: extraQueryKeys.workflowStudioDraft(workspaceId),
+            queryFn: () => draftFetch(workspaceId),
+          }),
+        { wrapper }
+      )
+    mountDraft('ws1')
+    mountDraft('ws2')
+    mocks.fetchPendingPublishRequest.mockImplementation(
+      async (workspaceId: string) =>
+        requestRecord({ id: 'req-shared', workspace_id: workspaceId })
+    )
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId: string }) =>
+        useAgentPublishRequest(workspaceId),
+      { wrapper, initialProps: { workspaceId: 'ws1' } }
+    )
+    const callsFor = (workspaceId: string) =>
+      draftFetch.mock.calls.filter(([id]) => id === workspaceId).length
+
+    await waitFor(() => {
+      expect(result.current.pendingRequest?.workspace_id).toBe('ws1')
+      expect(callsFor('ws1')).toBe(2)
+    })
+    expect(callsFor('ws2')).toBe(1)
+
+    rerender({ workspaceId: 'ws2' })
+    await waitFor(() => {
+      expect(result.current.pendingRequest?.workspace_id).toBe('ws2')
+      expect(callsFor('ws2')).toBe(2)
+    })
+    expect(callsFor('ws1')).toBe(2)
+
+    rerender({ workspaceId: 'ws1' })
+    await waitFor(() => {
+      expect(result.current.pendingRequest?.workspace_id).toBe('ws1')
+      expect(callsFor('ws1')).toBe(3)
+    })
+    expect(callsFor('ws2')).toBe(2)
+  })
+
   it('keeps pendingRequest null when the workspace has no request', async () => {
     const { result } = renderHookWithProviders()
 
@@ -436,7 +609,8 @@ describe('useAgentPublishRequest', () => {
       { wrapper }
     )
     await waitFor(() => expect(result.current.pendingRequest?.id).toBe('req-1'))
-    // 初始装载的取数不计入 confirm 段。
+    // #1198 的 pending 到达重取落定后，再把初始装载取数排除出 confirm 段。
+    await waitFor(() => expect(draftFetch).toHaveBeenCalledTimes(2))
     order.length = 0
     draftFetch.mockClear()
 

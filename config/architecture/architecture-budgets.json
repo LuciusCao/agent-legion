@@ -735,6 +735,7 @@
     "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialog.helpers.ts": 23,
     "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialog.module.css": 87,
     "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialog.tsx": 74,
+    "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialog.types.ts": 24,
     "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialogAdvisories.tsx": 40,
     "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialogChangeCount.tsx": 26,
     "frontend/src/features/workflowStudio/validation/WorkflowPublishReviewDialogChangeList.tsx": 37,
