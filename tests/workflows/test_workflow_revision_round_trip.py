@@ -66,3 +66,56 @@ def test_revision_snapshot_and_yaml_round_trip_preserves_tools_config_and_fanout
     reparsed = workflow_definition_from_mapping(payload)
     assert serialize_definition(reparsed) == published
     assert definition_to_yaml(reparsed) == echo
+
+
+@pytest.mark.no_db
+def test_capless_code_revision_round_trip_keeps_empty_string_field() -> None:
+    definition = workflow_definition_from_mapping(
+        {
+            "key": "capless_round_trip",
+            "label": "Capless Round Trip",
+            "schema_version": 2,
+            "nodes": {"collect": {"type": "code", "label": "Collect"}},
+            "edges": [],
+        }
+    )
+
+    published = serialize_definition(definition)
+    restored = workflow_definition_from_dict(json.loads(published))
+    assert serialize_definition(restored) == published
+    payload = yaml.safe_load(definition_to_yaml(restored))
+    assert payload["nodes"]["collect"]["capability"] == ""
+    assert serialize_definition(workflow_definition_from_mapping(payload)) == published
+
+
+def test_capless_code_publish_requires_node_key_code_and_echoes_empty_string(job_db) -> None:
+    from server.app.services.node_codes import NodeCodeService
+    from server.app.services.workflow_draft_publish import publish_workflow_draft
+
+    workspace = job_db.create_workspace("Capless", workspace_id="capless_round_trip")
+    workspace_id = str(workspace["id"])
+    draft = "key: capless_round_trip\nlabel: Capless\nnodes:\n  collect:\n    type: code\n"
+
+    ok, errors = publish_workflow_draft(job_db, workspace_id, draft)
+    assert ok is False
+    assert any("no published node code" in error for error in errors)
+
+    codes = NodeCodeService(job_db.dsn_identity)
+    codes.save_draft(
+        workspace_id,
+        "capless_round_trip",
+        "collect",
+        "def run(job, job_dir, runtime):\n    return {}\n",
+        "test seed",
+    )
+    codes.publish(workspace_id, "capless_round_trip", "collect")
+    ok, errors = publish_workflow_draft(job_db, workspace_id, draft)
+
+    assert (ok, errors) == (True, [])
+    active = job_db.get_active_workflow_revision(workspace_id, "capless_round_trip")
+    assert active is not None
+    definition = workflow_definition_from_dict(json.loads(str(active["definition_json"])))
+    assert definition.nodes["collect"].capability == ""
+    assert yaml.safe_load(definition_to_yaml(definition))["nodes"]["collect"]["capability"] == ""
+    versions = codes.list_versions(workspace_id, "capless_round_trip", "collect")
+    assert [row["status"] for row in versions] == ["published"]

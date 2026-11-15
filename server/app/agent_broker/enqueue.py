@@ -35,7 +35,7 @@ def enqueue_request(broker: AgentExecutionBroker, request: AgentExecutionRequest
     # Fail fast on unroutable manifests (placeholder/empty model): they
     # would otherwise poison the queue head forever (issue #13). #843 评审
     # P1：保留成员名碰撞同点拒（节点失败点名冲突名）。
-    manifest_guard.require_routable_execution(request.manifest)
+    manifest_guard.require_routable_execution(request.manifest, node_key=request.node_key)
     manifest_guard.require_unreserved_output_names(request.manifest)
     execution_id = request.execution_id or str(uuid.uuid4())
     try:

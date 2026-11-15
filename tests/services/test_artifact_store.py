@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+import server.app.db.connection as db_connection
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.artifact_store import (
@@ -104,20 +105,32 @@ def test_refs_lifecycle(store, tmp_path):
         store.open(h)
 
 
-def test_delete_refs_sweeps_refs_whose_job_row_is_gone(store):
+def test_delete_refs_sweeps_refs_whose_job_row_is_gone(store, monkeypatch):
     """正向路径：jobs 行不在而 refs 残留（级联缺失的存量/损坏形态）时才真正
     删除，并返回不再被任何 job 引用的 hash。FK 拦着正常写入，用
-    session_replication_role=replica 模拟（非 superuser 角色跳过）。"""
+    SET LOCAL session_replication_role=replica 模拟（非 superuser 角色跳过）；
+    特权设置仅限本事务，连接归还池时必须已恢复 origin。"""
     h = store.put(b"orphaned")
+    returned_roles = []
+    real_return = db_connection.return_checkout
+
+    def observe_return(raw, pool) -> None:
+        role = raw.execute("select current_setting('session_replication_role')").fetchone()
+        returned_roles.append(role[0])
+        raw.rollback()
+        real_return(raw, pool)
+
+    monkeypatch.setattr(db_connection, "return_checkout", observe_return)
     try:
         with write_transaction(TEST_DATABASE_URL) as conn:
-            conn.execute("set session_replication_role = replica")
+            conn.execute("set local session_replication_role = replica")
             conn.execute(
                 "insert into artifact_refs(job_id, node_key, name, hash) values (%s, %s, %s, %s)",
                 ("gone-job", "node-a", "out.json", h),
             )
     except Exception as exc:  # 测试角色非 superuser，无法绕过 FK
         pytest.skip(f"cannot simulate pre-cascade orphan refs: {exc}")
+    assert returned_roles == ["origin"]
     orphaned = store.delete_refs_for_job("gone-job")
     assert orphaned == [h]
     assert store.refs_for_job("gone-job") == []

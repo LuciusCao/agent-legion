@@ -23,8 +23,24 @@ nodes:
     return config
 
 
-def test_workflow_node_requires_non_empty_capability(tmp_path: Path) -> None:
-    path = write_workflow(tmp_path, node_body="label: Fetch\noutputs: [out.json]")
+@pytest.mark.parametrize(
+    "node_body",
+    [
+        "label: Fetch\noutputs: [out.json]",
+        "label: Fetch\ntype: code\ncapability: ''\noutputs: [out.json]",
+    ],
+)
+def test_code_node_capability_defaults_to_empty_string(tmp_path: Path, node_body: str) -> None:
+    path = write_workflow(tmp_path, node_body=node_body)
+    assert load_workflow_definition(path).nodes["one"].capability == ""
+
+
+@pytest.mark.parametrize("capability", ["null", "42", "[]"])
+def test_code_node_rejects_null_and_non_string_capability(tmp_path: Path, capability: str) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=f"label: Fetch\ntype: code\ncapability: {capability}",
+    )
     with pytest.raises(WorkflowDefinitionError, match="capability"):
         load_workflow_definition(path)
 

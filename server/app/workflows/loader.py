@@ -190,11 +190,11 @@ def _load_nodes(
 
         node_type, accepted_item_types, text_input = load_start_fields(raw_node, node_key)
         capability = raw_node.get("capability", "")
-        # Self-contained agent nodes may omit this optional label; legacy agents
-        # are checked after the effective runtime default has been merged.
-        if not isinstance(capability, str) or (
-            not capability and node_type not in ("start", "approval", "agent")
-        ):
+        # Self-contained agent and code nodes may omit this optional label;
+        # legacy agents are checked after the effective runtime default merge.
+        if not isinstance(capability, str):
+            raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
+        if not capability and node_type not in ("start", "approval", "agent", "code"):
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
         # Tool whitelist (#443): only Agent-routed nodes may declare one;
@@ -266,7 +266,7 @@ def load_workflow_nodes_with_execution(
     """Load node declarations and validate capability after runtime merging.
 
     Shared with the built-in DAG lint so both accept exactly the same
-    self-contained agent, code, and legacy declaration shapes (#936).
+    self-contained agent, code, and legacy declaration shapes (#936/#440).
     """
     execution, nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
     for node in nodes.values():

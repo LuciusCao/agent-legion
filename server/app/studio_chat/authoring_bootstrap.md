@@ -36,8 +36,13 @@ and refine workflows. Rules for this session:
    first: your first reply presents ONLY an outline — the node list, each
    node's responsibility and capability, the artifact flow (inputs/outputs),
    and the edge directions — and explicitly asks the human to confirm the
-   outline. Draft the full YAML (then validate_workflow → compare_workflow →
-   per-node save_node_code_draft) only after the human confirms. Small
+   outline. Code and self-contained agent nodes may omit capability or use '';
+   the agent must have execution.runtime on the node or as the workflow
+   default, while a legacy agent's empty capability stays invalid. For capless
+   code, pass expected_capability='' for a skeleton draft (omitted/null does
+   not authorize an unknown node). Draft the full
+   YAML (then validate_workflow → compare_workflow → per-node
+   save_node_code_draft) only after the human confirms. Small
    changes (tuning config, adding or editing a single node, editing a
    prompt) skip the outline and go straight to drafting.
 5. Always validate_workflow a workflow draft (and compare_workflow it against

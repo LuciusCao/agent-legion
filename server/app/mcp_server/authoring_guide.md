@@ -228,7 +228,7 @@ intake:                     # optional; how jobs enter the workflow
 nodes:                      # mapping, declaration order = presentation order
   fetch_data:
     label: 拉取数据
-    capability: fetch_data  # REQUIRED, non-empty; see section 4
+    capability: fetch_data  # optional code label; omit or use '' for capless
     inputs: []              # artifact names this node consumes
     outputs: [data.json]    # artifact names this node produces
   report:
@@ -263,18 +263,25 @@ Hard rules enforced at parse/validate time:
 
 ## 4. Capabilities and node kinds
 
-A capability is a snake_case verb_noun (`fetch_data`, `review_questions`).
-The node's kind is its explicit `type`:
+A non-empty capability label is a snake_case verb_noun (`fetch_data`,
+`review_questions`). The node's kind is its explicit `type`:
 
 - AGENT node (`type: agent`): runs an LLM agent with the node's own
   execution profile (section 5). Publish validation requires the profile —
   `execution.runtime` on the node or as the workflow top-level default —
-  and a node `skill` binding; no Agent definition is involved.
+  and a node `skill` binding; no Agent definition is involved. Its capability
+  is likewise an optional string label normalized to `''` when omitted/empty.
+  A legacy agent without an effective runtime still requires a non-empty
+  capability and fails closed; null/non-strings are always rejected.
 - CODE node (`type: code`, the default): runs on the implicit code
   pool (P-0.5); publish validation requires a published workspace node-code
-  version. Otherwise validation reports
-  `no published node code for <workflow_key>.<node_key>` — publish the code
-  with `save_node_code_draft` (skeleton draft + `expected_capability`) first.
+  version keyed by `(workspace_id, workflow_key, node_key)`. Otherwise
+  validation reports `no published node code for <workflow_key>.<node_key>` —
+  publish the code with `save_node_code_draft` (skeleton draft +
+  `expected_capability`) first. Its capability is an optional string
+  compatibility label: omit it or use `''` for capless code; null/non-strings
+  are rejected and legacy non-empty values are preserved. Capability is not
+  a routing or published-code identity fallback.
 
 `save_node_code_draft` code contract: the module must define a module-level
 `run` function (syntax-checked, max 64 KB). Prefer `def run(ctx)` with the
@@ -283,11 +290,13 @@ artifact IO / service_config / checkpoint); the classic
 `run(job, job_dir, runtime)` signature still works. Use
 `workspace_libs/http_client.py` / `download.py` for network access (SSRF
 guarded) — never raw socket code. Pass `expected_capability` when saving:
-- Existing node: validated against the active revision — mismatch is a 400
-  naming both capabilities.
-- Node not in any published revision yet: only accepted WITH
+- Existing node: exact string match against the active revision — mismatch is
+  a 400 naming both labels; use `''` for capless code. Omitted/null keeps the
+  historic behavior for an existing node.
+- Node not in any published revision yet: only accepted with a non-null
   `expected_capability`, creating a skeleton draft ahead of the workflow
-  draft that introduces the node. Without it you get 404.
+  draft that introduces the node. Use `''` for capless code; omitted or null
+  returns 404.
 
 ## 5. Node execution profiles and tunables
 

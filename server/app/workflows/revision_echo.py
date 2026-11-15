@@ -57,7 +57,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         raw_node: dict[str, Any] = {"label": node.label}
         # The explicit type must round-trip — dropping it would normalize an
         # Agent node back to code on the next load. start/approval declare no
-        # capability; start carries the entry contract instead (D1).
+        # capability; code keeps the string field even when its optional label
+        # is empty; start carries the entry contract instead (D1).
         raw_node["type"] = node.node_type
         if node.node_type == "start":
             raw_node["accepted_item_types"] = list(node.accepted_item_types)

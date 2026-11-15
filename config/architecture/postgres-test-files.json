@@ -310,6 +310,7 @@
     "tests/workflows/test_workflow_draft_compare_runtime.py",
     "tests/workflows/test_workflow_execution_control.py",
     "tests/workflows/test_workflow_revision_prune.py",
+    "tests/workflows/test_workflow_revision_round_trip.py",
     "tests/workflows/test_workflow_revisions.py",
     "tests/workflows/test_workflow_worker_concurrency.py"
   ]

@@ -33,10 +33,11 @@ def register_node_code_tools(mcp: FastMCP, client_factory: ClientFactory) -> Non
     ) -> str:
         """Save a draft of a code node's Python source (module-level run
         function required; get_authoring_guide §4). Draft only — a human
-        publishes in Studio. expected_capability declares the capability you
-        believe the node binds: mismatch with an existing node is rejected; a
-        node absent from any published revision is accepted only WITH it
-        (without it → 404). Supply exactly one of code or code_path. code_path
+        publishes in Studio. expected_capability declares the capability label
+        you believe the node binds: mismatch with an existing node is rejected;
+        use '' for a capless code node. A node absent from any published
+        revision is accepted only with a non-null value (omitted/null → 404).
+        Supply exactly one of code or code_path. code_path
         reads UTF-8 bytes from data/studio-mcp-files/<workspace_id>/ on the
         MCP host (relative to that directory, or absolute within it).
         The response carries the saved draft's code_hash."""

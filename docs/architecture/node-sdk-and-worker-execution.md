@@ -13,7 +13,12 @@ VAULT-SECRET-001）为准。
 所有节点代码以本 workspace 的 DB 发布文本执行（`versioned_entities`，无 global 兜底；
 demo 的 code 节点由 `workflow_nodes/` 种子源经 `services/demo_node_seed.py` 发布进 demo
 workspace，`workflow_nodes/` 本身不是执行路径），一律经 velites 沙箱执行（EXEC-CODE-003，
-沙箱不可用即拒绝）。Host 与 Worker 是两条**独立入口**：
+沙箱不可用即拒绝）。published node_code 的身份是 `(workspace_id, workflow_key, node_key)`，
+执行完整性是 `code_hash`。code 节点的 capability 只作字符串兼容标签：缺省或 `''` 统一为
+`''`，null/非字符串拒绝，旧非空值不清洗、不回填 node key；普通 job/rerun 取当前
+published，quality replay 取精确 frozen pin，legacy global 仅限精确 version+hash 的历史
+replay。新 capless revision 不能被旧 Host 读取，发布前必须先升级 Host。Host 与 Worker
+是两条**独立入口**：
 
 | 入口 | 链路 | 预取与 auth 失败标记 |
 | --- | --- | --- |
@@ -125,8 +130,13 @@ SDK 版本，SDK 承诺向后兼容（只加不减，破坏性变更走 `NodeCon
 
 - **通道**：复用 agent claim 协议（`kind: "code"`），共享 bundle 分发、artifact staging、
   状态回报、心跳与取消通道；manifest 的 code 负载为独立 section（与 agent 负载构成 tagged
-  union）：`capability`、解析后 `node_config`、代码文本 + 内容哈希、`expected_outputs`；
-  inputs 走 artifact staging。
+  union）：`node_key`、字符串 `capability`、解析后 `node_config`、`code_hash`、
+  `expected_outputs`；inputs 走 artifact staging。远程可路由身份是 node key+code_hash，
+  不是非空 capability：manifest 缺 node_key 时 guard 可使用请求行的非空身份，显式空、
+  非法类型或两处不一致均 fail-closed，绝不回退 capability/global/active revision。
+  capability 缺省或 `''` 时，manifest 与 `runtime['capability']` 仍携带 `''`；协议
+  `agent_id` 与 lease 字符串暂不迁移（空标签对应 `agent_id=''`、`agent:code:`）。
+  Worker 在 spawn 前重算代码文本 hash，mismatch 一律拒绝执行。
 - **容量池**：Worker 按 kind 分别声明容量（agent / code 各自上限，`max_code_concurrency`
   经 worker 控制台热更），Host 分开记账、分开强制（`server/app/agent_broker/claim.py`）。
 - **代码分发**：代码文本 + 内容哈希随任务下发，Worker 零 repo 依赖（只需 Python + velites

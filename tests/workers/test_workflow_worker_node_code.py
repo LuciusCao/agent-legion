@@ -126,6 +126,105 @@ def test_dispatch_uses_published_custom_code(tmp_path: Path) -> None:
     worker.stop()
 
 
+def _capless_fetch_node() -> WorkflowNode:
+    from dataclasses import replace
+
+    return replace(_local_node("fetch"), capability="")
+
+
+def test_capless_dispatch_uses_published_code_and_empty_runtime_label(tmp_path: Path) -> None:
+    node = _capless_fetch_node()
+    job_db, ws = _prepare_job(tmp_path, node)
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    _dispatch(tmp_path, worker)
+
+    assert executor.contexts[0].node_code == CUSTOM_V1
+    assert executor.contexts[0].capability == ""
+    worker.stop()
+
+
+def test_capless_rerun_runs_latest_ignoring_snapshot_pin(tmp_path: Path) -> None:
+    from server.app.services.job_artifact_mutation import JobArtifactMutationService
+    from server.app.services.job_rerun import JobRerunService
+
+    node = _capless_fetch_node()
+    batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
+    job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    job = _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V1, 1)})
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    rerun = JobRerunService(
+        job_db,
+        ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path),
+        worker.settings,
+        JobArtifactMutationService(worker.settings.jobs_dir),
+    )
+
+    result = rerun.rerun(ws["id"], job["id"], "fetch")
+    assert result["status"] == "succeeded"
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V2, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    executor.block_event.set()
+    _dispatch(tmp_path, worker)
+
+    assert executor.contexts[0].node_code == CUSTOM_V2
+    assert executor.contexts[0].capability == ""
+    worker.stop()
+
+
+def test_capless_quality_replay_keeps_frozen_workspace_pin(tmp_path: Path) -> None:
+    node = _capless_fetch_node()
+    job_db, ws = _prepare_job(
+        tmp_path,
+        node,
+        batch_payload={
+            "quality_replay": {"replay_id": "r1"},
+            "node_code_versions": {"fetch": _pin(CUSTOM_V1, 1)},
+        },
+    )
+    _publish_v1_v2(ws)
+    _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V1, 1)})
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    _dispatch(tmp_path, worker)
+
+    assert executor.contexts[0].node_code == CUSTOM_V1
+    assert executor.contexts[0].capability == ""
+    worker.stop()
+
+
+def test_capless_dispatch_without_workspace_code_does_not_use_legacy_global(
+    tmp_path: Path,
+) -> None:
+    node = _capless_fetch_node()
+    job_db, ws = _prepare_job(tmp_path, node)
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    assert codes.seed_global("test", "fetch", CUSTOM_V1, "test seed")
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    worker._poll()
+
+    assert executor.contexts == []
+    job = job_db.list_jobs(workspace_id=ws["id"])[0]
+    node_row = job_db.get_job_node(job["id"], "fetch")
+    assert node_row["status"] == "failed"
+    assert "no published node code" in node_row["error_message"]
+    worker.stop()
+
+
 def test_dispatch_runs_latest_published_ignoring_intake_pin(tmp_path: Path) -> None:
     """#115: ordinary jobs no longer honor the intake freeze — publishing a
     newer code version takes effect on the job's next node execution."""

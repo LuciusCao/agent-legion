@@ -7501,9 +7501,9 @@ export interface components {
     }
     /**
      * StudioAgentNodeCodeDraftRequest
-     * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
-     *     its presence authorizes a skeleton draft for a not-yet-published node.
-     *     ``min_length=1``: an empty string must not bypass the presence gate.
+     * @description ``expected_capability`` validates an existing node (mismatch -> 400).
+     *     Any non-null value, including ``''`` for a capless code node, authorizes
+     *     a skeleton draft; an omitted or null value does not.
      */
     StudioAgentNodeCodeDraftRequest: {
       /** Change Note */

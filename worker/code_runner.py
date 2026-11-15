@@ -145,7 +145,7 @@ def prepare_code_execution(
     expected = str(manifest.get("code_hash") or "")
     if not expected or digest != expected:
         raise ValueError(
-            f"code_hash mismatch for capability {manifest.get('capability')!r}:"
+            f"code_hash mismatch for node {manifest.get('node_key')!r}:"
             f" manifest {expected or '<missing>'}, bundle {digest}; refusing to run"
         )
     download_input_artifacts(client, manifest, job_dir, download_slots)
