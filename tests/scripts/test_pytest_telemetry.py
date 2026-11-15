@@ -28,7 +28,9 @@ def test_rerun_diagnostics_redact_secrets_and_bound_sections(
             when="call",
             longrepr=(
                 "postgresql://user:db-password@db.internal/production\n"
+                "postgresql+psycopg://user:driver-password@db.internal/production\n"
                 "token=super-secret-token Authorization: Bearer bearer-secret\n"
+                "Bearer abcdefghijklmnop~+/= and Bearer ~+/=\n"
                 "Traceback: controlled failure"
             ),
             sections=[
@@ -46,9 +48,12 @@ def test_rerun_diagnostics_redact_secrets_and_bound_sections(
     failure = report["failure"]["text"]
     assert "Traceback: controlled failure" in failure
     assert "db-password" not in failure
+    assert "driver-password" not in failure
     assert "db.internal" not in failure
     assert "super-secret-token" not in failure
     assert "bearer-secret" not in failure
+    assert "abcdefghijklmnop~+/=" not in failure
+    assert "Bearer ~+/=" not in failure
     assert report["sections"] == [
         {
             "name": "Captured stdout call",
@@ -75,9 +80,12 @@ def test_controlled_rerun():
     attempts += 1
     if attempts == 1:
         print("captured postgresql://user:captured-db-password@db.internal/production")
+        print("postgresql+asyncpg://user:driver-password@db.internal/production")
+        print("Bearer abcdefghijklmnop~+/= and Bearer ~+/=")
         raise RuntimeError(
             "controlled first failure; "
             "postgresql://user:traceback-db-password@db.internal/production; "
+            "postgresql+psycopg://user:traceback-driver-password@db.internal/production; "
             "token=traceback-secret-token"
         )
 
@@ -122,8 +130,12 @@ def test_after_rerun_still_runs(tmp_path):
     raw_payload = output.read_text(encoding="utf-8")
     assert "captured-db-password" not in raw_payload
     assert "traceback-db-password" not in raw_payload
+    assert "driver-password" not in raw_payload
+    assert "traceback-driver-password" not in raw_payload
     assert "traceback-secret-token" not in raw_payload
     assert "db.internal" not in raw_payload
+    assert "abcdefghijklmnop~+/=" not in raw_payload
+    assert "Bearer ~+/=" not in raw_payload
     payload = json.loads(raw_payload)
     assert payload["exitstatus"] == 0
     assert payload["tests"] == ["test_controlled_rerun.py::test_controlled_rerun"]

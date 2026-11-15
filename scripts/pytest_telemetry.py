@@ -11,12 +11,12 @@ from typing import Any
 _FAILURE_TEXT_LIMIT = 32_000
 _SECTION_TEXT_LIMIT = 8_000
 _TRUNCATION_MARKER = "\n... <truncated by pytest telemetry>"
-_DSN_RE = re.compile(r"\bpostgres(?:ql)?://[^\s'\"<>]+", re.IGNORECASE)
+_DSN_RE = re.compile(r"\bpostgres(?:ql)?(?:\+[A-Za-z0-9_]+)?://[^\s'\"<>]+", re.IGNORECASE)
 _SECRET_RE = re.compile(
     r"(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|dsn|password|passwd|secret|token)\s*[\"']?\s*[:=]\s*[\"']?)[^\s,;\"'}]+"
 )
 _TOKEN_RE = re.compile(
-    r"(?i)\b(?:bearer\s+[A-Za-z0-9._~+/=-]+|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b"
+    r"(?i)\b(?:bearer\s+[A-Za-z0-9._~+/-]+=*|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})(?![A-Za-z0-9._~+/=-])"
 )
 _CAPTURED_SECTIONS = ("Captured stdout", "Captured stderr", "Captured log")
 
