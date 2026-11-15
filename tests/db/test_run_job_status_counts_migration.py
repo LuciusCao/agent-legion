@@ -146,6 +146,7 @@ def test_orphan_run_id_jobs_are_counted() -> None:
         assert _table_counts(conn, "no-such-run") == _run_group_by_counts(conn, "no-such-run")
 
 
+@pytest.mark.fresh_schema
 def test_backfill_rebuilds_and_is_idempotent() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         _seed_workspace(conn, "rjsc-bf-ws")
