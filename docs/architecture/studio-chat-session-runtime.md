@@ -71,7 +71,8 @@ identity/closed CAS 拆除。runtime lock 不包住 join、wait 或 kill，旧 g
 
 | 事件 | 会话与终态语义 |
 |---|---|
-| 正常 turn_end / turn error | 先结束本 turn 的 delivered 跟踪；普通 `RequestError` 记录 per-turn error 后回 idle，direct child 继续存活 |
+| 正常 turn_end / turn error | 持久完成行后才结束本 turn 的 delivered 跟踪；普通 `RequestError` 记录 per-turn error 后回 idle，direct child 继续存活 |
+| PromptWedgedError 等 fatal `on_error` | 保留原 fatal detail，关闭 turn/compaction/tool 状态但不清 delivered identity；同代 exit settlement 补 unknown |
 | mid-turn process/stream death | 不写 turn_end；会话进入 `error`，可 resume；本代 pending permission 按 request id 写一次 `resolved` |
 | between-turns process/stream death | 与 mid-turn 共用 fatal 路径，不等待 prompt/journal timeout；已完成 turn 的消息不补 unknown |
 | 尚未 before_start 的 queued/held 消息 | 只按 message id 写一次 `queued_dropped`，明确表示未投递，可人工重发；不清除下一轮或 successor 的状态 |
@@ -84,6 +85,11 @@ identity/closed CAS 拆除。runtime lock 不包住 join、wait 或 kill，旧 g
 `queued_dropped`。unknown 消息会从 fallback resume transcript 中排除；session/load
 也不会由后端自动重放该消息，用户需核对后显式决定下一步。权限 waiter 在人工回答、
 timeout/cancel 与 durable resolved 之间也保留 request id，退出结算可覆盖这段竞态。
+delivered identity 只能在完成证据持久化后清除：`on_turn_end` 先写 turn_end/timeout，
+普通 per-turn error 先写 `message_id+outcome=failed`，再调用 `note_turn_closed`；若 append
+失败则身份保留。fatal `on_error` 用 `clear_delivery=False` 只关闭 turn/compaction/tool
+状态，原 fatal detail 不变，active id 留到同代 exit settlement 补 unknown。正常 fatal-between
+已完成输入因已有完成证据而不会被误标。
 
 退出投影先读时间线上的 request/message 终态，成功后才移除本代待结算项；append
 或 snapshot 故障可在同一代重试，不重复追加。主 process-exit error 以本代

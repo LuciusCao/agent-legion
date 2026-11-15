@@ -23,9 +23,10 @@ Script shape::
 Set ``"load_error": true`` to make session/load fail with a JSON-RPC error
 (the client must then fall back to session/new); otherwise session/load
 succeeds with an empty result. ``prompt_plans`` supplies per-turn overrides
-of ``on_prompt`` / ``wait_for_cancel`` / ``stop_reason``; a
-``{"close_stdout": true}`` step closes only stdout while keeping the fake
-process alive for receive-stream-death tests.
+of ``on_prompt`` / ``wait_for_cancel`` / ``stop_reason`` / ``ignore_cancel``;
+a ``{"close_stdout": true}`` step closes only stdout while keeping the fake
+process alive for receive-stream-death tests. ``ignore_cancel`` keeps the turn
+parked through session/cancel so the existing wedged-fatal ladder is exercised.
 
 Single-threaded message pump: ``pump_until`` re-enters dispatch so a prompt
 turn can await a permission response or a cancel notification while keeps
@@ -70,6 +71,7 @@ class _FakeAgent:
         self._next_request_id = 1
         self._write_lock = threading.Lock()
         self._unprompted_armed = "unprompted" in self.script
+        self._active_plan = self.script
 
     def _send(self, message: dict[str, Any]) -> None:
         with self._write_lock:
@@ -134,7 +136,7 @@ class _FakeAgent:
         if "method" in message and "id" in message:
             self._handle_request(message)
         elif "method" in message:
-            if message["method"] == "session/cancel":
+            if message["method"] == "session/cancel" and not self._active_plan.get("ignore_cancel"):
                 self.cancelled = True
         elif "id" in message:
             self.pending[message["id"]] = message
@@ -260,6 +262,7 @@ class _FakeAgent:
             self.script["_prompt_index"] = plan_index + 1
             plans = self.script.get("prompt_plans", [])
             plan = {**self.script, **plans[plan_index]} if plan_index < len(plans) else self.script
+            self._active_plan = plan
             failure = self._run_prompt(
                 message["params"].get("sessionId", self.acp_session_id), plan
             )

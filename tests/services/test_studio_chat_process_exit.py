@@ -13,6 +13,7 @@ from unittest.mock import Mock
 import pytest
 
 from server.app.auth.sessions import hash_token
+from server.app.studio_chat import prompt_turn
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.background_wakeup import wake_session
 from server.app.studio_chat.exit_settlement import PROCESS_EXIT_DETAIL
@@ -224,6 +225,112 @@ def test_delivered_queue_death_is_unknown_and_never_auto_replayed(chat) -> None:
     last_prompt = _prompt_texts(script_path)[-1]
     assert "fresh question" in last_prompt
     assert "unknown payload" not in last_prompt
+
+
+def test_direct_wedged_fatal_is_unknown_and_fallback_resume_does_not_replay(
+    chat, monkeypatch
+) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register({"on_prompt": [], "wait_for_cancel": True, "ignore_cancel": True})
+    monkeypatch.setattr(prompt_turn, "PROMPT_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(prompt_turn, "CANCEL_GRACE_SECONDS", 0)
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    direct = service.send_message(sid, workspace, "direct wedged payload")
+    _wait(lambda: len(_prompt_texts(script_path)) == 1)
+
+    _wait(
+        lambda: (
+            service.get_session(sid)["status"] == "error"
+            and any(
+                event.get("message_id") == direct["id"] and event.get("outcome") == "unknown"
+                for event in _events(service, sid, workspace, "error")
+            )
+        )
+    )
+    assert "prompt turn wedged" in service.get_session(sid)["error_detail"]
+    _resume_with_text(service, script_path, sid, workspace, user)
+    _finish_next_turn(service, sid, workspace, "fresh after wedged")
+    last_prompt = _prompt_texts(script_path)[-1]
+    assert "fresh after wedged" in last_prompt
+    assert "direct wedged payload" not in last_prompt
+
+
+def test_queued_wedged_fatal_is_unknown_and_fallback_resume_does_not_replay(
+    chat, monkeypatch
+) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(
+        {
+            "prompt_plans": [
+                {"on_prompt": [], "wait_for_cancel": True},
+                {"on_prompt": [], "wait_for_cancel": True, "ignore_cancel": True},
+            ]
+        }
+    )
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert wake_session(service, sid, runtime, ["finished-task"])
+    queued = service.send_message(sid, workspace, "queued wedged payload")
+    service.cancel(sid, workspace)
+    _wait(
+        lambda: (
+            any(
+                event["message_id"] == queued["id"]
+                for event in _events(service, sid, workspace, "queued_delivered")
+            )
+            and len(_prompt_texts(script_path)) == 2
+            and service.get_session(sid)["status"] == "running"
+        )
+    )
+    service._events().on_error(sid, "prompt turn wedged: injected", fatal=True)
+    service._events().on_exit(sid, close_initiated=False, expected=runtime)
+    _wait(
+        lambda: (
+            service.get_session(sid)["status"] == "error"
+            and any(
+                event.get("message_id") == queued["id"] and event.get("outcome") == "unknown"
+                for event in _events(service, sid, workspace, "error")
+            )
+        )
+    )
+    runtime.handle.close()
+    _resume_with_text(service, script_path, sid, workspace, user)
+    _finish_next_turn(service, sid, workspace, "fresh queued after wedged")
+    last_prompt = _prompt_texts(script_path)[-1]
+    assert "fresh queued after wedged" in last_prompt
+    assert "queued wedged payload" not in last_prompt
+
+
+def test_failed_append_error_keeps_delivery_for_unknown_settlement(chat, monkeypatch) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register({"on_prompt": [{"fail": "ordinary agent refusal"}]})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    direct = service.send_message(sid, workspace, "failed append payload")
+    real_append = service.store.append_message
+    failed = False
+
+    def fail_failed_row(*args, **kwargs):
+        nonlocal failed
+        if args[3].get("outcome") == "failed" and not failed:
+            failed = True
+            raise RuntimeError("injected failed-row append failure")
+        return real_append(*args, **kwargs)
+
+    monkeypatch.setattr(service.store, "append_message", fail_failed_row)
+    _wait(
+        lambda: (
+            service.get_session(sid)["status"] == "error"
+            and any(
+                event.get("message_id") == direct["id"] and event.get("outcome") == "unknown"
+                for event in _events(service, sid, workspace, "error")
+            )
+        )
+    )
+    _resume_with_text(service, script_path, sid, workspace, user)
+    _finish_next_turn(service, sid, workspace, "fresh after append failure")
+    last_prompt = _prompt_texts(script_path)[-1]
+    assert "fresh after append failure" in last_prompt
+    assert "failed append payload" not in last_prompt
 
 
 def test_stdout_eof_is_fatal_even_while_direct_child_is_alive(chat) -> None:

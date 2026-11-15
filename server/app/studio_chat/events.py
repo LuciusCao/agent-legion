@@ -140,7 +140,6 @@ class AcpEventHandlers:
         # trailing content (SDK response-before-updates ordering) clears it.
         empty_turn.schedule_check(self._backend, session_id, stop_reason, timed_out=timed_out)
         runtime = self._backend.runtime(session_id)
-        compaction.note_turn_closed(runtime)
         # #1228 codex P2: a toolCallId is unique within one turn only — drop
         # the coalescing ownership map at the turn boundary so cancelled or
         # timed-out calls never leak entries into later turns.
@@ -155,6 +154,7 @@ class AcpEventHandlers:
         else:
             content = {"event": "turn_end", "stop_reason": stop_reason}
         self._backend.store.append_message(session_id, "status", "system", content)
+        compaction.note_turn_closed(runtime)
         # Guarded (#158): turn_end only moves a live turn back to idle; a
         # concurrent close/error owns the final state.
         self._backend.db.update_studio_chat_session_if(
@@ -164,7 +164,10 @@ class AcpEventHandlers:
 
     def on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         runtime = self._backend.runtime(session_id)
-        compaction.note_turn_closed(runtime)
+        if fatal:
+            # Fatal is not completion evidence: keep the active message id for
+            # the same-generation exit settlement while closing turn/tool state.
+            compaction.note_turn_closed(runtime, clear_delivery=False)
         # #1228 codex P2: turn error is a turn boundary too (see on_turn_end).
         clear_tool_call_ownership(runtime)
         content = {"event": "error", "detail": detail}
@@ -174,6 +177,10 @@ class AcpEventHandlers:
             content["message_id"] = runtime.turn_retry_source[0]
             content["outcome"] = "failed"
         self._backend.store.append_message(session_id, "status", "system", content)
+        if not fatal:
+            # Only a durable failed row authorizes delivery cleanup. A failed
+            # append leaves the identity for fatal/startup unknown settlement.
+            compaction.note_turn_closed(runtime)
         if fatal:
             # Guarded (#158): a close owns the final 'closed' state, and a
             # resume claim's 'starting' row is not ours to stamp — a stale
