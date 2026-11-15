@@ -54,8 +54,9 @@ separate per-runtime guarantees. The invariant is `STUDIO-RUNTIME-001`.
 ## ACP 进程/流退出与幂等终态（#1153）
 
 `acp_consumer.py` 在每代 handle 的同一个 asyncio event loop 中同时观察 direct
-child 的 `process.wait()` 与 ACP 0.12 receive task。receive task 的结束代表 SDK
-已看到 stdout EOF / transport disconnect；监视器不再次读取 stdout，不消费协议帧。
+child 的 `returncode` 属性与 ACP 0.12 receive task。属性轮询可取消，不消费 waitpid
+状态、不要求 stdout/stderr EOF，也不扩大到 descendant；ACP 仍负责后续 Process.wait/kill。
+receive task 的结束代表 SDK 已看到 stdout EOF / transport disconnect；监视器不再次读取 stdout，不消费协议帧。
 startup RPC、between-turn queue.get、prompt 与 post-cancel grace 都与同一个 death
 task 竞争。死亡已观察到时优先于 turn_end、timeout、journal 与 late callback；
 普通 agent `RequestError` 仍是 per-turn error，连接失效不再回 idle。
@@ -111,9 +112,13 @@ live/status/error_detail 守卫，starting、closed 或 successor 拥有行时�
 进入 fallback transcript，正常已完成历史仍照常注入。终态优先级为 completed >
 delivered > dropped：legacy `queued_delivered→queued_dropped` 若没有完成证据，仍按
 unknown 补齐一次，不能被后 dropped 覆盖；transcript 则无条件排除 dropped/unknown，
-即使同 id 也有 delivered 行。startup 候选 SQL 与最终 live→error CAS 同时要求
-`deleted_at IS NULL` 和 `archived_at IS NULL`，因此已隐藏 row 以及读取后才隐藏
-的竞态都不会被改写，消息 append 的既有守卫不替代这条 row CAS。
+即使同 id 也有 delivered 行。正常可见 startup 的候选 SQL 与最终 live→error CAS 同时要求
+`deleted_at IS NULL` 和 `archived_at IS NULL`，读取后才隐藏的可见 row 不被改写，
+消息 append 的既有守卫不替代这条 row CAS。delete/archive stamp 后 close 前崩溃的
+hidden live row 则走独立回收：`hidden=True` 读取 hidden 候选，独立回收只对其中
+live row 做最终 CAS，同时要求 hidden 与 archived_at 快照相等，成功后才 teardown 本代 runtime/token；
+只把 row 改为 error 以释放 create/resume 活跃配额，不写隐藏 permission/queued/unknown
+或 error 消息。unarchive 后快照不匹配即跳过，恢复 row 不被误改，重复 reaper 不重复写事件。
 
 每次 reaper 都重读持久终态，只补缺项；permission/drop/unknown/status 任一阶段
 在提交后报错，下一次启动仍按 request/message id 跳过已落库行，不重复追加。

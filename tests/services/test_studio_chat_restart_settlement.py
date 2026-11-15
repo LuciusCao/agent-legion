@@ -9,6 +9,7 @@ import pytest
 
 from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.auth.sessions import hash_token
+from server.app.services.job_errors import ConflictError
 from server.app.studio_chat.service import StudioChatService
 from tests.helpers import studio_chat_fixtures as fixtures
 from tests.helpers import wait_for_predicate
@@ -297,20 +298,29 @@ def _idle_session(db, workspace: str, user: str) -> str:
     return sid
 
 
-def test_startup_excludes_deleted_and_archived_candidates(chat) -> None:
+def test_startup_settles_visible_and_hidden_candidates_without_hidden_writes(chat) -> None:
     service, _bus, _register, workspace, user = chat
     deleted = _idle_session(service.db, workspace, user)
     archived = _idle_session(service.db, workspace, user)
     live = _idle_session(service.db, workspace, user)
+    _pending(service.db, deleted)
+    _pending(service.db, archived)
     assert service.db.mark_studio_chat_session_deleted(deleted)
     assert service.db.set_studio_chat_session_archived(archived, True)
 
     service.reap_zombie_sessions()
 
-    assert service.db.get_studio_chat_session(live)["status"] == "error"
-    assert service.db.get_studio_chat_session(deleted)["status"] == "idle"
-    assert service.db.get_studio_chat_session(archived)["status"] == "idle"
+    for sid in (live, deleted, archived):
+        assert service.db.get_studio_chat_session(sid)["status"] == "error"
+    for sid in (deleted, archived):
+        assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
+            "pending"
+        ]
     assert {row["id"] for row in service.db.list_zombie_studio_chat_sessions()} == {live}
+    assert {row["id"] for row in service.db.list_zombie_studio_chat_sessions(hidden=True)} == {
+        deleted,
+        archived,
+    }
 
 
 @pytest.mark.parametrize("stamp", ["deleted", "archived"])
@@ -321,8 +331,10 @@ def test_startup_visibility_cas_blocks_delete_or_archive_after_read(
     sid = _idle_session(service.db, workspace, user)
     real_list = service.db.list_zombie_studio_chat_sessions
 
-    def hide_after_read():
-        rows = real_list()
+    def hide_after_read(**kwargs):
+        rows = real_list(**kwargs)
+        if kwargs.get("hidden"):
+            return []
         if stamp == "deleted":
             assert service.db.mark_studio_chat_session_deleted(sid)
         else:
@@ -335,3 +347,74 @@ def test_startup_visibility_cas_blocks_delete_or_archive_after_read(
     row = service.db.get_studio_chat_session(sid)
     assert row["status"] == "idle"
     assert row[f"{stamp}_at"] is not None
+
+
+def _hidden_zombie(db, workspace: str, user: str, stamp: str) -> str:
+    sid = _idle_session(db, workspace, user)
+    _pending(db, sid)
+    if stamp == "deleted":
+        assert db.mark_studio_chat_session_deleted(sid)
+    else:
+        assert db.set_studio_chat_session_archived(sid, True)
+    return sid
+
+
+@pytest.mark.parametrize("stamp", ["deleted", "archived"])
+def test_hidden_zombie_releases_create_and_resume_capacity(chat, monkeypatch, stamp: str) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(fixtures.TEXT_SCRIPT)
+    sid = _hidden_zombie(service.db, workspace, user, stamp)
+    visible = _idle_session(service.db, workspace, user)
+    resumable = service.db.create_studio_chat_session(workspace, user, "fake-agent")
+    service.db.update_studio_chat_session(resumable, status="error")
+    monkeypatch.setattr("server.app.studio_chat.service.MAX_ACTIVE_STUDIO_CHAT_SESSIONS", 1)
+    with pytest.raises(ConflictError, match="Too many active"):
+        service.create_session(workspace, user, "fake-agent")
+    with pytest.raises(ConflictError, match="Too many active"):
+        service.resume_session(resumable, workspace, user)
+
+    service.reap_zombie_sessions()
+    service.reap_zombie_sessions()
+
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "error"
+    assert row[f"{stamp}_at"] is not None
+    assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
+        "pending"
+    ]
+    assert service.db.get_studio_chat_session(visible)["status"] == "error"
+    created = service.create_session(workspace, user, "fake-agent")
+    assert created["status"] == "idle"
+    service.close_session(created["id"], workspace)
+    assert service.resume_session(resumable, workspace, user)["status"] == "idle"
+    service.send_message(resumable, workspace, "after hidden cleanup")
+    wait_for_predicate(
+        lambda: any(
+            m["kind"] == "text" and m["role"] == "agent"
+            for m in service.list_messages(resumable, workspace)
+        ),
+        timeout=10,
+    )
+    assert _prompt_texts(script_path)
+
+
+def test_hidden_archive_cas_does_not_rewrite_row_restored_after_read(chat, monkeypatch) -> None:
+    service, _bus, _register, workspace, user = chat
+    sid = _hidden_zombie(service.db, workspace, user, "archived")
+    real_list = service.db.list_zombie_studio_chat_sessions
+
+    def unarchive_after_read(**kwargs):
+        rows = real_list(**kwargs)
+        if kwargs.get("hidden"):
+            assert service.db.set_studio_chat_session_archived(sid, False)
+        return rows
+
+    monkeypatch.setattr(service.db, "list_zombie_studio_chat_sessions", unarchive_after_read)
+    service.reap_zombie_sessions()
+
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "idle"
+    assert row["archived_at"] is None
+    assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
+        "pending"
+    ]

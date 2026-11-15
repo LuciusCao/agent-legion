@@ -91,8 +91,7 @@ class StudioChatQueriesMixin(
             if max_active is not None:
                 conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (_CAP_LOCK_KEY,))
                 row = conn.execute(
-                    "select count(*) as n from studio_chat_sessions"
-                    " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
+                    "select count(*) as n from studio_chat_sessions where status in ('starting', 'idle', 'running', 'awaiting_permission')",
                 ).fetchone()
                 if row is not None and int(row["n"]) >= max_active:
                     return None
@@ -103,20 +102,22 @@ class StudioChatQueriesMixin(
             )
         return session_id
 
-    def list_zombie_studio_chat_sessions(self) -> list[dict[str, Any]]:
-        """Rows whose persisted timeline may need restart reconciliation."""
+    def list_zombie_studio_chat_sessions(self, *, hidden: bool = False) -> list[dict[str, Any]]:
+        """Visible or hidden rows whose persisted state may need reconciliation."""
+        visibility = "deleted_at is null and archived_at is null"
+        if hidden:
+            visibility = "deleted_at is not null or archived_at is not null"
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_SESSION_COLUMNS} from studio_chat_sessions"
-                " where status in ('starting','idle','running','awaiting_permission','error') and deleted_at is null and archived_at is null order by id"
+                f" where status in ('starting','idle','running','awaiting_permission','error') and ({visibility}) order by id"
             ).fetchall()
         return [_session_record(row) for row in rows]
 
     def get_studio_chat_session(self, session_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
             row = conn.execute(
-                f"select {_SESSION_COLUMNS} from studio_chat_sessions where id=%s",
-                (session_id,),
+                f"select {_SESSION_COLUMNS} from studio_chat_sessions where id=%s", (session_id,)
             ).fetchone()
         return _session_record(row) if row is not None else None
 
@@ -128,8 +129,7 @@ class StudioChatQueriesMixin(
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_SESSION_COLUMNS} from studio_chat_sessions"
-                " where workspace_id=%s and deleted_at is null"
-                " and (archived_at is not null)=%s"
+                " where workspace_id=%s and deleted_at is null and (archived_at is not null)=%s"
                 " order by created_at desc, id desc",
                 (workspace_id, archived),
             ).fetchall()
@@ -141,9 +141,7 @@ class StudioChatQueriesMixin(
         can never clobber a newer window's flag. Returns whether it fired."""
         with self.connect() as conn:
             row = conn.execute(
-                "update studio_chat_sessions set compacting=false,"
-                " updated_at=current_timestamp where id=%s and compacting=true"
-                " returning id",
+                "update studio_chat_sessions set compacting=false, updated_at=current_timestamp where id=%s and compacting=true returning id",
                 (session_id,),
             ).fetchone()
         return row is not None
@@ -156,8 +154,7 @@ class StudioChatQueriesMixin(
         assignments = ", ".join(f"{key}=%s" for key in updates)
         with self.connect() as conn:
             conn.execute(
-                f"update studio_chat_sessions set {assignments},"
-                " updated_at=current_timestamp where id=%s",
+                f"update studio_chat_sessions set {assignments}, updated_at=current_timestamp where id=%s",
                 (*updates.values(), session_id),
             )
 
@@ -168,7 +165,8 @@ class StudioChatQueriesMixin(
         status_in: tuple[str, ...] | None = None,
         status_not_in: tuple[str, ...] | None = None,
         error_detail_is: str | None = None,
-        visible_only: bool = False,
+        visible_only: bool | str = False,
+        archived_at_is: Any = None,
         **fields: Any,
     ) -> bool:
         """Guarded update: apply only while the current status matches (#158).
@@ -179,7 +177,9 @@ class StudioChatQueriesMixin(
         ``error_detail_is`` additionally pins the current ``error_detail``
         (e.g. undoing only one's own error stamp, not a later real failure).
         ``visible_only`` also requires deleted_at/archived_at to be null inside
-        the same UPDATE, closing read-then-hide races for startup reconciliation.
+        the same UPDATE, closing read-then-hide races for startup reconciliation;
+        ``visible_only="hidden"`` instead requires either stamp, while
+        ``archived_at_is`` pins the archived snapshot to reject unarchive races.
         Returns True when a row was actually updated.
         """
         updates = _build_session_updates(fields)
@@ -196,14 +196,17 @@ class StudioChatQueriesMixin(
             placeholders = ",".join("%s" for _ in status_not_in)
             clauses.append(f"status not in ({placeholders})")
             params.extend(status_not_in)
-        if error_detail_is is not None:
-            clauses.append("error_detail=%s")
-            params.append(error_detail_is)
-        clauses.extend(("deleted_at is null and archived_at is null",) if visible_only else ())
+        clauses.extend(("error_detail=%s",) if error_detail_is is not None else ())
+        params.extend((error_detail_is,) if error_detail_is is not None else ())
+        if visible_only == "hidden":
+            clauses.append("(deleted_at is not null or archived_at is not null)")
+        elif visible_only:
+            clauses.append("deleted_at is null and archived_at is null")
+        clauses.extend(("archived_at=%s",) if archived_at_is is not None else ())
+        params.extend((archived_at_is,) if archived_at_is is not None else ())
         with self.connect() as conn:
             row = conn.execute(
-                f"update studio_chat_sessions set {assignments},"
-                f" updated_at=current_timestamp where {' and '.join(clauses)} returning id",
+                f"update studio_chat_sessions set {assignments}, updated_at=current_timestamp where {' and '.join(clauses)} returning id",
                 tuple(params),
             ).fetchone()
         return row is not None
@@ -216,8 +219,7 @@ class StudioChatQueriesMixin(
         """
         with self.connect() as conn:
             row = conn.execute(
-                "update studio_chat_sessions set status='running',"
-                " updated_at=current_timestamp where id=%s and status='idle' returning id",
+                "update studio_chat_sessions set status='running', updated_at=current_timestamp where id=%s and status='idle' returning id",
                 (session_id,),
             ).fetchone()
         return row is not None

@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 from typing import Any
@@ -313,6 +314,15 @@ class _FakeAgent:
             elif "terminal" in step:
                 outcome = self._run_terminal(session_id, step["terminal"])
                 self._sink({"terminal_outcome": outcome, "record": step.get("record")})
+            elif "descendant" in step:
+                descendant = subprocess.Popen(
+                    step["descendant"].get(
+                        "args", [sys.executable, "-c", "import time; time.sleep(30)"]
+                    ),
+                    stdout=sys.stdout.fileno(),
+                    stderr=sys.stdout.fileno(),
+                )
+                self._sink({"descendant_pid": descendant.pid})
             elif "fail" in step:
                 return str(step["fail"])
             elif step.get("close_stdout"):

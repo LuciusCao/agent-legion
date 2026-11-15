@@ -155,6 +155,8 @@ def reconcile_zombie_session(service: StudioChatService, row: dict[str, Any]) ->
 
 def reconcile_zombie_sessions(service: StudioChatService) -> None:
     """Run one full startup pass, failing closed if any row is unsettled."""
+    from server.app.studio_chat.hidden_restart import reconcile_hidden_zombie_sessions
+
     logger = logging.getLogger(__name__)
     reaped = 0
     failures: list[str] = []
@@ -177,6 +179,7 @@ def reconcile_zombie_sessions(service: StudioChatService) -> None:
             # so no resume can replay a row whose terminal settlement failed.
             failures.append(session_id)
             logger.warning("failed to reconcile studio chat session %s", session_id, exc_info=True)
+    reconcile_hidden_zombie_sessions(service, failures)
     if reaped:
         logger.warning("reaped %d zombie studio chat session(s) at startup", reaped)
     if failures:

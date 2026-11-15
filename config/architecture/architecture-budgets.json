@@ -2057,6 +2057,7 @@
     "server/app/studio_chat/empty_turn_retry.py": 52,
     "server/app/studio_chat/events.py": 128,
     "server/app/studio_chat/exit_settlement.py": 189,
+    "server/app/studio_chat/hidden_restart.py": 36,
     "server/app/studio_chat/inbound_delivery.py": 136,
     "server/app/studio_chat/inbound_queue.py": 71,
     "server/app/studio_chat/instance_probe.py": 23,

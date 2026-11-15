@@ -2,7 +2,8 @@
 
 ACP 0.12 rejects outstanding requests when its receive loop ends, but has no
 public disconnect callback. Its receive task is therefore observed alongside
-``process.wait()``; neither waiter reads or consumes the stdout byte stream.
+the direct child's ``returncode`` property, polled without consuming waitpid
+status or depending on stdout/stderr EOF. ACP owns subsequent Process.wait/kill.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import threading
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -28,6 +30,21 @@ def _receive_task(conn: Any) -> asyncio.Task[Any] | None:
     return task if isinstance(task, asyncio.Task) else None
 
 
+def _poll_returncode(process: Any, stop: threading.Event) -> int | None:
+    while (returncode := getattr(process, "returncode", None)) is None:
+        if stop.wait(0.05):
+            return None
+    return int(returncode)
+
+
+async def _wait_returncode(process: Any) -> int | None:
+    stop = threading.Event()
+    try:
+        return await asyncio.to_thread(_poll_returncode, process, stop)
+    finally:
+        stop.set()
+
+
 async def watch_connection(
     conn: Any,
     process: Any,
@@ -36,9 +53,7 @@ async def watch_connection(
     note_death: Callable[[str], bool],
 ) -> str | None:
     """Return the first death, or None for an explicit handle close."""
-    process_wait = (
-        asyncio.create_task(process.wait()) if callable(getattr(process, "wait", None)) else None
-    )
+    process_wait = asyncio.create_task(_wait_returncode(process))
     receive_task = _receive_task(conn)
     waiters = {task for task in (process_wait, receive_task) if task is not None}
     if not waiters:

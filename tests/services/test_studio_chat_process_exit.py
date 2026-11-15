@@ -64,6 +64,12 @@ def _prompt_texts(script_path: Path) -> list[str]:
     ]
 
 
+def _descendant_pid(script_path: Path) -> int:
+    return next(
+        entry["descendant_pid"] for entry in _sink(script_path) if "descendant_pid" in entry
+    )
+
+
 def _kill(runtime) -> int:
     process = runtime.handle._process
     assert process is not None and process.returncode is None
@@ -123,6 +129,56 @@ def test_kill_mid_turn_settles_permission_and_unstarted_queue_then_resumes(chat)
     _resume_with_text(service, script_path, sid, workspace, user)
     _finish_next_turn(service, sid, workspace, "after fatal exit")
     assert "not started" not in _prompt_texts(script_path)[-1]
+
+
+def test_descendant_pipe_does_not_delay_mid_turn_exit_or_queue_settlement(chat) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(
+        {"on_prompt": [{"descendant": {}}, PERMISSION_STEP], "wait_for_cancel": True}
+    )
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    assert wake_session(service, sid, runtime, ["finished-task"])
+    _wait(lambda: service.get_session(sid)["status"] == "awaiting_permission")
+    queued = service.send_message(sid, workspace, "queued behind descendant")
+    descendant_pid = _descendant_pid(script_path)
+    try:
+        _kill(runtime)
+        _wait(
+            lambda: (
+                service.get_session(sid)["status"] == "error"
+                and bool(_events(service, sid, workspace, "queued_dropped"))
+            )
+        )
+        assert [
+            event["message_id"] for event in _events(service, sid, workspace, "queued_dropped")
+        ] == [queued["id"]]
+        assert pid_is_running(descendant_pid)
+    finally:
+        os.kill(descendant_pid, signal.SIGKILL)
+
+
+def test_descendant_pipe_does_not_delay_between_turn_exit(chat) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(
+        {"on_prompt": [{"descendant": {}}, fixtures.TEXT_SCRIPT["on_prompt"][0]]}
+    )
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    _finish_next_turn(service, sid, workspace, "completed before descendant")
+    _wait(lambda: service.get_session(sid)["status"] == "idle")
+    descendant_pid = _descendant_pid(script_path)
+    try:
+        _kill(runtime)
+        _wait(lambda: service.get_session(sid)["status"] == "error")
+        assert pid_is_running(descendant_pid)
+        assert not [
+            event
+            for event in _events(service, sid, workspace, "error")
+            if event.get("outcome") == "unknown"
+        ]
+    finally:
+        os.kill(descendant_pid, signal.SIGKILL)
 
 
 def test_kill_between_turns_is_error_without_marking_completed_message_unknown(chat) -> None:
