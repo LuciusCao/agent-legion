@@ -167,6 +167,8 @@ def note_turn_closed(runtime: SessionRuntime | None) -> None:
         return
     with runtime.lock:
         runtime.turn_open = False
+        if (source := runtime.turn_retry_source) is not None:
+            runtime.inbound_messages.pop(source[0], None)
 
 
 def note_ready(

@@ -33,10 +33,10 @@ RESUME_TRANSCRIPT_FOOTER = "[此前对话记录结束。以下是用户的新消
 def build_resume_transcript(messages: list[dict[str, Any]]) -> str:
     """Rebuild a compact user/assistant transcript; "" when nothing usable.
 
-    #882: an inbound-queued user message (``content.queued``) counts only once
-    a ``queued_delivered`` status row proves the agent received it — a
-    dropped or never-started one asked the user to resend and must not be
-    silently injected into the next prompt (fail-safe: no proof, no entry).
+    #882: an inbound-queued user message (``content.queued``) counts only
+    after ``queued_delivered`` proves its before_start claim committed. A
+    dropped/never-started message has no proof; a delivered message whose
+    turn died with unknown outcome is also excluded to prevent auto-resend.
     """
     delivered = {
         (message.get("content") or {}).get("message_id")
@@ -44,9 +44,20 @@ def build_resume_transcript(messages: list[dict[str, Any]]) -> str:
         if message.get("kind") == "status"
         and (message.get("content") or {}).get("event") == "queued_delivered"
     }
+    # A delivered prompt whose turn died has an unknown result. Reinjecting it
+    # into fallback resume context would be an automatic resend, not recovery.
+    unknown = {
+        (message.get("content") or {}).get("message_id")
+        for message in messages
+        if message.get("kind") == "status"
+        and (message.get("content") or {}).get("event") == "error"
+        and (message.get("content") or {}).get("outcome") == "unknown"
+    }
     entries: list[str] = []
     for message in messages:
         if message.get("kind") != "text" or message.get("role") not in ("user", "agent"):
+            continue
+        if message.get("id") in unknown:
             continue
         if (message.get("content") or {}).get("queued") and message.get("id") not in delivered:
             continue

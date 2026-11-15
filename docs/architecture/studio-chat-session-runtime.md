@@ -51,6 +51,53 @@ terminated handles, and absence of durable starting/running rows. Existing
 admission, resume, generation-bound callbacks and fatal-loop tests retain their
 separate per-runtime guarantees. The invariant is `STUDIO-RUNTIME-001`.
 
+## ACP 进程/流退出与幂等终态（#1153）
+
+`acp_consumer.py` 在每代 handle 的同一个 asyncio event loop 中同时观察 direct
+child 的 `process.wait()` 与 ACP 0.12 receive task。receive task 的结束代表 SDK
+已看到 stdout EOF / transport disconnect；监视器不再次读取 stdout，不消费协议帧。
+startup RPC、between-turn queue.get、prompt 与 post-cancel grace 都与同一个 death
+task 竞争。死亡已观察到时优先于 turn_end、timeout、journal 与 late callback；
+普通 agent `RequestError` 仍是 per-turn error，连接失效不再回 idle。
+
+`process_exit.py` 先把本 handle 的 prompt admission fence 掉，再经
+`ServiceCallbacks.on_connection_lost` 在旧 runtime 上执行 `exit_settlement.py`。
+该路径设置 `runtime.closed`、停止 background wakeup、使本代空轮重投失效，并按
+runtime identity（进程内 generation）、request id、message id 结算。第一次 EOF
+投影保留 registry 中的旧 runtime，让 resume 仍能 join 可能活着的 direct child；
+SDK transport 的有界关闭与 `terminals.close_all()` 后，线程最后的 `on_exit` 再按
+identity/closed CAS 拆除。runtime lock 不包住 join、wait 或 kill，旧 generation
+的 exit/callback 不得清理 successor。
+
+| 事件 | 会话与终态语义 |
+|---|---|
+| 正常 turn_end / turn error | 先结束本 turn 的 delivered 跟踪；普通 `RequestError` 记录 per-turn error 后回 idle，direct child 继续存活 |
+| mid-turn process/stream death | 不写 turn_end；会话进入 `error`，可 resume；本代 pending permission 按 request id 写一次 `resolved` |
+| between-turns process/stream death | 与 mid-turn 共用 fatal 路径，不等待 prompt/journal timeout；已完成 turn 的消息不补 unknown |
+| 尚未 before_start 的 queued/held 消息 | 只按 message id 写一次 `queued_dropped`，明确表示未投递，可人工重发；不清除下一轮或 successor 的状态 |
+| 已写 queued_delivered、turn 尚未结束 | 写现有 `error` 状态行，携带 `message_id` 与 `outcome=unknown`；不得谎报未送达，也不得自动重发 |
+| 显式 close / resume / shutdown | 沿用 closed CAS、显式权限拒绝和 close/join/kill fence，不写进程崩溃 error；close 赢得 death 竞态时不追加 crash 事件 |
+
+`queued_delivered` 只证明 `before_start` 的 token lock + idle claim + 状态行已在
+同一事务提交，不证明 `conn.prompt` 已执行，更不证明模型已产生结果。若该事务已
+提交但调用方收到异常，delivery 先读持久证明再决定，禁止补一条虚假的
+`queued_dropped`。unknown 消息会从 fallback resume transcript 中排除；session/load
+也不会由后端自动重放该消息，用户需核对后显式决定下一步。权限 waiter 在人工回答、
+timeout/cancel 与 durable resolved 之间也保留 request id，退出结算可覆盖这段竞态。
+
+退出投影先读时间线上的 request/message 终态，成功后才移除本代待结算项；append
+或 snapshot 故障可在同一代重试，不重复追加。主 process-exit error 以本代
+`runtime_exit_id` 去重，resume 后的下一代死亡仍有自己的事件；startup refusal、
+wedged turn 等既有 fatal `on_error` 则保留原 detail，不被改写成第二次进程崩溃。
+两次即时 EOF 投影尝试之外，线程最终 `on_exit` 仍走同一幂等入口。append 使用
+live/status/error_detail 守卫，starting、closed 或 successor 拥有行时旧 generation
+不再写入。本片没有 DDL，也不声称后端进程崩溃后的跨进程 exactly-once。
+
+清理对象仅限本 handle 拉起的 direct ACP child 与该 child 经 ACP 登记的 terminal；
+不按 process group 清理 Kimi 内部的非 direct-child 后台任务。event-loop wedged 的
+线外看门狗、可配置 prompt/cancel/unprompted/close timeout 属于后续 A2，本片不以
+asyncio timer 或固定 sleep 伪造这些能力。
+
 ## Kimi 后台任务活动与完成接续（#772/#806）
 
 Kimi 的 ACP `ACPSession.prompt()` 只在 prompt 请求内迭代通知流。Studio
@@ -279,5 +326,6 @@ step 本身失败则按已结算的门状态裁决（否则日志损坏时会来
 消息，仍按 #1029 之前的行为送进 ACP，这是轮询日志这一观测方式固有的。回合永不结束时不永久卡住：日志被替换或截断（重建基线后
 `turn.ended` 不可观测）立即解除，日志连续 `IDLE_TIMEOUT_SECONDS`（900 秒）无进展（含日志
 读取持续失败）超时解除，两者都把暂存消息记 `queued_dropped`（「agent 自发回合长时间无进展，
-排队消息未投递，请重发」）；引擎崩溃使 runtime 拆除时暂存消息不再投递，前端按 #1028 的
-既有语义在会话不再存活时标「未送达」。
+排队消息未投递，请重发」）；引擎进程/流死亡时按 #1153 的本代 message id 结算，
+未 before_start 的暂存消息明确写 `queued_dropped`，已 delivered 但未结束的写
+`outcome=unknown`，不再只靠前端的会话存活兜底推导。

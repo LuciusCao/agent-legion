@@ -298,12 +298,11 @@ class StudioChatService:
         if runtime is None:
             raise NotFoundError("Permission request not found or already resolved")
         with runtime.lock:
-            # Dict membership is the not-yet-settled criterion (#158): the
-            # timeout/teardown/cancel settlers pop under this same lock, so a
-            # respond that loses the race finds the request gone and 404s
-            # instead of writing an orphan decision and faking success.
-            pending = runtime.pending_permissions.pop(request_id, None)
-            if pending is None:
+            # The event is the settled criterion (#158): an answer keeps the
+            # request id until its resolved row is durable, while a duplicate
+            # answer still 404s instead of writing an orphan decision.
+            pending = runtime.pending_permissions.get(request_id)
+            if pending is None or pending.event.is_set():
                 raise NotFoundError("Permission request not found or already resolved")
             pending.decision = {"deny": True} if deny else {"option_id": option_id}
             pending.event.set()

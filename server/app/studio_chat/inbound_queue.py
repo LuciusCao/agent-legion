@@ -1,58 +1,48 @@
-"""Inbound queue for human messages that arrive during a background turn (#882).
+"""FIFO admission for human messages behind a platform-initiated turn (#882).
 
-A background wakeup (background_delivery.wake_session) claims the session
-like a human turn does, so a message sent while it runs used to be refused
-with 409 — and a client that raced the claim (it still saw ``idle``) lost
-the text it had already cleared from the composer (#863 comment ④).
-
-Now, while a platform-initiated turn holds the session, the message is
-persisted immediately (``content.queued``) and handed to the ACP prompt
-queue behind the running turn. The handle's prompt loop is strictly FIFO
-and only dequeues after the previous turn settled (on_turn_end has moved
-the row back to idle), so delivery order is the arrival order. At dequeue
-time ``before_start`` claims the turn exactly like human admission and
-records ``queued_delivered``; if the session can no longer take it
-(compaction window, dead run token, row not idle) the prompt is not sent
-and ``queued_dropped`` tells the user to resend — never a silent loss.
-
-While any message is queued, later sends queue too (FIFO — a direct claim
-would overtake them) and background wakeups stand back (wake_session), so
-nothing Studio sends can slip in between a turn's end and the queued
-message's start; a Kimi Code unprompted turn opened there is caught by the
-#1109 dequeue check (unprompted_queue.GatedUnpromptedWatcher.defer).
-A runtime torn down with messages still queued never starts them; the UI
-marks such rows undelivered once the session is no longer live.
+Messages persist with ``content.queued`` and enter the handle's FIFO. Their
+actual ``before_start`` claim lives in inbound_delivery.py: queued_delivered
+means that claim committed, never that conn.prompt or the model completed.
 """
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.sessions import hash_token
-from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
-from server.app.studio_chat import compaction
-from server.app.studio_chat.payloads import serialize_message
-from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
-from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.inbound_delivery import (
+    DELIVERED_DETAIL,
+    DROPPED_BUSY,
+    DROPPED_COMPACTING,
+    DROPPED_ERROR,
+    DROPPED_TOKEN,
+    _deliver,
+    _note_dropped,
+    note_enqueued,
+    publish_committed,
+)
+
+__all__ = [
+    "DELIVERED_DETAIL",
+    "DROPPED_BUSY",
+    "DROPPED_COMPACTING",
+    "DROPPED_ERROR",
+    "DROPPED_TOKEN",
+    "_deliver",
+    "_note_dropped",
+    "enqueue",
+    "publish_committed",
+    "should_queue",
+]
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
 
-logger = logging.getLogger(__name__)
-
-DELIVERED_DETAIL = "排队消息已开始处理"
-DROPPED_COMPACTING = "上下文压缩中，排队消息未投递，请稍后重发"
-DROPPED_TOKEN = "工具通道已失效，排队消息未投递；请点「继续对话」重建后重发"
-DROPPED_BUSY = "会话状态已变化，排队消息未投递，请重发"
-DROPPED_ERROR = "排队消息投递失败，请重发"
-
 
 def should_queue(runtime: SessionRuntime, status: str) -> bool:
-    """Caller holds runtime.lock: queue behind a background turn, or behind
-    messages already queued (keeps FIFO across the turn boundary)."""
+    """Caller holds runtime.lock: preserve FIFO behind a turn or other input."""
     if runtime.inbound_pending > 0:
         return status in ("idle", "running", "awaiting_permission")
     return (
@@ -70,8 +60,7 @@ def enqueue(
     prompt: str,
     commit_wakeup: Callable[[], None],
 ) -> dict[str, Any] | None:
-    """Caller holds runtime.lock with all prompt preparation done; returns the
-    persisted user row, or None when the handle no longer accepts input."""
+    """Persist and hand off one message, or None when admission is fenced."""
     message: dict[str, Any] | None = None
 
     def accept() -> None:
@@ -79,7 +68,7 @@ def enqueue(
         message = service.db.enqueue_studio_chat_message(
             session_id, hash_token(runtime.token), text
         )
-        runtime.inbound_pending += 1
+        note_enqueued(runtime, message)
         runtime.resume_transcript_pending = False
         commit_wakeup()
 
@@ -90,93 +79,3 @@ def enqueue(
     if not runtime.handle.send_prompt(prompt, accept=accept, before_start=before_start):
         return None
     return message
-
-
-def _deliver(
-    service: StudioChatService,
-    session_id: str,
-    runtime: SessionRuntime,
-    message_id: str,
-    text: str,
-    prompt: str,
-) -> bool:
-    """At the queued prompt's turn (worker thread, no lock held): claim like
-    human admission."""
-    # #1109: on Kimi Code, re-observe the wire journal first; a just-opened
-    # unprompted turn sends the message back to the gate (still pending).
-    if (gate := runtime.unprompted_gate) is not None and gate.defer(message_id, text, prompt):
-        return False
-    with runtime.lock:
-        runtime.inbound_pending -= 1
-        if runtime.closed or service.runtime(session_id) is not runtime:
-            return False
-        detail: str | None = None
-        try:
-            if compaction.send_blocked(service.db, session_id, runtime, text):
-                detail = DROPPED_COMPACTING
-            elif not _token_alive(service, runtime.token):
-                invalidate_run_token(service, session_id, runtime)
-                detail = DROPPED_TOKEN
-            elif (detail := _claim(service, session_id, runtime, message_id)) is None:
-                open_turn(runtime, text, message_id=message_id, prompt=prompt)
-        except Exception:
-            # #204 broad-except audit: every step before the claim is a
-            # read/notice and the claim is the last fallible call, so a raise
-            # means no turn was taken; dropping (with a visible notice) beats
-            # killing the prompt loop. Traceback retained.
-            logger.warning("queued chat message delivery failed for %s", session_id, exc_info=True)
-            detail = DROPPED_ERROR
-        if detail is not None:
-            _note_dropped(service, session_id, message_id, detail)
-        return detail is None
-
-
-def _claim(
-    service: StudioChatService, session_id: str, runtime: SessionRuntime, message_id: str
-) -> str | None:
-    """Token lock + idle claim + ``queued_delivered`` row in one transaction
-    (human-admission parity; the delivery proof can never be missing for a
-    turn that was actually claimed and sent)."""
-    notice = {"event": "queued_delivered", "message_id": message_id, "detail": DELIVERED_DETAIL}
-    try:
-        row = service.db.claim_studio_chat_turn_with_token(
-            session_id, hash_token(runtime.token), notice
-        )
-    except StudioChatAdmissionRejected:
-        alive = _token_alive(service, runtime.token)
-        if not alive:
-            invalidate_run_token(service, session_id, runtime)
-        return DROPPED_BUSY if alive else DROPPED_TOKEN
-    publish_committed(service, session_id, row)
-    return None
-
-
-def publish_committed(service: StudioChatService, session_id: str, row: dict[str, Any]) -> None:
-    """Push an already-committed status row + snapshot; best-effort only."""
-    try:
-        service.store.publish(session_id, {"type": "message", "message": serialize_message(row)})
-        service.store.publish_session(session_id)
-    except Exception:
-        # #204 broad-except audit: the row and claim are durable; a failed
-        # publish must not abort the claimed turn's prompt. SSE reconnect /
-        # REST refill recovers it; traceback retained.
-        logger.warning("queued chat message publish failed for %s", session_id, exc_info=True)
-
-
-def _note_dropped(
-    service: StudioChatService, session_id: str, message_id: str, detail: str
-) -> None:
-    try:
-        service.store.append_message(
-            session_id,
-            "status",
-            "system",
-            {"event": "queued_dropped", "message_id": message_id, "detail": detail},
-        )
-        service.store.publish_session(session_id)
-    except Exception:
-        # #204 broad-except audit: advisory notice after the drop is decided
-        # (no turn was claimed, nothing sent); a missing row only leaves the
-        # UI on its session-status fallback and the transcript excludes the
-        # message either way. Traceback retained.
-        logger.warning("queued chat message notice failed for %s", session_id, exc_info=True)

@@ -188,6 +188,18 @@ class AcpEventHandlers:
             )
         self._backend.store.publish_session(session_id)
 
+    def on_connection_lost(
+        self, session_id: str, detail: str, *, expected: SessionRuntime | None
+    ) -> None:
+        del detail  # the stable public error wording lives in exit_settlement
+        finish_session_exit(
+            self._backend,
+            session_id,
+            close_initiated=False,
+            expected=expected,
+            project_only=True,
+        )
+
     def on_exit(
         self, session_id: str, *, close_initiated: bool, expected: SessionRuntime | None
     ) -> None:

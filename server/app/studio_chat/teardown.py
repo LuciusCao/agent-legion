@@ -63,12 +63,13 @@ def teardown_runtime(
         # Same for a pending empty_turn verdict (#863).
         timers = (runtime.compact_timer, runtime.empty_turn_timer)
         runtime.compact_timer = runtime.empty_turn_timer = None
-        # Pop each waiter so a respond racing the settle finds the request
-        # gone (dict membership is the not-yet-settled criterion, #158).
-        while runtime.pending_permissions:
-            _request_id, pending = runtime.pending_permissions.popitem()
-            pending.decision = {"deny": True}
-            pending.event.set()
+        # Explicit teardown discards waiter identities. An unexpected-exit
+        # projection retains them for its own idempotent durable retry.
+        if not runtime.exit_started:
+            while runtime.pending_permissions:
+                _request_id, pending = runtime.pending_permissions.popitem()
+                pending.decision = {"deny": True}
+                pending.event.set()
     for timer in timers:
         if timer is not None:
             timer.cancel()

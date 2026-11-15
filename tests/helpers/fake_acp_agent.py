@@ -22,7 +22,10 @@ Script shape::
 
 Set ``"load_error": true`` to make session/load fail with a JSON-RPC error
 (the client must then fall back to session/new); otherwise session/load
-succeeds with an empty result.
+succeeds with an empty result. ``prompt_plans`` supplies per-turn overrides
+of ``on_prompt`` / ``wait_for_cancel`` / ``stop_reason``; a
+``{"close_stdout": true}`` step closes only stdout while keeping the fake
+process alive for receive-stream-death tests.
 
 Single-threaded message pump: ``pump_until`` re-enters dispatch so a prompt
 turn can await a permission response or a cancel notification while keeps
@@ -250,7 +253,16 @@ class _FakeAgent:
                     }
                 )
         elif method == "session/prompt":
-            failure = self._run_prompt(message["params"].get("sessionId", self.acp_session_id))
+            self.cancelled = False
+            # Optional per-turn overrides make the first background turn end
+            # normally and a later queued turn wait, fail, or lose stdout.
+            plan_index = int(self.script.get("_prompt_index", 0))
+            self.script["_prompt_index"] = plan_index + 1
+            plans = self.script.get("prompt_plans", [])
+            plan = {**self.script, **plans[plan_index]} if plan_index < len(plans) else self.script
+            failure = self._run_prompt(
+                message["params"].get("sessionId", self.acp_session_id), plan
+            )
             if failure is not None:
                 # Agent-side turn failure: the prompt response is a JSON-RPC
                 # error, which the SDK surfaces as an exception inside the
@@ -269,9 +281,7 @@ class _FakeAgent:
                     "id": request_id,
                     "result": {
                         "stopReason": (
-                            "cancelled"
-                            if self.cancelled
-                            else self.script.get("stop_reason", "end_turn")
+                            "cancelled" if self.cancelled else plan.get("stop_reason", "end_turn")
                         )
                     },
                 }
@@ -284,8 +294,8 @@ class _FakeAgent:
         else:
             self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
 
-    def _run_prompt(self, session_id: str) -> str | None:
-        for step in self.script.get("on_prompt", []):
+    def _run_prompt(self, session_id: str, plan: dict[str, Any]) -> str | None:
+        for step in plan.get("on_prompt", []):
             if "notify" in step:
                 self._send(
                     {
@@ -302,7 +312,11 @@ class _FakeAgent:
                 self._sink({"terminal_outcome": outcome, "record": step.get("record")})
             elif "fail" in step:
                 return str(step["fail"])
-        if self.script.get("wait_for_cancel"):
+            elif step.get("close_stdout"):
+                # Keep stdin and the process alive: isolates receive-stream
+                # EOF from process.wait(), including between-turn detection.
+                os.close(sys.stdout.fileno())
+        if plan.get("wait_for_cancel"):
             self.pump_until(lambda: self.cancelled)
         return None
 

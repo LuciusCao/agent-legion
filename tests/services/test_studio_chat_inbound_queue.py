@@ -186,3 +186,25 @@ def test_resume_transcript_keeps_delivered_and_drops_undelivered_queued(admissio
     assert "用户：delivered question" in transcript
     assert "dropped question" not in transcript
     assert "orphan question" not in transcript
+
+
+def test_claim_exception_after_commit_uses_durable_delivery_proof(admission, monkeypatch) -> None:
+    """A post-commit client exception must not turn a claimed prompt into a
+    false queued_dropped row; the transaction's own proof is authoritative."""
+    service, db, sid, workspace, runtime = admission
+    _start_background_turn(service, db, sid, runtime)
+    queued = service.send_message(sid, workspace, "commit outcome")
+    _prompt, start = _next_item(runtime)
+    _finish_turn(service, sid)
+    real_claim = db.claim_studio_chat_turn_with_token
+
+    def committed_then_error(*args, **kwargs):
+        real_claim(*args, **kwargs)
+        raise RuntimeError("injected post-commit uncertainty")
+
+    monkeypatch.setattr(db, "claim_studio_chat_turn_with_token", committed_then_error)
+    assert start()
+    assert db.get_studio_chat_session(sid)["status"] == "running"
+    assert runtime.turn_retry_source[0] == queued["id"]
+    assert [event["message_id"] for event in _events(db, sid, "queued_delivered")] == [queued["id"]]
+    assert _events(db, sid, "queued_dropped") == []
