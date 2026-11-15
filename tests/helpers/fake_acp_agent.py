@@ -22,7 +22,11 @@ Script shape::
 
 Set ``"load_error": true`` to make session/load fail with a JSON-RPC error
 (the client must then fall back to session/new); otherwise session/load
-succeeds with an empty result.
+succeeds with an empty result. ``prompt_plans`` supplies per-turn overrides
+of ``on_prompt`` / ``wait_for_cancel`` / ``stop_reason`` / ``ignore_cancel``;
+a ``{"close_stdout": true}`` step closes only stdout while keeping the fake
+process alive for receive-stream-death tests. ``ignore_cancel`` keeps the turn
+parked through session/cancel so the existing wedged-fatal ladder is exercised.
 
 Single-threaded message pump: ``pump_until`` re-enters dispatch so a prompt
 turn can await a permission response or a cancel notification while keeps
@@ -51,6 +55,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import threading
 from typing import Any
@@ -67,6 +72,7 @@ class _FakeAgent:
         self._next_request_id = 1
         self._write_lock = threading.Lock()
         self._unprompted_armed = "unprompted" in self.script
+        self._active_plan = self.script
 
     def _send(self, message: dict[str, Any]) -> None:
         with self._write_lock:
@@ -131,7 +137,7 @@ class _FakeAgent:
         if "method" in message and "id" in message:
             self._handle_request(message)
         elif "method" in message:
-            if message["method"] == "session/cancel":
+            if message["method"] == "session/cancel" and not self._active_plan.get("ignore_cancel"):
                 self.cancelled = True
         elif "id" in message:
             self.pending[message["id"]] = message
@@ -250,7 +256,17 @@ class _FakeAgent:
                     }
                 )
         elif method == "session/prompt":
-            failure = self._run_prompt(message["params"].get("sessionId", self.acp_session_id))
+            self.cancelled = False
+            # Optional per-turn overrides make the first background turn end
+            # normally and a later queued turn wait, fail, or lose stdout.
+            plan_index = int(self.script.get("_prompt_index", 0))
+            self.script["_prompt_index"] = plan_index + 1
+            plans = self.script.get("prompt_plans", [])
+            plan = {**self.script, **plans[plan_index]} if plan_index < len(plans) else self.script
+            self._active_plan = plan
+            failure = self._run_prompt(
+                message["params"].get("sessionId", self.acp_session_id), plan
+            )
             if failure is not None:
                 # Agent-side turn failure: the prompt response is a JSON-RPC
                 # error, which the SDK surfaces as an exception inside the
@@ -269,9 +285,7 @@ class _FakeAgent:
                     "id": request_id,
                     "result": {
                         "stopReason": (
-                            "cancelled"
-                            if self.cancelled
-                            else self.script.get("stop_reason", "end_turn")
+                            "cancelled" if self.cancelled else plan.get("stop_reason", "end_turn")
                         )
                     },
                 }
@@ -284,8 +298,8 @@ class _FakeAgent:
         else:
             self._send({"jsonrpc": "2.0", "id": request_id, "result": {}})
 
-    def _run_prompt(self, session_id: str) -> str | None:
-        for step in self.script.get("on_prompt", []):
+    def _run_prompt(self, session_id: str, plan: dict[str, Any]) -> str | None:
+        for step in plan.get("on_prompt", []):
             if "notify" in step:
                 self._send(
                     {
@@ -300,9 +314,22 @@ class _FakeAgent:
             elif "terminal" in step:
                 outcome = self._run_terminal(session_id, step["terminal"])
                 self._sink({"terminal_outcome": outcome, "record": step.get("record")})
+            elif "descendant" in step:
+                descendant = subprocess.Popen(
+                    step["descendant"].get(
+                        "args", [sys.executable, "-c", "import time; time.sleep(30)"]
+                    ),
+                    stdout=sys.stdout.fileno(),
+                    stderr=sys.stdout.fileno(),
+                )
+                self._sink({"descendant_pid": descendant.pid})
             elif "fail" in step:
                 return str(step["fail"])
-        if self.script.get("wait_for_cancel"):
+            elif step.get("close_stdout"):
+                # Keep stdin and the process alive: isolates receive-stream
+                # EOF from process.wait(), including between-turn detection.
+                os.close(sys.stdout.fileno())
+        if plan.get("wait_for_cancel"):
             self.pump_until(lambda: self.cancelled)
         return None
 

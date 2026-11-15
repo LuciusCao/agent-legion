@@ -298,12 +298,11 @@ class StudioChatService:
         if runtime is None:
             raise NotFoundError("Permission request not found or already resolved")
         with runtime.lock:
-            # Dict membership is the not-yet-settled criterion (#158): the
-            # timeout/teardown/cancel settlers pop under this same lock, so a
-            # respond that loses the race finds the request gone and 404s
-            # instead of writing an orphan decision and faking success.
-            pending = runtime.pending_permissions.pop(request_id, None)
-            if pending is None:
+            # The event is the settled criterion (#158): an answer keeps the
+            # request id until its resolved row is durable, while a duplicate
+            # answer still 404s instead of writing an orphan decision.
+            pending = runtime.pending_permissions.get(request_id)
+            if pending is None or pending.event.is_set():
                 raise NotFoundError("Permission request not found or already resolved")
             pending.decision = {"deny": True} if deny else {"option_id": option_id}
             pending.event.set()
@@ -350,17 +349,10 @@ class StudioChatService:
     # -- shutdown ------------------------------------------------------------
 
     def reap_zombie_sessions(self) -> None:
-        """Startup reconcile (#158 review): sessions are in-process only, so
-        rows left in a live status by a crashed or killed backend are
-        zombies — their runtimes, tokens' owners, and agent subprocesses are
-        gone. Marking them error at startup keeps the active-session cap
-        honest and the session list truthful (and lets the UI offer resume
-        on open, #760). Unconditional on purpose: the control plane is
-        single-replica (#277), and a restart that overlaps the old process
-        (the probe then sees its lock) still leaves orphans to repair."""
-        reaped = self._db.reap_zombie_studio_chat_sessions()
-        if reaped:
-            logger.warning("reaped %d zombie studio chat session(s) at startup", reaped)
+        """Rebuild persistent terminals before making interrupted rows resumable."""
+        from server.app.studio_chat.restart_settlement import reconcile_zombie_sessions
+
+        reconcile_zombie_sessions(self)
 
     def shutdown(self) -> None:
         """Close every live session (backend shutdown hook)."""

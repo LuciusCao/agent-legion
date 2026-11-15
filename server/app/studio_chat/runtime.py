@@ -42,12 +42,10 @@ class SessionRuntime:
         self.background_wakeup_enabled = True
         self.background_epoch = 0
         self.background_rearm_epoch: int | None = None
-        self.background_baseline: Any = None
+        (self.background_baseline, self.background_cursor) = (None, None)  # type: (Any, Any)
         # #938: pre-spawn baseline of the resumed Kimi Code wire journal
         # (wire_baseline.WireBaseline); None for a session this runtime created.
-        self.wire_baseline: Any = None
-        self.background_cursor: Any = None
-        self.background_cleanup: Any = None
+        (self.wire_baseline, self.background_cleanup) = (None, None)  # type: (Any, Any)
         # Streaming chunk coalescing (agent text + thought): each kind folds
         # into one message row per turn; the slots are reset at turn START
         # (send_message), so trailing chunks of a finished turn still fold
@@ -96,9 +94,9 @@ class SessionRuntime:
         # compaction.COMPACTING_TIMEOUT_SECONDS via compacting_since.
         self.loading = self.compacting = False
         self.compacting_since: float | None = None
-        # Active self-clear timer for the current compaction window
-        # (compaction.py #694 review P1); cancelled on completion/teardown.
-        self.compact_timer: threading.Timer | None = None
+        # Active self-clear timers for the current compaction window and the
+        # deferred empty-turn verdict; both are cancelled on completion/teardown.
+        (self.compact_timer, self.empty_turn_timer) = (None, None)  # type: (threading.Timer | None, threading.Timer | None)
         # #694 review R2-P2 marker gate: kimi_agent is stamped at on_ready
         # from the registry agent id / ACP agentInfo name; turn_open spans a
         # prompt turn (send_message → turn close), and turn_may_compact marks
@@ -118,7 +116,6 @@ class SessionRuntime:
         self.turn_started_at: float | None = None
         self.turn_update_count = 0
         self.turn_skip_empty_check = False
-        self.empty_turn_timer: threading.Timer | None = None
         # #882 (inbound_queue.py / empty_turn_retry.py): turn_background marks a
         # platform-initiated turn (background wakeup); turn_retry_source is the
         # (message_id, text, prompt) of the human message behind the open turn,
@@ -130,6 +127,13 @@ class SessionRuntime:
         self.turn_retry_source: tuple[str, str, str] | None = None
         self.empty_turn_retry: tuple[str, str, str] | None = None
         self.inbound_pending = 0
+        # Live delivery states are message_id -> queued|delivered. Delivered
+        # means before_start committed, never that the model produced a result.
+        self.inbound_messages: dict[str, str] = {}
+        # Pending request/message ids stay until their terminal rows are
+        # durable; the runtime identity fences all exit projection retries.
+        self.exit_started = self.exit_projection_done = False
+        self.exit_event_id: str | None = None
         # #1029: the Kimi Code wire watcher (unprompted_queue.GatedUnprompted-
         # Watcher) that holds human messages while an unprompted turn runs;
         # None for non-Kimi-Code runtimes.

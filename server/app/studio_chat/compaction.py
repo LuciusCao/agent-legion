@@ -160,13 +160,14 @@ def late_gate_blocked(
     return False
 
 
-def note_turn_closed(runtime: SessionRuntime | None) -> None:
-    """Any turn close (end/cancel/timeout/error) re-opens the marker gate's
-    turn-context condition (#694 review R2-P2)."""
+def note_turn_closed(runtime: SessionRuntime | None, *, clear_delivery: bool = True) -> None:
+    """Close turn state, clearing delivery only with durable completion proof."""
     if runtime is None:
         return
     with runtime.lock:
         runtime.turn_open = False
+        if clear_delivery and (source := runtime.turn_retry_source) is not None:
+            runtime.inbound_messages.pop(source[0], None)
 
 
 def note_ready(

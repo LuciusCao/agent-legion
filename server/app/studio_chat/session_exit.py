@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
     from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.exit_settlement import project_process_exit
 
 
 def finish_session_exit(
@@ -15,32 +16,21 @@ def finish_session_exit(
     *,
     close_initiated: bool,
     expected: SessionRuntime | None,
+    project_only: bool = False,
 ) -> None:
-    # Keep the generation registered until its last event is written.
-    # Otherwise close could observe absence and publish its terminal
-    # marker before this exiting thread appends a late error.
     runtime = expected or backend.runtime(session_id)
     if runtime is None:
         return
-    with runtime.lock:
-        try:
-            if close_initiated or runtime.closed or backend.runtime(session_id) is not runtime:
-                return
-            changed = backend.db.update_studio_chat_session_if(
-                session_id,
-                status_not_in=("closed", "error", "starting"),
-                status="error",
-                error_detail="agent process exited",
-            )
-            if changed:
-                backend.store.append_message(
-                    session_id,
-                    "status",
-                    "system",
-                    {"event": "error", "detail": "agent process exited"},
-                )
-                backend.store.publish_session(session_id)
-        finally:
-            # No join on the ACP thread; teardown always cleans this
-            # generation, including failures in its final DB projection.
+    try:
+        if not close_initiated:
+            # Keep the generation registered through its durable projection.
+            # The helper fences this generation before its first DB write and
+            # supports idempotent retries after the registry entry is gone.
+            project_process_exit(backend, session_id, runtime)
+    finally:
+        # No runtime lock is held here, and close_handle=False avoids a
+        # self-join on the ACP thread. A stale generation cleans only itself.
+        # The early EOF projection keeps registration so resume can still join
+        # a live direct child; thread-final on_exit performs the actual removal.
+        if not project_only:
             backend.teardown_runtime(session_id, runtime, close_handle=False, expected=runtime)

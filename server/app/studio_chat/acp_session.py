@@ -25,31 +25,27 @@ import logging
 import queue
 import threading
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol
 
-from acp import PROTOCOL_VERSION, spawn_agent_process
-from acp.schema import (
-    HttpMcpServer,
-    Implementation,
-)
+from acp import spawn_agent_process
+from acp.schema import HttpMcpServer
 
-from server.app.studio_chat.acp_client import AcpClient
-from server.app.studio_chat.acp_session_config import (
-    SessionConfigHandleMixin,
-    studio_client_capabilities,
+from server.app.studio_chat.acp_consumer import (
+    _CLOSE,
+    drain_stderr,
+    next_item,
+    prompt_loop,
+    run_acp_session,
 )
-from server.app.studio_chat.capabilities import capability_snapshot
-from server.app.studio_chat.prompt_turn import PromptWedgedError, run_prompt_turn
+from server.app.studio_chat.acp_session_config import SessionConfigHandleMixin
+from server.app.studio_chat.prompt_turn import run_prompt_turn
 from server.app.studio_chat.session_load import open_acp_session
-from server.app.studio_chat.terminals import AcpTerminalStore
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.session_config_state import OpenedAcpSession
 
 logger = logging.getLogger(__name__)
-
-_CLOSE = object()
 
 
 def _log_cancel_result(task: asyncio.Task[Any]) -> None:
@@ -95,6 +91,9 @@ class AcpSessionCallbacks(Protocol):
 
     def on_error(self, detail: str) -> None:
         """The whole ACP run collapsed (startup failure or connection loss)."""
+
+    def on_connection_lost(self, detail: str) -> None:
+        """Fence/project before transport cleanup; final on_exit owns removal."""
 
     def on_exit(self, *, close_initiated: bool) -> None: ...
 
@@ -144,6 +143,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self._loop: asyncio.AbstractEventLoop | None = None
         self._conn: Any = None
         self._process: Any = None
+        self._transport_failure: str | None = None
         self._acp_session_id: str | None = None
         self.ready_event = threading.Event()
 
@@ -152,6 +152,18 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             target=self._thread_main, name="studio-chat-acp", daemon=True
         )
         self._thread.start()
+
+    def transport_failure(self) -> str | None:
+        with self._state_lock:
+            return self._transport_failure
+
+    def _note_connection_lost(self, detail: str) -> bool:
+        with self._state_lock:
+            if self._closed:
+                return False
+            self._transport_failure = detail
+            self._stop_requested = True
+            return True
 
     def send_prompt(
         self,
@@ -288,128 +300,18 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             self.callbacks.on_exit(close_initiated=self._closed)
 
     async def _run(self) -> None:
-        client = AcpClient()
-        client._handle, client.terminals = self, AcpTerminalStore()
-        try:
-            async with spawn_agent_process(
-                cast(Any, client), self.command, *self.args, env=self.env, cwd=self.cwd
-            ) as (conn, process):
-                with self._state_lock:
-                    self._loop = asyncio.get_running_loop()
-                    self._conn = conn
-                    self._process = process
-                self._drain_stderr(process)
-                initialize = await conn.initialize(
-                    protocol_version=PROTOCOL_VERSION,
-                    # Declaration rationale lives in acp_session_config.py.
-                    client_capabilities=studio_client_capabilities(),
-                    client_info=Implementation(
-                        name="agent-legion-studio", title="Agent Legion", version="1"
-                    ),
-                )
-                capabilities = capability_snapshot(initialize)
-                opened = await open_acp_session(
-                    conn,
-                    cwd=self.cwd,
-                    mcp_server=self.mcp_server,
-                    resume_acp_session_id=self._resume_acp_session_id,
-                    capabilities=capabilities,
-                )
-                acp_session_id = opened.acp_session_id
-                with self._state_lock:
-                    self._acp_session_id = acp_session_id
-                self.loaded_existing = opened.loaded_existing
-                self.callbacks.on_ready(capabilities, opened)
-                # Startup handshake complete: release the create_session waiter.
-                self.ready_event.set()
-                try:
-                    await self._prompt_loop(conn, acp_session_id)
-                finally:
-                    # Fence admission before transport teardown or callbacks can
-                    # block behind a sender's runtime lock. Keep _closed for
-                    # explicit close(), which must still join/kill this handle.
-                    self.request_stop()
-        except Exception as exc:
-            # exc_info: this is the primary failure signal for the whole ACP
-            # session lifecycle — losing the traceback makes spawn/transport
-            # problems undiagnosable from the logs alone.
-            # #204 broad-except audit: the catch stays broad because the
-            # outcome space is genuinely mixed — expected agent-side
-            # refusals (RequestError from initialize / session open),
-            # transport deaths (ConnectionError / OSError), the #664
-            # wedged-turn escalation (PromptWedgedError from the prompt
-            # loop) and programming errors all funnel into the SAME
-            # designed semantics here: the
-            # session is marked error and the user sees a dead session
-            # instead of a hung one. Nothing is masked (the traceback is
-            # logged) and no exception type is converted on the way out.
-            self.request_stop()
-            logger.warning("studio chat ACP session failed: %s", exc, exc_info=True)
-            self.callbacks.on_error(str(exc))
-        finally:
-            # Reap terminals a crashed/killed agent never released itself.
-            # #204 suppress audit: close_all already contains per-terminal
-            # failure isolation (its _swallow helper logs each kill/release),
-            # so this suppress only guards the finally itself — an exception
-            # raised while reaping must not REPLACE the failure already
-            # propagating out of _run (Python would otherwise drop the
-            # original). Cleanup-never-classify, the #233 pattern.
-            with contextlib.suppress(Exception):
-                await client.terminals.close_all()
+        await run_acp_session(self, spawn_agent_process, open_acp_session)
 
-    async def _prompt_loop(self, conn: Any, acp_session_id: str) -> None:
-        while True:
-            item = await asyncio.to_thread(self._queue.get)
-            if item is _CLOSE:
-                return
-            try:
-                text, before_start = item if isinstance(item, tuple) else (str(item), None)
-                result = await run_prompt_turn(
-                    conn,
-                    acp_session_id,
-                    text,
-                    on_timeout=self.callbacks.on_turn_timeout,
-                    **({"before_start": before_start} if before_start is not None else {}),
-                )
-                if result.response is None:
-                    continue
-                self.callbacks.on_turn_end(
-                    str(result.response.stop_reason), timed_out=result.timed_out
-                )
-            except PromptWedgedError:
-                # Fatal, not per-turn containment (#664): a turn that ignores
-                # session/cancel past the grace is wedged at the transport
-                # level — every later prompt would be rejected ("another turn
-                # is already in progress"), so keeping the loop alive only
-                # preserves a zombie session. _run's error path marks the
-                # session error (the resume-reachable state) and the
-                # async-with tears the subprocess down.
-                raise
-            except Exception as exc:
-                # #204 broad-except audit: deliberate per-turn containment —
-                # the prompt loop is the session's life support, so one failed
-                # turn must not kill the loop and the session with it; the
-                # service records the turn error and the user can send the
-                # next prompt, and the traceback is logged for the agent-side
-                # failures that dominate here. Only the wedged signal crosses
-                # the turn boundary (filtered above by type): on_turn_end
-                # callback failures (transient store/DB errors inside the
-                # hook) stay contained per-turn exactly as before #664.
-                self.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
-                logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
+    async def _next_item(self, death: asyncio.Task[str | None] | None) -> Any:
+        return await next_item(self, death)
+
+    async def _prompt_loop(
+        self,
+        conn: Any,
+        acp_session_id: str,
+        death: asyncio.Task[str | None] | None = None,
+    ) -> None:
+        await prompt_loop(self, conn, acp_session_id, death, run_prompt_turn)
 
     def _drain_stderr(self, process: Any) -> None:
-        """Discard agent stderr on a reader task so a chatty agent never
-        deadlocks on a full pipe; lines go to the debug log only."""
-        stderr = process.stderr
-        if stderr is None:
-            return
-
-        async def drain() -> None:
-            while True:
-                line = await stderr.readline()
-                if not line:
-                    return
-                logger.debug("studio chat agent stderr: %s", line.decode(errors="replace").rstrip())
-
-        asyncio.get_running_loop().create_task(drain())
+        drain_stderr(process)

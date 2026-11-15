@@ -11,9 +11,8 @@ stays as the irreversible secondary action. Runtime semantics match *close*:
   live;
 - an archived row stays readable (GET / messages answer 200: it is hidden,
   not gone), but resume is refused with 409 until it is unarchived;
-- unarchive only clears the stamp. It never spawns a runtime: the row stays
-  closed and the existing resume ("continue the conversation") path brings
-  it back.
+- unarchive only clears the stamp. It never spawns a runtime: the row keeps
+  its current closed/error status and the existing resume path brings it back.
 
 Both are idempotent: archiving an archived row (or unarchiving a listed one)
 answers the current row without side effects.

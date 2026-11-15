@@ -26,6 +26,7 @@ from server.app.studio_chat.resume_context import (
     build_resume_transcript,
 )
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.turn_state import open_turn, turn_completion_evidence
 from tests.helpers import studio_chat_fixtures, wait_for_predicate
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -210,8 +211,7 @@ def test_resume_reaped_error_session_tears_down_stale_runtime(chat, job_db) -> N
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
-    reaped = job_db.reap_zombie_studio_chat_sessions()
-    assert reaped == 1
+    service.reap_zombie_sessions()
     assert service.get_session(session["id"])["status"] == "error"
     assert service.runtime(session["id"]) is not None  # 旧 runtime 仍在册
 
@@ -275,11 +275,15 @@ def test_resume_with_unavailable_agent_fails_before_spawn(chat) -> None:
 
 def test_build_resume_transcript_filters_and_truncates() -> None:
     messages = [
-        {"kind": "text", "role": "user", "content": {"text": "u1"}},
+        {"id": "u1", "kind": "text", "role": "user", "content": {"text": "u1"}},
         {"kind": "tool_call", "role": "agent", "content": {"toolCallId": "tc"}},
         {"kind": "text", "role": "agent", "content": {"text": "a1"}},
-        {"kind": "status", "role": "system", "content": {"event": "turn_end"}},
-        {"kind": "text", "role": "user", "content": {"text": ""}},
+        {
+            "kind": "status",
+            "role": "system",
+            "content": {"event": "turn_end", "turn_origin": "human", "message_id": "u1"},
+        },
+        {"id": "empty", "kind": "text", "role": "user", "content": {"text": ""}},
     ]
     transcript = build_resume_transcript(messages)
     assert transcript.startswith(RESUME_TRANSCRIPT_HEADER)
@@ -291,8 +295,25 @@ def test_build_resume_transcript_filters_and_truncates() -> None:
 
     # 超长历史截断到字符预算内，保留最近对话。
     long_history = [
-        {"kind": "text", "role": "user", "content": {"text": f"q{i} " + "x" * 1000}}
+        message
         for i in range(20)
+        for message in (
+            {
+                "id": f"q{i}",
+                "kind": "text",
+                "role": "user",
+                "content": {"text": f"q{i} " + "x" * 1000},
+            },
+            {
+                "kind": "status",
+                "role": "system",
+                "content": {
+                    "event": "turn_end",
+                    "turn_origin": "human",
+                    "message_id": f"q{i}",
+                },
+            },
+        )
     ]
     truncated = build_resume_transcript(long_history)
     assert len(truncated) <= RESUME_TRANSCRIPT_MAX_CHARS + len(RESUME_TRANSCRIPT_HEADER) + len(
@@ -305,12 +326,100 @@ def test_build_resume_transcript_filters_and_truncates() -> None:
     assert build_resume_transcript([messages[1]]) == ""
 
 
+def test_build_resume_transcript_uses_shared_completion_evidence() -> None:
+    runtime = SessionRuntime(object(), "token")
+    with runtime.lock:
+        open_turn(runtime, "", owner=object())
+    assert turn_completion_evidence(runtime) == {"turn_origin": "platform"}
+    with runtime.lock:
+        open_turn(runtime, "payload", message_id="u")
+    assert turn_completion_evidence(runtime) == {"turn_origin": "human", "message_id": "u"}
+    assert turn_completion_evidence(None) == {"turn_origin": "unknown"}
+
+    def transcript_with(terminal: dict | None) -> str:
+        messages = [{"id": "u", "kind": "text", "role": "user", "content": {"text": "payload"}}]
+        if terminal is not None:
+            messages.append({"kind": "status", "role": "system", "content": terminal})
+        return build_resume_transcript(messages)
+
+    for terminal in (
+        {"event": "turn_end", "turn_origin": "human", "message_id": "u"},
+        {"event": "turn_timeout", "turn_origin": "human", "message_id": "u"},
+        {"event": "error", "turn_origin": "human", "message_id": "u", "outcome": "failed"},
+        {"event": "error", "message_id": "u", "outcome": "failed"},
+    ):
+        assert "用户：payload" in transcript_with(terminal)
+    for terminal in (
+        None,
+        {"event": "turn_end"},
+        {"event": "error", "detail": "fatal process exit"},
+        {"event": "error", "turn_origin": "human", "message_id": "u", "outcome": "unknown"},
+        {"event": "turn_end", "turn_origin": "platform", "message_id": "u"},
+        {"event": "turn_timeout", "turn_origin": "platform", "message_id": "u"},
+        {
+            "event": "error",
+            "turn_origin": "platform",
+            "message_id": "u",
+            "outcome": "failed",
+        },
+        {"event": "turn_end", "turn_origin": "unknown", "message_id": "u"},
+        {"event": "turn_end", "turn_origin": "human"},
+        {"event": "turn_end", "turn_origin": "human", "message_id": "other"},
+    ):
+        assert transcript_with(terminal) == ""
+
+    legacy = [
+        {
+            "id": "q",
+            "kind": "text",
+            "role": "user",
+            "content": {"text": "legacy", "queued": True},
+        },
+        {
+            "kind": "status",
+            "role": "system",
+            "content": {"event": "queued_delivered", "message_id": "q"},
+        },
+        {
+            "kind": "status",
+            "role": "system",
+            "content": {"event": "queued_dropped", "message_id": "q"},
+        },
+    ]
+    assert build_resume_transcript(legacy) == ""
+    legacy.append(
+        {
+            "kind": "status",
+            "role": "system",
+            "content": {"event": "turn_end", "turn_origin": "platform"},
+        }
+    )
+    assert build_resume_transcript(legacy) == ""
+    legacy[-1]["content"] = {
+        "event": "turn_end",
+        "turn_origin": "human",
+        "message_id": "q",
+    }
+    assert "用户：legacy" in build_resume_transcript(legacy)
+
+
 def test_build_resume_transcript_hard_truncates_single_oversized_message() -> None:
     """One message larger than the whole budget must not wave through whole:
     it gets hard-cut to the budget (tail kept) with an omission marker."""
     huge = "z" * (RESUME_TRANSCRIPT_MAX_CHARS * 4)
     transcript = build_resume_transcript(
-        [{"kind": "text", "role": "user", "content": {"text": huge}}]
+        [
+            {"id": "huge", "kind": "text", "role": "user", "content": {"text": huge}},
+            {
+                "kind": "status",
+                "role": "system",
+                "content": {
+                    "event": "turn_end",
+                    "turn_origin": "human",
+                    "message_id": "huge",
+                },
+            },
+        ]
     )
     assert transcript.startswith(RESUME_TRANSCRIPT_HEADER)
     assert transcript.endswith(RESUME_TRANSCRIPT_FOOTER)

@@ -26,6 +26,12 @@ STUDIO_CHAT_PAGE_SIZE = 500
 STUDIO_CHAT_PAGE_UP_SIZE = 100
 
 
+def _message_record(row: Any) -> dict[str, Any]:
+    record = dict(row)
+    record["content"] = json.loads(record.pop("content_json") or "{}")
+    return record
+
+
 class StudioChatPaginationQueriesMixin(StudioChatTranscriptQueriesMixin):
     """Paged read with an explicit older-side cursor for the messages route."""
 
@@ -75,12 +81,24 @@ class StudioChatPaginationQueriesMixin(StudioChatTranscriptQueriesMixin):
                 params,
             ).fetchall()
         has_more = len(rows) > limit
-        messages = []
-        for row in reversed(rows[:limit]):
-            record = dict(row)
-            record["content"] = json.loads(record.pop("content_json") or "{}")
-            messages.append(record)
-        return messages, has_more
+        return [_message_record(row) for row in reversed(rows[:limit])], has_more
+
+    def list_studio_chat_messages_forward(
+        self, session_id: str, *, after_seq: int = 0, limit: int = STUDIO_CHAT_PAGE_SIZE
+    ) -> list[dict[str, Any]]:
+        """Internal forward scan with no latest-window truncation (#1153).
+
+        Unlike the endpoint's desc+reverse page above, this preserves the first
+        ``limit`` rows after ``after_seq`` in ascending seq order.
+        """
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select id, session_id, kind, role, content_json, seq, created_at"
+                " from studio_chat_messages where session_id=%s and seq>%s"
+                " order by seq asc limit %s",
+                (session_id, after_seq, limit),
+            ).fetchall()
+        return [_message_record(row) for row in rows]
 
     def get_studio_chat_message(self, session_id: str, message_id: str) -> dict[str, Any] | None:
         """Single message by id, session-scoped (#1236 point read).
@@ -97,6 +115,4 @@ class StudioChatPaginationQueriesMixin(StudioChatTranscriptQueriesMixin):
             ).fetchone()
         if row is None:
             return None
-        record = dict(row)
-        record["content"] = json.loads(record.pop("content_json") or "{}")
-        return record
+        return _message_record(row)

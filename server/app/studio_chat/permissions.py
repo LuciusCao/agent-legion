@@ -33,15 +33,13 @@ PERMISSION_TIMEOUT_SECONDS = 120
 
 
 def settle_pending_permissions(runtime: SessionRuntime) -> None:
-    """Deny every parked permission so a cancelled turn never leaves a
-    permission prompt hanging (AGENTS.md half-applied-state discipline).
-    Pop each entry so a respond racing the cancel finds it gone (#158).
-    Split from service.py (file budget, #1238 merge); semantics unchanged."""
+    """Deny unanswered requests and mark them settled without dropping their
+    identity before the resolved row is durable (#1153)."""
     with runtime.lock:
-        while runtime.pending_permissions:
-            _request_id, pending = runtime.pending_permissions.popitem()
-            pending.decision = {"deny": True}
-            pending.event.set()
+        for pending in runtime.pending_permissions.values():
+            if not pending.event.is_set():
+                pending.decision = {"deny": True}
+                pending.event.set()
 
 
 def handle_permission_request(
@@ -114,16 +112,15 @@ def handle_permission_request(
             if not settled:
                 logger.warning("studio chat permission %s timed out; auto-denied", request_id)
                 with runtime.lock:
-                    # Dict membership is the not-yet-settled criterion (#158):
-                    # a human answer that raced the timeout already popped the
-                    # request and owns the decision.
-                    orphaned = runtime.pending_permissions.pop(request_id, None)
-                    if orphaned is not None:
+                    orphaned = runtime.pending_permissions.get(request_id)
+                    if orphaned is not None and not orphaned.event.is_set():
                         orphaned.decision = {"deny": True, "via": "timeout"}
+                        orphaned.event.set()
         finally:
             with runtime.lock:
-                runtime.pending_permissions.pop(request_id, None)
-                still_parked = bool(runtime.pending_permissions)
+                still_parked = any(
+                    not pending.event.is_set() for pending in runtime.pending_permissions.values()
+                )
                 if (
                     not runtime.closed
                     and backend.runtime(session_id) is runtime
@@ -142,6 +139,7 @@ def handle_permission_request(
             "user",
             {"request_id": request_id, "status": "resolved", "decision": pending.decision},
         )
+        runtime.pending_permissions.pop(request_id, None)
         return pending.decision
 
 

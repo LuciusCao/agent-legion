@@ -19,6 +19,8 @@ def context():
     runtime = SessionRuntime(Mock(), "dead-token")
     service.runtime.return_value = runtime
     service.db.get_scoped_token_user.return_value = None
+    service.db.get_studio_chat_session.return_value = {"status": "idle"}
+    service.db.list_studio_chat_messages.return_value = []
     callbacks = ServiceCallbacks(service, "session")
     callbacks.runtime = runtime
     return service, runtime, callbacks
@@ -88,13 +90,13 @@ def test_exit_publishes_while_generation_is_registered_and_always_cleans(context
 
     service, runtime, _ = context
 
-    def append(*args):
+    def append(*args, **kwargs):
         service.teardown_runtime.assert_not_called()
         assert service.runtime("session") is runtime
         if fault:
             raise RuntimeError("final projection failed")
 
-    service.store.append_message.side_effect = append
+    service.store.append_message_if_live.side_effect = append
     events = AcpEventHandlers(service)
     if fault:
         with pytest.raises(RuntimeError, match="final projection"):
@@ -112,5 +114,5 @@ def test_exit_that_loses_durable_transition_emits_no_error(context):
     service, runtime, _ = context
     service.db.update_studio_chat_session_if.return_value = False
     AcpEventHandlers(service).on_exit("session", close_initiated=False, expected=runtime)
-    service.store.append_message.assert_not_called()
+    service.store.append_message_if_live.assert_not_called()
     service.teardown_runtime.assert_called_once()

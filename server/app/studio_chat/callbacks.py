@@ -67,6 +67,9 @@ class ServiceCallbacks:
     def on_error(self, detail: str) -> None:
         self._service._on_error(self._session_id, detail, fatal=True)
 
+    def on_connection_lost(self, detail: str) -> None:
+        self._service._events().on_connection_lost(self._session_id, detail, expected=self.runtime)
+
     def on_exit(self, *, close_initiated: bool) -> None:
         # 走 _events() 直传 expected_runtime：service._on_exit 保持给 #158 存量
         # 调用/测试的兼容签名（expected=None 即弹注册表当前项的原始语义）。

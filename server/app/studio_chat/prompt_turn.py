@@ -15,10 +15,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Any
 
 from acp.schema import TextContentBlock
+
+from server.app.studio_chat.process_exit import AcpConnectionLost
+from server.app.studio_chat.prompt_outcome import PromptTurnResult, PromptWedgedError, _orphan
 
 logger = logging.getLogger(__name__)
 
@@ -30,40 +32,6 @@ PROMPT_TIMEOUT_SECONDS = 3600
 CANCEL_GRACE_SECONDS = 30
 
 
-class PromptWedgedError(RuntimeError):
-    """The turn outlived the timeout AND the post-cancel grace: the agent
-    never acknowledged session/cancel, so the transport is wedged and the
-    session cannot continue — fatal, handled by the session's error path."""
-
-
-@dataclass(frozen=True)
-class PromptTurnResult:
-    """Turn outcome (#693): an agent that honours the post-timeout
-    session/cancel returns an ordinary-looking response (usually
-    stop_reason="cancelled"), so ``timed_out`` is the only way for the
-    caller to tell a timeout-terminated turn apart from a completed one
-    and surface it instead of reporting success."""
-
-    response: Any
-    timed_out: bool
-
-
-def _log_orphan_result(task: asyncio.Task[Any]) -> None:
-    """Retrieve an orphaned prompt task's result so a failure never surfaces
-    as an unretrieved-exception warning while the session loop tears down."""
-    if task.cancelled():
-        return
-    if (exc := task.exception()) is not None:
-        logger.warning("studio chat ACP orphaned prompt task failed: %s", exc)
-
-
-def _orphan(task: asyncio.Task[Any]) -> None:
-    """Abandon a wedged prompt task: cancel it locally (the agent side is
-    already lost) and consume its eventual result via the done callback."""
-    task.cancel()
-    task.add_done_callback(_log_orphan_result)
-
-
 async def run_prompt_turn(
     conn: Any,
     acp_session_id: str,
@@ -71,19 +39,9 @@ async def run_prompt_turn(
     *,
     on_timeout: Callable[[], None],
     before_start: Callable[[], bool] | None = None,
+    death_task: asyncio.Task[str | None] | None = None,
 ) -> PromptTurnResult:
-    """One prompt turn: prompt → on timeout settle+cancel → grace → wedged.
-
-    The prompt runs as a task and asyncio.wait never cancels it on timeout,
-    so the timeout path can still deliver the cancel and harvest a late
-    response. ``on_timeout`` fires before the cancel is sent — the service
-    uses it to settle parked permissions as denied, because an agent parked
-    on session/request_permission can only end its prompt after the reply
-    arrives; skipping it would misread a healthy session as wedged once the
-    grace expires (#664 review). Raises PromptWedgedError when the cancel
-    cannot be sent or the grace expires; any task exception (agent refusal
-    etc.) propagates as-is for the caller's per-turn containment.
-    """
+    """One prompt turn, with connection death ahead of result and timeout."""
 
     async def start() -> Any:
         # The dequeue guard takes runtime.lock and may step the Kimi wire
@@ -93,9 +51,22 @@ async def run_prompt_turn(
             return None
         return await conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
 
+    def death_result(timed_out: bool = False) -> PromptTurnResult:
+        assert death_task is not None
+        _orphan(prompt_task)
+        detail = death_task.result()
+        if detail is None:
+            return PromptTurnResult(response=None, timed_out=timed_out)
+        raise AcpConnectionLost(detail)
+
     prompt_task = asyncio.create_task(start())
-    done, _pending = await asyncio.wait({prompt_task}, timeout=PROMPT_TIMEOUT_SECONDS)
-    timed_out = not done
+    waiters = {prompt_task} | ({death_task} if death_task is not None else set())
+    done, _pending = await asyncio.wait(
+        waiters, timeout=PROMPT_TIMEOUT_SECONDS, return_when=asyncio.FIRST_COMPLETED
+    )
+    if death_task in done:
+        return death_result()
+    timed_out = prompt_task not in done
     if timed_out:
         try:
             on_timeout()
@@ -107,8 +78,6 @@ async def run_prompt_turn(
             # hook failure is logged with its traceback; the cancel still
             # goes out and the grace verdict decides the outcome.
             logger.warning("studio chat turn-timeout hook failed", exc_info=True)
-        # Loop-local cancel path — unlike the cross-thread handle.cancel(),
-        # conn is directly usable here.
         try:
             await conn.cancel(acp_session_id)
         except Exception as exc:
@@ -120,14 +89,15 @@ async def run_prompt_turn(
             # of being retried or dropped into per-turn containment.
             _orphan(prompt_task)
             raise PromptWedgedError(f"prompt timed out and session/cancel failed: {exc}") from exc
-        done, _pending = await asyncio.wait({prompt_task}, timeout=CANCEL_GRACE_SECONDS)
-        if not done:
+        done, _pending = await asyncio.wait(
+            waiters, timeout=CANCEL_GRACE_SECONDS, return_when=asyncio.FIRST_COMPLETED
+        )
+        if death_task in done:
+            return death_result(timed_out=True)
+        if prompt_task not in done:
             _orphan(prompt_task)
             raise PromptWedgedError(
                 f"prompt turn wedged: no response within {CANCEL_GRACE_SECONDS}s "
                 "after session/cancel"
             )
-    # Agent honoured the cancel (usually stop_reason="cancelled"), or the
-    # turn finished in time; a task exception surfaces at result() and falls
-    # into the caller's per-turn containment like any other turn failure.
     return PromptTurnResult(response=prompt_task.result(), timed_out=timed_out)

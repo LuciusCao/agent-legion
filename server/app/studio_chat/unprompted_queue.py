@@ -42,8 +42,9 @@ written) is inherent and only falls back to the pre-#1029 behavior.
 A turn that never ends — journal replaced or
 truncated (re-baselined, its ``turn.ended`` unobservable), or no journal
 progress for ``IDLE_TIMEOUT_SECONDS`` — stops gating, and held messages are
-dropped with a visible notice (#1028's undelivered semantics). A runtime torn
-down while holding never starts them; the UI marks such rows undelivered.
+dropped with a visible notice (#1028's undelivered semantics). Unexpected
+process/stream death settles held ids as queued_dropped (#1153); an already
+delivered turn instead gets outcome=unknown and is never auto-replayed.
 """
 
 from __future__ import annotations
@@ -51,11 +52,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from server.app.auth.sessions import hash_token
-from server.app.studio_chat.inbound_queue import DROPPED_ERROR, _deliver, _note_dropped
+from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver, _note_dropped
+from server.app.studio_chat.inbound_delivery import hold as hold
 from server.app.studio_chat.kimi_wire import kimi_code_homes, locate_wire
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 
@@ -101,27 +101,6 @@ def refresh(runtime: SessionRuntime, timeout: float = -1) -> bool:
     finally:
         gate.step_lock.release()
     return True
-
-
-def hold(
-    service: StudioChatService,
-    session_id: str,
-    runtime: SessionRuntime,
-    text: str,
-    prompt: str,
-    commit_wakeup: Callable[[], None],
-) -> dict[str, Any] | None:
-    """Caller holds runtime.lock with all prompt preparation done (the
-    inbound_queue.enqueue contract); None when the runtime is gone."""
-    gate = runtime.unprompted_gate
-    if gate is None or runtime.closed:
-        return None
-    message = service.db.enqueue_studio_chat_message(session_id, hash_token(runtime.token), text)
-    runtime.inbound_pending += 1
-    runtime.resume_transcript_pending = False
-    commit_wakeup()
-    gate.held.append((str(message["id"]), text, prompt))
-    return message
 
 
 class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
@@ -205,7 +184,7 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
         held, self.held, self.front = self.held, [], 0
         for message_id, _text, _prompt in held:
             self.runtime.inbound_pending -= 1
-            _note_dropped(self.service, self.session_id, message_id, detail)
+            _note_dropped(self.service, self.session_id, message_id, detail, runtime=self.runtime)
 
     def _flush(self) -> None:
         """Caller holds runtime.lock: hand held messages to the ACP queue in
@@ -224,7 +203,7 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
 
             if not runtime.handle.send_prompt(prompt, before_start=before_start):
                 runtime.inbound_pending -= 1
-                _note_dropped(service, session_id, message_id, DROPPED_ERROR)
+                _note_dropped(self.service, session_id, message_id, DROPPED_ERROR, runtime=runtime)
 
 
 def gated_watcher(

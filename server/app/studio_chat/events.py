@@ -20,6 +20,7 @@ from server.app.studio_chat.session_exit import finish_session_exit
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.token_keepalive import keepalive_run_token
 from server.app.studio_chat.tool_call_coalesce import clear_tool_call_ownership
+from server.app.studio_chat.turn_state import turn_completion_evidence
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -140,7 +141,6 @@ class AcpEventHandlers:
         # trailing content (SDK response-before-updates ordering) clears it.
         empty_turn.schedule_check(self._backend, session_id, stop_reason, timed_out=timed_out)
         runtime = self._backend.runtime(session_id)
-        compaction.note_turn_closed(runtime)
         # #1228 codex P2: a toolCallId is unique within one turn only — drop
         # the coalescing ownership map at the turn boundary so cancelled or
         # timed-out calls never leak entries into later turns.
@@ -154,7 +154,9 @@ class AcpEventHandlers:
             content = {"event": "turn_timeout", "stop_reason": stop_reason, "detail": detail}
         else:
             content = {"event": "turn_end", "stop_reason": stop_reason}
+        content.update(turn_completion_evidence(runtime))
         self._backend.store.append_message(session_id, "status", "system", content)
+        compaction.note_turn_closed(runtime)
         # Guarded (#158): turn_end only moves a live turn back to idle; a
         # concurrent close/error owns the final state.
         self._backend.db.update_studio_chat_session_if(
@@ -164,12 +166,22 @@ class AcpEventHandlers:
 
     def on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         runtime = self._backend.runtime(session_id)
-        compaction.note_turn_closed(runtime)
+        if fatal:
+            # Fatal is not completion evidence: keep the active message id for
+            # the same-generation exit settlement while closing turn/tool state.
+            compaction.note_turn_closed(runtime, clear_delivery=False)
         # #1228 codex P2: turn error is a turn boundary too (see on_turn_end).
         clear_tool_call_ownership(runtime)
-        self._backend.store.append_message(
-            session_id, "status", "system", {"event": "error", "detail": detail}
-        )
+        content = {"event": "error", "detail": detail, **turn_completion_evidence(runtime)}
+        if not fatal and content.get("turn_origin") == "human":
+            # Only an owned human failure proves completion; platform/unknown
+            # failures stay non-completing even when they end their own turn.
+            content["outcome"] = "failed"
+        self._backend.store.append_message(session_id, "status", "system", content)
+        if not fatal:
+            # Only a durable failed row authorizes delivery cleanup. A failed
+            # append leaves the identity for fatal/startup unknown settlement.
+            compaction.note_turn_closed(runtime)
         if fatal:
             # Guarded (#158): a close owns the final 'closed' state, and a
             # resume claim's 'starting' row is not ours to stamp — a stale
@@ -187,6 +199,18 @@ class AcpEventHandlers:
                 session_id, status_in=("running", "awaiting_permission"), status="idle"
             )
         self._backend.store.publish_session(session_id)
+
+    def on_connection_lost(
+        self, session_id: str, detail: str, *, expected: SessionRuntime | None
+    ) -> None:
+        del detail  # the stable public error wording lives in exit_settlement
+        finish_session_exit(
+            self._backend,
+            session_id,
+            close_initiated=False,
+            expected=expected,
+            project_only=True,
+        )
 
     def on_exit(
         self, session_id: str, *, close_initiated: bool, expected: SessionRuntime | None

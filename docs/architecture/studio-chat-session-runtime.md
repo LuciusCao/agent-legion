@@ -51,6 +51,119 @@ terminated handles, and absence of durable starting/running rows. Existing
 admission, resume, generation-bound callbacks and fatal-loop tests retain their
 separate per-runtime guarantees. The invariant is `STUDIO-RUNTIME-001`.
 
+## 压缩窗口超时清理（#694/#1153）
+
+`compact_timer.py` 只负责 arm/cancel；`compact_timer_fire.py` 在 runtime identity 与
+`compacting_since` 代次校验后，于同一 runtime.lock 内执行 conditional DB clear。
+clear 抛错时没有可用的完成证明，保留窗口和代次并以 0.1 秒间隔、最多四次同代尝试；
+重试耗尽只停止 timer 并保留 traceback，不伪报已清理。re-arm 会更换代次并取消旧 timer，
+即使旧 firing 迟到也不能清掉新窗口。clear 成功后才最终清内存 flag/since/timer；
+后续通知或快照异常不回滚镜像，也不因提交点不明而盲目重复 `compact_timeout`。
+STUDIO-RUNTIME-001 同时约束该恢复路径。
+
+## ACP 进程/流退出与幂等终态（#1153）
+
+`acp_consumer.py` 在每代 handle 的同一个 asyncio event loop 中同时观察 direct
+child 的 `returncode` 属性与 ACP 0.12 receive task。属性轮询可取消，不消费 waitpid
+状态、不要求 stdout/stderr EOF，也不扩大到 descendant；ACP 仍负责后续 Process.wait/kill。
+receive task 的结束代表 SDK 已看到 stdout EOF / transport disconnect；监视器不再次读取 stdout，不消费协议帧。
+startup RPC、between-turn queue.get、prompt 与 post-cancel grace 都与同一个 death
+task 竞争。死亡已观察到时优先于 turn_end、timeout、journal 与 late callback；
+普通 agent `RequestError` 仍是 per-turn error，连接失效不再回 idle。
+
+`process_exit.py` 先把本 handle 的 prompt admission fence 掉，再经
+`ServiceCallbacks.on_connection_lost` 在旧 runtime 上执行 `exit_settlement.py`。
+该路径设置 `runtime.closed`、停止 background wakeup、使本代空轮重投失效，并按
+runtime identity（进程内 generation）、request id、message id 结算。第一次 EOF
+投影保留 registry 中的旧 runtime，让 resume 仍能 join 可能活着的 direct child；
+SDK transport 的有界关闭与 `terminals.close_all()` 后，线程最后的 `on_exit` 再按
+identity/closed CAS 拆除。runtime lock 不包住 join、wait 或 kill，旧 generation
+的 exit/callback 不得清理 successor。
+
+| 事件 | 会话与终态语义 |
+|---|---|
+| 正常 turn_end / turn error | 持久完成行后才结束本 turn 的 delivered 跟踪；普通 `RequestError` 记录 per-turn error 后回 idle，direct child 继续存活 |
+| PromptWedgedError 等 fatal `on_error` | 保留原 fatal detail，关闭 turn/compaction/tool 状态但不清 delivered identity；同代 exit settlement 补 unknown |
+| mid-turn process/stream death | 不写 turn_end；会话进入 `error`，可 resume；本代 pending permission 按 request id 写一次 `resolved` |
+| between-turns process/stream death | 与 mid-turn 共用 fatal 路径，不等待 prompt/journal timeout；已完成 turn 的消息不补 unknown |
+| 尚未 before_start 的 queued/held 消息 | 只按 message id 写一次 `queued_dropped`，明确表示未投递，可人工重发；不清除下一轮或 successor 的状态 |
+| direct accept 或 queued_delivered 已成功、turn 尚未结束 | direct 与 queued 都写现有 `error` 状态行，携带 `message_id` 与 `outcome=unknown`；不得谎报未送达，也不得自动重发 |
+| 显式 close / resume / shutdown | 沿用 closed CAS、显式权限拒绝和 close/join/kill fence，不写进程崩溃 error；close 赢得 death 竞态时不追加 crash 事件 |
+
+`queued_delivered` 只证明 `before_start` 的 token lock + idle claim + 状态行已在
+同一事务提交，不证明 `conn.prompt` 已执行，更不证明模型已产生结果。若该事务已
+提交但调用方收到异常，delivery 先读持久证明再决定，禁止补一条虚假的
+`queued_dropped`。unknown 消息会从 fallback resume transcript 中排除；session/load
+也不会由后端自动重放该消息，用户需核对后显式决定下一步。权限 waiter 在人工回答、
+timeout/cancel 与 durable resolved 之间也保留 request id，退出结算可覆盖这段竞态。
+delivered identity 只能在完成证据持久化后清除：`on_turn_end` 先写 turn_end/timeout，
+普通 per-turn error 先写 `message_id+outcome=failed`，再调用 `note_turn_closed`；若 append
+失败则身份保留。fatal `on_error` 用 `clear_delivery=False` 只关闭 turn/compaction/tool
+状态，原 fatal detail 不变，active id 留到同代 exit settlement 补 unknown。正常 fatal-between
+已完成输入因已有完成证据而不会被误标。
+
+退出投影先读时间线上的 request/message 终态，成功后才移除本代待结算项；append
+或 snapshot 故障可在同一代重试，不重复追加。主 process-exit error 以本代
+`runtime_exit_id` 去重，resume 后的下一代死亡仍有自己的事件；startup refusal、
+wedged turn 等既有 fatal `on_error` 则保留原 detail，不被改写成第二次进程崩溃。
+两次即时 EOF 投影尝试之外，线程最终 `on_exit` 仍走同一幂等入口。append 使用
+live/status/error_detail 守卫，starting、closed 或 successor 拥有行时旧 generation
+不再写入。以上是同代去重：它解决本进程内 fatal 重试与 ABA，不承担重启后的恢复。
+
+后端非正常重启后，`restart_settlement.py` 独立按持久证据恢复，不依赖 runtime
+内存。startup 用专用 `list_studio_chat_messages_forward` 以 `seq>cursor ORDER BY seq ASC LIMIT 500`
+真正前向分页，500/501/1000/1001 边界都覆盖早期 pending/direct/queued/delivered；
+共享 `list_studio_chat_messages_page` 继续保留 UI/API 的最新 limit 页语义，不能互相替代。
+随后重建 direct/queued 的 queued→delivered→dropped/unknown/completed 状态：无 resolved 的 permission 补
+`deny(via=backend_restart)`，未 delivered queued 补 `queued_dropped`，delivered
+但没有完成证据的输入补 `outcome=unknown`。终态优先级为 completed > delivered > dropped：
+legacy `queued_delivered→queued_dropped` 若没有完成证据，仍按 unknown 补齐一次，不能被后
+dropped 覆盖；若已有完成证据，dropped/fatal 也不会追溯抹掉正常历史。
+
+完成证据必须有持久 turn 归属。`turn_state.turn_completion_evidence` 在 events 写
+turn_end/turn_timeout/per-turn error 前快照当前 turn：人工 direct/queued/empty-retry 写
+`turn_origin=human` 与对应 `message_id`；background wake 的空文本 `open_turn` 写
+`turn_origin=platform`，runtime 缺失或无法归类写 `unknown`。平台普通 failed 不携带
+`message_id+outcome=failed`，不能伪装成人工失败。初始 direct 与后续人工 turn 使用同一规则，
+不需要 `session_created` 或默认 human 特例。
+
+重建时，turn_end/timeout 只有 `turn_origin=human` 且 message_id 等于当前 active 人工输入
+才完成它；普通 failed 也只接受 human，或 legacy 已带 message_id 的可归属形态。无 owner 的
+legacy turn_end/timeout、origin unknown/不匹配及平台终态一律不完成 active，保留 delivered
+并禁止重放。这是旧数据的保守上下文降级，不声称能完美区分所有历史无 origin 后台事件。
+fatal 与 unprompted 既有排除不变。正常 `session_resumed` 仍清除旧 active；即使其 append
+失败后新 runtime/idle row 已存在，后续 background wake 的 platform 终态也不能完成旧输入。
+
+`resume_context.py` 与 startup 共用 `_reconstruct`，不维护第二套证据状态机。fallback
+transcript 对用户文本只接受 `completed`，因此 direct/queued delivered、unknown、dropped
+和未投递 queued 都不能自动重放；正常有归属的 turn_end/timeout/普通 failed 用户与助手历史
+仍注入，assistant 文本、截断和 one-shot marker 不变。该只读过滤也让
+archive→hidden reap→unarchive→loadSession=False resume 无需在隐藏期补 unknown：unarchive
+与 resume claim 之间不存在可授权重放的写入窗口，不需要新增跨事务锁。相比在 unarchive
+后补终态，它既复用完成证据模型，也避免另一线程先 resume 的竞态。
+
+正常可见 startup 的候选 SQL 与最终 live→error CAS 同时要求 `deleted_at IS NULL` 和
+`archived_at IS NULL`，读取后才隐藏的可见 row 不被改写，消息 append 的既有守卫不替代
+这条 row CAS。delete/archive stamp 后 close 前崩溃的 hidden live row 则走独立回收：
+`hidden=True` 读取 hidden 候选，独立回收只对其中 live row 做最终 CAS，同时要求 hidden
+与 archived_at 快照相等，成功后才 teardown 本代 runtime/token；只把 row 改为 error 以释放
+create/resume 活跃配额，不写隐藏 permission/queued/unknown 或 error 消息。unarchive 后
+快照不匹配即跳过，恢复 row 不被误改，重复 reaper/unarchive 不重复写事件。archived row
+可在 unarchive 后 resume，由上述 transcript 过滤封闭模糊输入；deleted 是不可逆隐藏，
+没有 unarchive 入口，既有 resume/spawn fence 不变。
+
+每次 reaper 都重读持久终态，只补缺项；permission/drop/unknown/status 任一阶段
+在提交后报错，下一次启动仍按 request/message id 跳过已落库行，不重复追加。
+单 session 全部缺失终态写妥后才做 live→error；任一 row 失败会在其他 row 修复后
+聚合抛出启动失败，阻止未结算输入提前 resume，下一次启动再按持久证据补齐。closed row
+或已被 successor 接管的 starting row 不归旧 reaper 写入。同代与 restart 两条路径共用同一事件语义，
+但不互相冒充：前者依赖 runtime/owner，后者只依赖持久 seq 与 id；无需新增 DDL。
+
+清理对象仅限本 handle 拉起的 direct ACP child 与该 child 经 ACP 登记的 terminal；
+不按 process group 清理 Kimi 内部的非 direct-child 后台任务。event-loop wedged 的
+线外看门狗、可配置 prompt/cancel/unprompted/close timeout 属于后续 A2，本片不以
+asyncio timer 或固定 sleep 伪造这些能力。
+
 ## Kimi 后台任务活动与完成接续（#772/#806）
 
 Kimi 的 ACP `ACPSession.prompt()` 只在 prompt 请求内迭代通知流。Studio
@@ -279,5 +392,6 @@ step 本身失败则按已结算的门状态裁决（否则日志损坏时会来
 消息，仍按 #1029 之前的行为送进 ACP，这是轮询日志这一观测方式固有的。回合永不结束时不永久卡住：日志被替换或截断（重建基线后
 `turn.ended` 不可观测）立即解除，日志连续 `IDLE_TIMEOUT_SECONDS`（900 秒）无进展（含日志
 读取持续失败）超时解除，两者都把暂存消息记 `queued_dropped`（「agent 自发回合长时间无进展，
-排队消息未投递，请重发」）；引擎崩溃使 runtime 拆除时暂存消息不再投递，前端按 #1028 的
-既有语义在会话不再存活时标「未送达」。
+排队消息未投递，请重发」）；引擎进程/流死亡时按 #1153 的本代 message id 结算，
+未 before_start 的暂存消息明确写 `queued_dropped`，已 delivered 但未结束的写
+`outcome=unknown`，不再只靠前端的会话存活兜底推导。

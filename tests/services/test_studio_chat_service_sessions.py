@@ -443,7 +443,7 @@ def test_timed_out_turn_writes_turn_timeout_status_message(job_db, settings) -> 
     while the session state machine still returns to idle."""
     service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
     try:
-        service.send_message(session_id, workspace_id, "long running")
+        sent = service.send_message(session_id, workspace_id, "long running")
         service._on_turn_end(session_id, "cancelled", timed_out=True)
 
         statuses = [
@@ -455,6 +455,8 @@ def test_timed_out_turn_writes_turn_timeout_status_message(job_db, settings) -> 
             "event": "turn_timeout",
             "stop_reason": "cancelled",
             "detail": "运行超过 1 小时已被终止",
+            "turn_origin": "human",
+            "message_id": sent["id"],
         } in statuses
         assert all(s.get("event") != "turn_end" for s in statuses)
         assert service.get_session(session_id, workspace_id)["status"] == "idle"
@@ -463,11 +465,11 @@ def test_timed_out_turn_writes_turn_timeout_status_message(job_db, settings) -> 
 
 
 def test_normal_turn_end_still_writes_turn_end_status_message(job_db, settings) -> None:
-    """#693 guard: the non-timeout path is unchanged — a completed turn keeps
-    writing the plain turn_end status message and returns to idle."""
+    """#693/#1153: the non-timeout path writes a human-owned turn_end and
+    returns to idle."""
     service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
     try:
-        service.send_message(session_id, workspace_id, "quick")
+        sent = service.send_message(session_id, workspace_id, "quick")
         service._on_turn_end(session_id, "end_turn")
 
         statuses = [
@@ -475,7 +477,12 @@ def test_normal_turn_end_still_writes_turn_end_status_message(job_db, settings) 
             for m in service.list_messages(session_id, workspace_id)
             if m["kind"] == "status"
         ]
-        assert {"event": "turn_end", "stop_reason": "end_turn"} in statuses
+        assert {
+            "event": "turn_end",
+            "stop_reason": "end_turn",
+            "turn_origin": "human",
+            "message_id": sent["id"],
+        } in statuses
         assert all(s.get("event") != "turn_timeout" for s in statuses)
         assert service.get_session(session_id, workspace_id)["status"] == "idle"
     finally:

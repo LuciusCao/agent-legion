@@ -1,0 +1,644 @@
+"""Restart reconciliation from durable evidence, including post-commit faults."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from server.app.auth.scoped_tokens import mint_scoped_token
+from server.app.auth.sessions import hash_token
+from server.app.services.job_errors import ConflictError
+from server.app.studio_chat.background_wakeup import wake_session
+from server.app.studio_chat.resume_context import RESUME_TRANSCRIPT_HEADER
+from server.app.studio_chat.service import StudioChatService
+from tests.helpers import studio_chat_fixtures as fixtures
+from tests.helpers import wait_for_predicate
+
+chat = fixtures.chat
+
+
+def _prompt_texts(script_path: Path) -> list[str]:
+    path = Path(str(script_path) + ".sink.jsonl")
+    if not path.exists():
+        return []
+    return [
+        "".join(block.get("text", "") for block in entry["received"]["params"].get("prompt", []))
+        for entry in (json.loads(line) for line in path.read_text().splitlines())
+        if entry.get("received", {}).get("method") == "session/prompt"
+    ]
+
+
+def _history(db, sid: str, token: str) -> None:
+    message = db.accept_studio_chat_message(sid, hash_token(token), "known history")
+    db.append_studio_chat_message(
+        sid,
+        "status",
+        "system",
+        {"event": "turn_end", "turn_origin": "human", "message_id": message["id"]},
+    )
+    db.update_studio_chat_session(sid, status="idle")
+
+
+def _pending(db, sid: str) -> None:
+    db.append_studio_chat_message(
+        sid,
+        "permission",
+        "agent",
+        {"request_id": "restart-request", "status": "pending", "tool_call": {}, "options": []},
+    )
+
+
+def _seed_direct(db, workspace: str, user: str) -> tuple[str, str]:
+    sid = db.create_studio_chat_session(workspace, user, "fake-agent")
+    token = mint_scoped_token(db, user, origin="run", workspace_id=workspace)
+    db.update_studio_chat_session(sid, status="idle")
+    _history(db, sid, token)
+    db.accept_studio_chat_message(sid, hash_token(token), "direct restart unknown")
+    _pending(db, sid)
+    db.update_studio_chat_session(sid, status="awaiting_permission")
+    return sid, "direct restart unknown"
+
+
+def _seed_queued(db, workspace: str, user: str) -> tuple[str, str, str]:
+    sid = db.create_studio_chat_session(workspace, user, "fake-agent")
+    token = mint_scoped_token(db, user, origin="run", workspace_id=workspace)
+    db.update_studio_chat_session(sid, status="idle")
+    _history(db, sid, token)
+    assert db.claim_studio_chat_turn(sid)
+    delivered = db.enqueue_studio_chat_message(sid, hash_token(token), "queued restart unknown")
+    db.enqueue_studio_chat_message(sid, hash_token(token), "queued restart dropped")
+    db.append_studio_chat_message(sid, "status", "system", {"event": "turn_end"})
+    db.update_studio_chat_session(sid, status="idle")
+    notice = {
+        "event": "queued_delivered",
+        "message_id": delivered["id"],
+        "detail": "排队消息已开始处理",
+    }
+    db.claim_studio_chat_turn_with_token(sid, hash_token(token), notice)
+    _pending(db, sid)
+    db.update_studio_chat_session(sid, status="awaiting_permission")
+    return sid, "queued restart unknown", "queued restart dropped"
+
+
+def _inject_after_commit(service, db, stage: str, monkeypatch) -> None:
+    if stage == "status":
+        real_update = db.update_studio_chat_session_if
+        failed = False
+
+        def update_then_fail(*args, **kwargs):
+            nonlocal failed
+            result = real_update(*args, **kwargs)
+            if kwargs.get("status") == "error" and not failed:
+                failed = True
+                raise RuntimeError("post-commit status failure")
+            return result
+
+        monkeypatch.setattr(db, "update_studio_chat_session_if", update_then_fail)
+        return
+    real_append = service.store.append_message_if_live
+    failed = False
+
+    def append_then_fail(*args, **kwargs):
+        nonlocal failed
+        result = real_append(*args, **kwargs)
+        content = args[3]
+        matched = (
+            stage == "permission"
+            and content.get("status") == "resolved"
+            or stage == "dropped"
+            and content.get("event") == "queued_dropped"
+            or stage == "unknown"
+            and content.get("outcome") == "unknown"
+        )
+        if matched and not failed:
+            failed = True
+            raise RuntimeError(f"post-commit {stage} failure")
+        return result
+
+    monkeypatch.setattr(service.store, "append_message_if_live", append_then_fail)
+
+
+def _events(db, sid: str, name: str) -> list[dict]:
+    return [
+        m["content"]
+        for m in db.list_studio_chat_messages(sid)
+        if m["kind"] == "status" and m["content"].get("event") == name
+    ]
+
+
+def _assert_single_terminals(db, sid: str, *, queued: bool) -> None:
+    resolved = [
+        m
+        for m in db.list_studio_chat_messages(sid)
+        if m["kind"] == "permission" and m["content"].get("status") == "resolved"
+    ]
+    unknown = [event for event in _events(db, sid, "error") if event.get("outcome") == "unknown"]
+    assert len(resolved) == 1
+    assert resolved[0]["content"]["decision"] == {"deny": True, "via": "backend_restart"}
+    assert len(unknown) == 1
+    assert len(_events(db, sid, "queued_dropped")) == (1 if queued else 0)
+    assert db.get_studio_chat_session(sid)["status"] == "error"
+
+
+def _resume_and_check(
+    service, script_path: Path, sid: str, workspace: str, user: str, old: list[str]
+) -> None:
+    try:
+        assert service.resume_session(sid, workspace, user)["status"] == "idle"
+        service.send_message(sid, workspace, "fresh after restart")
+        wait_for_predicate(
+            lambda: any(
+                m["kind"] == "text" and m["role"] == "agent"
+                for m in service.list_messages(sid, workspace)
+            ),
+            timeout=10,
+        )
+        prompt = _prompt_texts(script_path)[-1]
+        assert "fresh after restart" in prompt
+        assert "known history" in prompt
+        for text in old:
+            assert text not in prompt
+    finally:
+        service.shutdown()
+
+
+@pytest.mark.parametrize("stage", ["permission", "unknown", "status"])
+def test_direct_restart_recovers_from_each_commit_stage(chat, monkeypatch, stage: str) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(fixtures.TEXT_SCRIPT)
+    sid, unknown = _seed_direct(service.db, workspace, user)
+    with monkeypatch.context() as patch:
+        _inject_after_commit(service, service.db, stage, patch)
+        with pytest.raises(RuntimeError, match="startup reconciliation failed"):
+            service.reap_zombie_sessions()
+
+    restarted = StudioChatService(service.db, service._settings, service._bus)
+    restarted.reap_zombie_sessions()
+    restarted.reap_zombie_sessions()
+    _assert_single_terminals(service.db, sid, queued=False)
+    _resume_and_check(restarted, script_path, sid, workspace, user, [unknown])
+
+
+@pytest.mark.parametrize("stage", ["permission", "dropped", "unknown", "status"])
+def test_queued_restart_recovers_from_each_commit_stage(chat, monkeypatch, stage: str) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(fixtures.TEXT_SCRIPT)
+    sid, unknown, dropped = _seed_queued(service.db, workspace, user)
+    with monkeypatch.context() as patch:
+        _inject_after_commit(service, service.db, stage, patch)
+        with pytest.raises(RuntimeError, match="startup reconciliation failed"):
+            service.reap_zombie_sessions()
+
+    restarted = StudioChatService(service.db, service._settings, service._bus)
+    restarted.reap_zombie_sessions()
+    restarted.reap_zombie_sessions()
+    _assert_single_terminals(service.db, sid, queued=True)
+    _resume_and_check(restarted, script_path, sid, workspace, user, [unknown, dropped])
+
+
+def _seed_early_shapes(db, workspace: str, user: str, total: int) -> tuple[str, str, str, str]:
+    sid = db.create_studio_chat_session(workspace, user, "fake-agent")
+    token = mint_scoped_token(db, user, origin="run", workspace_id=workspace)
+    db.update_studio_chat_session(sid, status="idle")
+    _history(db, sid, token)
+    _pending(db, sid)
+    direct = db.accept_studio_chat_message(sid, hash_token(token), "early direct unknown")
+    delivered = db.enqueue_studio_chat_message(sid, hash_token(token), "early queued unknown")
+    dropped = db.enqueue_studio_chat_message(sid, hash_token(token), "early queued dropped")
+    db.update_studio_chat_session(sid, status="idle")
+    notice = {
+        "event": "queued_delivered",
+        "message_id": delivered["id"],
+        "detail": "排队消息已开始处理",
+    }
+    db.claim_studio_chat_turn_with_token(sid, hash_token(token), notice)
+    current = len(db.list_studio_chat_messages(sid))
+    for index in range(current, total):
+        db.append_studio_chat_message(sid, "status", "system", {"event": "noise", "index": index})
+    assert len(db.list_studio_chat_messages(sid, limit=total + 1)) == total
+    return sid, direct["id"], delivered["id"], dropped["id"]
+
+
+@pytest.mark.parametrize("total", [500, 501, 1000, 1001])
+def test_startup_replays_every_message_page(chat, total: int) -> None:
+    service, _bus, _register, workspace, user = chat
+    sid, direct_id, delivered_id, dropped_id = _seed_early_shapes(
+        service.db, workspace, user, total
+    )
+
+    service.reap_zombie_sessions()
+    service.reap_zombie_sessions()
+
+    resolved = [
+        m
+        for m in service.db.list_studio_chat_messages(sid)
+        if m["kind"] == "permission" and m["content"].get("status") == "resolved"
+    ]
+    unknown = [
+        event for event in _events(service.db, sid, "error") if event.get("outcome") == "unknown"
+    ]
+    dropped = _events(service.db, sid, "queued_dropped")
+    assert len(resolved) == 1
+    assert {event["message_id"] for event in unknown} == {direct_id, delivered_id}
+    assert len(unknown) == 2
+    assert [event["message_id"] for event in dropped] == [dropped_id]
+    assert service.db.get_studio_chat_session(sid)["status"] == "error"
+
+
+def test_forward_reader_does_not_change_latest_page_contract(chat) -> None:
+    service, _bus, _register, workspace, user = chat
+    sid, _direct_id, _delivered_id, _dropped_id = _seed_early_shapes(
+        service.db, workspace, user, 501
+    )
+
+    latest, has_more = service.db.list_studio_chat_messages_page(sid, limit=500)
+    forward = service.db.list_studio_chat_messages_forward(sid, limit=500)
+
+    assert len(latest) == len(forward) == 500
+    assert has_more is True
+    assert latest[0]["seq"] > forward[0]["seq"]
+
+
+def test_legacy_delivered_dropped_is_unknown_and_never_replayed(chat) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(fixtures.TEXT_SCRIPT)
+    sid, unknown_text, dropped_text = _seed_queued(service.db, workspace, user)
+    delivered_id = next(
+        m["id"]
+        for m in service.db.list_studio_chat_messages(sid)
+        if m["kind"] == "text" and m["content"].get("text") == unknown_text
+    )
+    service.db.append_studio_chat_message(
+        sid,
+        "status",
+        "system",
+        {
+            "event": "queued_dropped",
+            "message_id": delivered_id,
+            "detail": "legacy post-commit drop",
+        },
+    )
+
+    service.reap_zombie_sessions()
+    service.reap_zombie_sessions()
+
+    unknown = [
+        event
+        for event in _events(service.db, sid, "error")
+        if event.get("message_id") == delivered_id and event.get("outcome") == "unknown"
+    ]
+    dropped = [
+        event
+        for event in _events(service.db, sid, "queued_dropped")
+        if event["message_id"] == delivered_id
+    ]
+    assert len(unknown) == len(dropped) == 1
+    restarted = StudioChatService(service.db, service._settings, service._bus)
+    _resume_and_check(restarted, script_path, sid, workspace, user, [unknown_text, dropped_text])
+
+
+def _idle_session(db, workspace: str, user: str) -> str:
+    sid = db.create_studio_chat_session(workspace, user, "fake-agent")
+    db.update_studio_chat_session(sid, status="idle")
+    return sid
+
+
+def test_startup_settles_visible_and_hidden_candidates_without_hidden_writes(chat) -> None:
+    service, _bus, _register, workspace, user = chat
+    deleted = _idle_session(service.db, workspace, user)
+    archived = _idle_session(service.db, workspace, user)
+    live = _idle_session(service.db, workspace, user)
+    _pending(service.db, deleted)
+    _pending(service.db, archived)
+    assert service.db.mark_studio_chat_session_deleted(deleted)
+    assert service.db.set_studio_chat_session_archived(archived, True)
+
+    service.reap_zombie_sessions()
+
+    for sid in (live, deleted, archived):
+        assert service.db.get_studio_chat_session(sid)["status"] == "error"
+    for sid in (deleted, archived):
+        assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
+            "pending"
+        ]
+    assert {row["id"] for row in service.db.list_zombie_studio_chat_sessions()} == {live}
+    assert {row["id"] for row in service.db.list_zombie_studio_chat_sessions(hidden=True)} == {
+        deleted,
+        archived,
+    }
+
+
+@pytest.mark.parametrize("stamp", ["deleted", "archived"])
+def test_startup_visibility_cas_blocks_delete_or_archive_after_read(
+    chat, monkeypatch, stamp: str
+) -> None:
+    service, _bus, _register, workspace, user = chat
+    sid = _idle_session(service.db, workspace, user)
+    real_list = service.db.list_zombie_studio_chat_sessions
+
+    def hide_after_read(**kwargs):
+        rows = real_list(**kwargs)
+        if kwargs.get("hidden"):
+            return []
+        if stamp == "deleted":
+            assert service.db.mark_studio_chat_session_deleted(sid)
+        else:
+            assert service.db.set_studio_chat_session_archived(sid, True)
+        return rows
+
+    monkeypatch.setattr(service.db, "list_zombie_studio_chat_sessions", hide_after_read)
+    service.reap_zombie_sessions()
+
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "idle"
+    assert row[f"{stamp}_at"] is not None
+
+
+def _hidden_zombie(db, workspace: str, user: str, stamp: str) -> str:
+    sid = _idle_session(db, workspace, user)
+    _pending(db, sid)
+    if stamp == "deleted":
+        assert db.mark_studio_chat_session_deleted(sid)
+    else:
+        assert db.set_studio_chat_session_archived(sid, True)
+    return sid
+
+
+@pytest.mark.parametrize("stamp", ["deleted", "archived"])
+def test_hidden_zombie_releases_create_and_resume_capacity(chat, monkeypatch, stamp: str) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register(fixtures.TEXT_SCRIPT)
+    sid = _hidden_zombie(service.db, workspace, user, stamp)
+    visible = _idle_session(service.db, workspace, user)
+    resumable = service.db.create_studio_chat_session(workspace, user, "fake-agent")
+    service.db.update_studio_chat_session(resumable, status="error")
+    monkeypatch.setattr("server.app.studio_chat.service.MAX_ACTIVE_STUDIO_CHAT_SESSIONS", 1)
+    with pytest.raises(ConflictError, match="Too many active"):
+        service.create_session(workspace, user, "fake-agent")
+    with pytest.raises(ConflictError, match="Too many active"):
+        service.resume_session(resumable, workspace, user)
+
+    service.reap_zombie_sessions()
+    service.reap_zombie_sessions()
+
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "error"
+    assert row[f"{stamp}_at"] is not None
+    assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
+        "pending"
+    ]
+    assert service.db.get_studio_chat_session(visible)["status"] == "error"
+    created = service.create_session(workspace, user, "fake-agent")
+    assert created["status"] == "idle"
+    service.close_session(created["id"], workspace)
+    assert service.resume_session(resumable, workspace, user)["status"] == "idle"
+    service.send_message(resumable, workspace, "after hidden cleanup")
+    wait_for_predicate(
+        lambda: any(
+            m["kind"] == "text" and m["role"] == "agent"
+            for m in service.list_messages(resumable, workspace)
+        ),
+        timeout=10,
+    )
+    assert _prompt_texts(script_path)
+
+
+def test_hidden_archive_cas_does_not_rewrite_row_restored_after_read(chat, monkeypatch) -> None:
+    service, _bus, _register, workspace, user = chat
+    sid = _hidden_zombie(service.db, workspace, user, "archived")
+    real_list = service.db.list_zombie_studio_chat_sessions
+
+    def unarchive_after_read(**kwargs):
+        rows = real_list(**kwargs)
+        if kwargs.get("hidden"):
+            assert service.db.set_studio_chat_session_archived(sid, False)
+        return rows
+
+    monkeypatch.setattr(service.db, "list_zombie_studio_chat_sessions", unarchive_after_read)
+    service.reap_zombie_sessions()
+
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "idle"
+    assert row["archived_at"] is None
+    assert [m["content"]["status"] for m in service.db.list_studio_chat_messages(sid)] == [
+        "pending"
+    ]
+
+
+_ARCHIVE_PERMISSION = {
+    "permission": {
+        "toolCall": {"toolCallId": "archive-pending", "title": "Bash: archive-test"},
+        "options": [{"optionId": "deny", "name": "Deny", "kind": "reject_once"}],
+    }
+}
+
+
+@pytest.mark.parametrize("delivery", ["direct", "queued_delivered"])
+def test_archived_hidden_delivered_is_not_replayed_after_unarchive(chat, delivery: str) -> None:
+    service, _bus, register, workspace, user = chat
+    plans = [
+        fixtures.TEXT_SCRIPT,
+        {"on_prompt": [{"fail": "ordinary agent refusal"}]},
+    ]
+    if delivery == "queued_delivered":
+        plans.append({"on_prompt": [], "wait_for_cancel": True})
+    plans.append({"on_prompt": [_ARCHIVE_PERMISSION], "wait_for_cancel": True})
+    script_path = register({**fixtures.TEXT_SCRIPT, "prompt_plans": plans})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+
+    service.send_message(sid, workspace, "known completed input")
+    wait_for_predicate(lambda: service.get_session(sid)["status"] == "idle", timeout=10)
+    failed = service.send_message(sid, workspace, "known failed input")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and any(
+                event.get("message_id") == failed["id"] and event.get("outcome") == "failed"
+                for event in _events(service.db, sid, "error")
+            )
+        ),
+        timeout=10,
+    )
+
+    if delivery == "direct":
+        unresolved = service.send_message(sid, workspace, "direct hidden unresolved")
+    else:
+        runtime = service.runtime(sid)
+        assert wake_session(service, sid, runtime, ["finished-task"])
+        unresolved = service.send_message(sid, workspace, "queued hidden unresolved")
+        service.cancel(sid, workspace)
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "awaiting_permission"
+            and (
+                delivery == "direct"
+                or any(
+                    event.get("message_id") == unresolved["id"]
+                    for event in _events(service.db, sid, "queued_delivered")
+                )
+            )
+        ),
+        timeout=10,
+    )
+    assert bool(unresolved["content"].get("queued")) == (delivery == "queued_delivered")
+    runtime = service.runtime(sid)
+    process = runtime.handle._process
+    assert process is not None
+
+    assert service.db.set_studio_chat_session_archived(sid, True)
+    service.reap_zombie_sessions()
+    service.reap_zombie_sessions()
+    row = service.db.get_studio_chat_session(sid)
+    assert row["status"] == "error" and row["archived_at"] is not None
+    assert not [
+        event for event in _events(service.db, sid, "error") if event.get("outcome") == "unknown"
+    ]
+    wait_for_predicate(
+        lambda: not runtime.handle._thread.is_alive() and process.returncode is not None,
+        timeout=10,
+    )
+
+    script_path.write_text(json.dumps(fixtures.TEXT_SCRIPT), encoding="utf-8")
+    assert service.unarchive_session(sid, workspace)["status"] == "error"
+    assert service.unarchive_session(sid, workspace)["archived_at"] is None
+    assert service.resume_session(sid, workspace, user)["status"] == "idle"
+    previous_prompts = len(_prompt_texts(script_path))
+    service.send_message(sid, workspace, "fresh after unarchive")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and len(_prompt_texts(script_path)) > previous_prompts
+        ),
+        timeout=10,
+    )
+
+    prompt = _prompt_texts(script_path)[-1]
+    assert RESUME_TRANSCRIPT_HEADER in prompt
+    assert "known completed input" in prompt
+    assert "known failed input" in prompt
+    assert "助手：pong" in prompt
+    assert "fresh after unarchive" in prompt
+    assert unresolved["content"]["text"] not in prompt
+    assert not [
+        event for event in _events(service.db, sid, "error") if event.get("outcome") == "unknown"
+    ]
+    assert [
+        m["content"]["status"]
+        for m in service.db.list_studio_chat_messages(sid)
+        if m["kind"] == "permission"
+    ] == ["pending"]
+
+
+@pytest.mark.parametrize("delivery", ["direct", "queued_delivered"])
+def test_background_turn_cannot_complete_hidden_delivery_after_resume_marker_failure(
+    chat, monkeypatch, delivery: str
+) -> None:
+    service, _bus, register, workspace, user = chat
+    plans = [
+        fixtures.TEXT_SCRIPT,
+        {"on_prompt": [{"fail": "ordinary agent refusal"}]},
+    ]
+    if delivery == "queued_delivered":
+        plans.append({"on_prompt": [], "wait_for_cancel": True})
+    plans.append({"on_prompt": [_ARCHIVE_PERMISSION], "wait_for_cancel": True})
+    script_path = register({**fixtures.TEXT_SCRIPT, "prompt_plans": plans})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+
+    service.send_message(sid, workspace, "known completed input")
+    wait_for_predicate(lambda: service.get_session(sid)["status"] == "idle", timeout=10)
+    failed = service.send_message(sid, workspace, "known failed input")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and any(
+                event.get("message_id") == failed["id"] and event.get("outcome") == "failed"
+                for event in _events(service.db, sid, "error")
+            )
+        ),
+        timeout=10,
+    )
+    if delivery == "direct":
+        unresolved = service.send_message(sid, workspace, "direct hidden unresolved")
+    else:
+        runtime = service.runtime(sid)
+        assert wake_session(service, sid, runtime, ["finished-task"])
+        unresolved = service.send_message(sid, workspace, "queued hidden unresolved")
+        service.cancel(sid, workspace)
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "awaiting_permission"
+            and (
+                delivery == "direct"
+                or any(
+                    event.get("message_id") == unresolved["id"]
+                    for event in _events(service.db, sid, "queued_delivered")
+                )
+            )
+        ),
+        timeout=10,
+    )
+    runtime = service.runtime(sid)
+    process = runtime.handle._process
+    assert process is not None
+    assert service.db.set_studio_chat_session_archived(sid, True)
+    service.reap_zombie_sessions()
+    assert service.get_session(sid)["status"] == "error"
+    wait_for_predicate(
+        lambda: not runtime.handle._thread.is_alive() and process.returncode is not None,
+        timeout=10,
+    )
+
+    script_path.write_text(json.dumps(fixtures.TEXT_SCRIPT), encoding="utf-8")
+    service.unarchive_session(sid, workspace)
+    real_append = service.store.append_message
+    append_failed = False
+
+    def fail_resume_marker(*args):
+        nonlocal append_failed
+        if args[3].get("event") == "session_resumed" and not append_failed:
+            append_failed = True
+            raise RuntimeError("injected session_resumed append failure")
+        return real_append(*args)
+
+    monkeypatch.setattr(service.store, "append_message", fail_resume_marker)
+    with pytest.raises(RuntimeError, match="session_resumed append failure"):
+        service.resume_session(sid, workspace, user)
+    resumed_runtime = service.runtime(sid)
+    assert resumed_runtime is not None and resumed_runtime is not runtime
+    assert service.get_session(sid)["status"] == "idle"
+    assert not _events(service.db, sid, "session_resumed")
+
+    previous_prompts = len(_prompt_texts(script_path))
+    assert wake_session(service, sid, resumed_runtime, ["finished-task"])
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and len(_prompt_texts(script_path)) > previous_prompts
+        ),
+        timeout=10,
+    )
+    background_end = _events(service.db, sid, "turn_end")[-1]
+    assert background_end["turn_origin"] == "platform"
+    assert "message_id" not in background_end and "unprompted" not in background_end
+    service.send_message(sid, workspace, "fresh after background")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and len(_prompt_texts(script_path)) > previous_prompts + 1
+        ),
+        timeout=10,
+    )
+
+    prompt = _prompt_texts(script_path)[-1]
+    assert RESUME_TRANSCRIPT_HEADER in prompt
+    assert "known completed input" in prompt
+    assert "known failed input" in prompt
+    assert "fresh after background" in prompt
+    assert unresolved["content"]["text"] not in prompt
+    assert [
+        m["content"]["status"]
+        for m in service.db.list_studio_chat_messages(sid)
+        if m["kind"] == "permission"
+    ] == ["pending"]
