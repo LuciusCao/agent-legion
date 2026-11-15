@@ -12,7 +12,9 @@ applied. Active errors abort the whole migration. Invalid or unsafe drafts are
 backed up and reported as unresolved without blocking active revisions. Jobs,
 archived revisions, queued manifests and runtime history are never read or
 written. Replaying is a no-op because migrated sources no longer carry the
-workflow-level key and unresolved drafts already have a backup.
+workflow-level key and identical unresolved drafts already have a backup. A
+later, different original receives a fresh ``source_id#N`` backup row instead
+of replacing or being hidden by the earlier attempt.
 """
 
 from __future__ import annotations
@@ -278,17 +280,36 @@ def _prepare_drafts(rows: list[Any]) -> tuple[list[_Backup], list[_DraftUpdate]]
 
 
 def _insert_backup(conn: Any, backup: _Backup) -> None:
+    report_json = _canonical_json(backup.report)
+    rows = conn.execute(
+        "select source_id, original_text, original_hash, report_json"
+        " from workflow_execution_retirement_backups where workspace_id=%s and source=%s",
+        (backup.workspace_id, backup.source),
+    ).fetchall()
+    for row in rows:
+        if (
+            row["original_text"] == backup.original_text
+            and row["original_hash"] == backup.original_hash
+            and row["report_json"] == report_json
+        ):
+            return
+    used_ids = {str(row["source_id"]) for row in rows}
+    source_id = backup.source_id
+    attempt = 2
+    while source_id in used_ids:
+        source_id = f"{backup.source_id}#{attempt}"
+        attempt += 1
     conn.execute(
         "insert into workflow_execution_retirement_backups"
         "(workspace_id, source, source_id, original_text, original_hash, report_json)"
-        " values (%s, %s, %s, %s, %s, %s) on conflict(source, source_id) do nothing",
+        " values (%s, %s, %s, %s, %s, %s)",
         (
             backup.workspace_id,
             backup.source,
-            backup.source_id,
+            source_id,
             backup.original_text,
             backup.original_hash,
-            _canonical_json(backup.report),
+            report_json,
         ),
     )
 

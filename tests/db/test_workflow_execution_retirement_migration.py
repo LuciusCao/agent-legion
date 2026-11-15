@@ -174,7 +174,7 @@ def _backups(conn, workspace_id: str) -> list[dict[str, Any]]:
         dict(row)
         for row in conn.execute(
             "select * from workflow_execution_retirement_backups where workspace_id=%s"
-            " order by source",
+            " order by source, id",
             (workspace_id,),
         ).fetchall()
     ]
@@ -379,6 +379,63 @@ def test_unresolved_draft_is_backed_up_unchanged_without_blocking_active(
     report = json.loads(draft_backup["report_json"])
     assert report["status"] == "unresolved"
     assert reason in report["reason"]
+
+
+def test_unresolved_draft_correction_gets_a_new_immutable_backup_attempt() -> None:
+    workspace_id = "v105-unresolved-replay"
+    bad_yaml = "nodes: [unterminated"
+    corrected = yaml.safe_dump(_draft_payload(workspace_id), sort_keys=False)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed_workspace(conn, workspace_id)
+        conn.execute(
+            "update workspace_workflow_drafts set definition_yaml=%s where workspace_id=%s",
+            (bad_yaml, workspace_id),
+        )
+        migrate_workflow_execution_defaults_retirement(conn)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        before = _backups(conn, workspace_id)
+        unresolved = next(backup for backup in before if backup["source"] == "draft")
+        assert unresolved["original_text"] == bad_yaml
+        assert json.loads(unresolved["report_json"])["status"] == "unresolved"
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update workspace_workflow_drafts set definition_yaml=%s,"
+            " updated_at=timestamptz '2020-02-01' where workspace_id=%s",
+            (corrected, workspace_id),
+        )
+        migrate_workflow_execution_defaults_retirement(conn)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        after = _backups(conn, workspace_id)
+        draft_backups = [backup for backup in after if backup["source"] == "draft"]
+        assert len(draft_backups) == 2
+        assert len({backup["source_id"] for backup in draft_backups}) == 2
+        assert next(backup for backup in after if backup["id"] == unresolved["id"]) == unresolved
+        migrated = next(backup for backup in draft_backups if backup["id"] != unresolved["id"])
+        assert migrated["source_id"] == f"{workspace_id}#2"
+        assert migrated["original_text"] == corrected
+        assert migrated["original_hash"] is None
+        report = json.loads(migrated["report_json"])
+        assert report["status"] == "migrated"
+        assert any(node["materialized_fields"] for node in report["nodes"])
+        assert len([backup for backup in after if backup["source"] == "active_revision"]) == 1
+        draft = _row(conn, "workspace_workflow_drafts", "workspace_id=%s", (workspace_id,))
+        generation = _row(
+            conn, "workspace_workflow_draft_generation", "workspace_id=%s", (workspace_id,)
+        )
+        assert "execution" not in yaml.safe_load(draft["definition_yaml"])
+        assert generation["generation"] == 8
+        stable = (after, draft, generation)
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        migrate_workflow_execution_defaults_retirement(conn)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert (
+            _backups(conn, workspace_id),
+            _row(conn, "workspace_workflow_drafts", "workspace_id=%s", (workspace_id,)),
+            _row(conn, "workspace_workflow_draft_generation", "workspace_id=%s", (workspace_id,)),
+        ) == stable
 
 
 def test_active_failure_rolls_back_all_sources_and_backups() -> None:
