@@ -106,17 +106,28 @@ live/status/error_detail 守卫，starting、closed 或 successor 拥有行时�
 共享 `list_studio_chat_messages_page` 继续保留 UI/API 的最新 limit 页语义，不能互相替代。
 随后重建 direct/queued 的 queued→delivered→dropped/unknown/completed 状态：无 resolved 的 permission 补
 `deny(via=backend_restart)`，未 delivered queued 补 `queued_dropped`，delivered
-但没有完成证据的输入补 `outcome=unknown`。turn_end/turn_timeout 与带
-`message_id+outcome=failed` 的普通 turn error 证明完成；fatal、旧格式或模糊
-错误不能证明完成，宁可标 unknown 也不授权重放。终态优先级为 completed >
-delivered > dropped：legacy `queued_delivered→queued_dropped` 若没有完成证据，仍按
-unknown 补齐一次，不能被后 dropped 覆盖；若已有完成证据，dropped/fatal 也不会追溯抹掉
-正常历史。
+但没有完成证据的输入补 `outcome=unknown`。终态优先级为 completed > delivered > dropped：
+legacy `queued_delivered→queued_dropped` 若没有完成证据，仍按 unknown 补齐一次，不能被后
+dropped 覆盖；若已有完成证据，dropped/fatal 也不会追溯抹掉正常历史。
+
+完成证据必须有持久 turn 归属。`turn_state.turn_completion_evidence` 在 events 写
+turn_end/turn_timeout/per-turn error 前快照当前 turn：人工 direct/queued/empty-retry 写
+`turn_origin=human` 与对应 `message_id`；background wake 的空文本 `open_turn` 写
+`turn_origin=platform`，runtime 缺失或无法归类写 `unknown`。平台普通 failed 不携带
+`message_id+outcome=failed`，不能伪装成人工失败。初始 direct 与后续人工 turn 使用同一规则，
+不需要 `session_created` 或默认 human 特例。
+
+重建时，turn_end/timeout 只有 `turn_origin=human` 且 message_id 等于当前 active 人工输入
+才完成它；普通 failed 也只接受 human，或 legacy 已带 message_id 的可归属形态。无 owner 的
+legacy turn_end/timeout、origin unknown/不匹配及平台终态一律不完成 active，保留 delivered
+并禁止重放。这是旧数据的保守上下文降级，不声称能完美区分所有历史无 origin 后台事件。
+fatal 与 unprompted 既有排除不变。正常 `session_resumed` 仍清除旧 active；即使其 append
+失败后新 runtime/idle row 已存在，后续 background wake 的 platform 终态也不能完成旧输入。
 
 `resume_context.py` 与 startup 共用 `_reconstruct`，不维护第二套证据状态机。fallback
 transcript 对用户文本只接受 `completed`，因此 direct/queued delivered、unknown、dropped
-和未投递 queued 都不能自动重放；正常 turn_end/timeout/普通 failed 的用户与助手历史仍注入。
-fatal 只使当前 active delivered 保持模糊，不覆盖此前已完成输入。该只读过滤也让
+和未投递 queued 都不能自动重放；正常有归属的 turn_end/timeout/普通 failed 用户与助手历史
+仍注入，assistant 文本、截断和 one-shot marker 不变。该只读过滤也让
 archive→hidden reap→unarchive→loadSession=False resume 无需在隐藏期补 unknown：unarchive
 与 resume claim 之间不存在可授权重放的写入窗口，不需要新增跨事务锁。相比在 unarchive
 后补终态，它既复用完成证据模型，也避免另一线程先 resume 的竞态。

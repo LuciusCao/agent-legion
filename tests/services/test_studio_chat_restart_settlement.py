@@ -31,8 +31,13 @@ def _prompt_texts(script_path: Path) -> list[str]:
 
 
 def _history(db, sid: str, token: str) -> None:
-    db.accept_studio_chat_message(sid, hash_token(token), "known history")
-    db.append_studio_chat_message(sid, "status", "system", {"event": "turn_end"})
+    message = db.accept_studio_chat_message(sid, hash_token(token), "known history")
+    db.append_studio_chat_message(
+        sid,
+        "status",
+        "system",
+        {"event": "turn_end", "turn_origin": "human", "message_id": message["id"]},
+    )
     db.update_studio_chat_session(sid, status="idle")
 
 
@@ -519,6 +524,119 @@ def test_archived_hidden_delivered_is_not_replayed_after_unarchive(chat, deliver
     assert not [
         event for event in _events(service.db, sid, "error") if event.get("outcome") == "unknown"
     ]
+    assert [
+        m["content"]["status"]
+        for m in service.db.list_studio_chat_messages(sid)
+        if m["kind"] == "permission"
+    ] == ["pending"]
+
+
+@pytest.mark.parametrize("delivery", ["direct", "queued_delivered"])
+def test_background_turn_cannot_complete_hidden_delivery_after_resume_marker_failure(
+    chat, monkeypatch, delivery: str
+) -> None:
+    service, _bus, register, workspace, user = chat
+    plans = [
+        fixtures.TEXT_SCRIPT,
+        {"on_prompt": [{"fail": "ordinary agent refusal"}]},
+    ]
+    if delivery == "queued_delivered":
+        plans.append({"on_prompt": [], "wait_for_cancel": True})
+    plans.append({"on_prompt": [_ARCHIVE_PERMISSION], "wait_for_cancel": True})
+    script_path = register({**fixtures.TEXT_SCRIPT, "prompt_plans": plans})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+
+    service.send_message(sid, workspace, "known completed input")
+    wait_for_predicate(lambda: service.get_session(sid)["status"] == "idle", timeout=10)
+    failed = service.send_message(sid, workspace, "known failed input")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and any(
+                event.get("message_id") == failed["id"] and event.get("outcome") == "failed"
+                for event in _events(service.db, sid, "error")
+            )
+        ),
+        timeout=10,
+    )
+    if delivery == "direct":
+        unresolved = service.send_message(sid, workspace, "direct hidden unresolved")
+    else:
+        runtime = service.runtime(sid)
+        assert wake_session(service, sid, runtime, ["finished-task"])
+        unresolved = service.send_message(sid, workspace, "queued hidden unresolved")
+        service.cancel(sid, workspace)
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "awaiting_permission"
+            and (
+                delivery == "direct"
+                or any(
+                    event.get("message_id") == unresolved["id"]
+                    for event in _events(service.db, sid, "queued_delivered")
+                )
+            )
+        ),
+        timeout=10,
+    )
+    runtime = service.runtime(sid)
+    process = runtime.handle._process
+    assert process is not None
+    assert service.db.set_studio_chat_session_archived(sid, True)
+    service.reap_zombie_sessions()
+    assert service.get_session(sid)["status"] == "error"
+    wait_for_predicate(
+        lambda: not runtime.handle._thread.is_alive() and process.returncode is not None,
+        timeout=10,
+    )
+
+    script_path.write_text(json.dumps(fixtures.TEXT_SCRIPT), encoding="utf-8")
+    service.unarchive_session(sid, workspace)
+    real_append = service.store.append_message
+    append_failed = False
+
+    def fail_resume_marker(*args):
+        nonlocal append_failed
+        if args[3].get("event") == "session_resumed" and not append_failed:
+            append_failed = True
+            raise RuntimeError("injected session_resumed append failure")
+        return real_append(*args)
+
+    monkeypatch.setattr(service.store, "append_message", fail_resume_marker)
+    with pytest.raises(RuntimeError, match="session_resumed append failure"):
+        service.resume_session(sid, workspace, user)
+    resumed_runtime = service.runtime(sid)
+    assert resumed_runtime is not None and resumed_runtime is not runtime
+    assert service.get_session(sid)["status"] == "idle"
+    assert not _events(service.db, sid, "session_resumed")
+
+    previous_prompts = len(_prompt_texts(script_path))
+    assert wake_session(service, sid, resumed_runtime, ["finished-task"])
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and len(_prompt_texts(script_path)) > previous_prompts
+        ),
+        timeout=10,
+    )
+    background_end = _events(service.db, sid, "turn_end")[-1]
+    assert background_end["turn_origin"] == "platform"
+    assert "message_id" not in background_end and "unprompted" not in background_end
+    service.send_message(sid, workspace, "fresh after background")
+    wait_for_predicate(
+        lambda: (
+            service.get_session(sid)["status"] == "idle"
+            and len(_prompt_texts(script_path)) > previous_prompts + 1
+        ),
+        timeout=10,
+    )
+
+    prompt = _prompt_texts(script_path)[-1]
+    assert RESUME_TRANSCRIPT_HEADER in prompt
+    assert "known completed input" in prompt
+    assert "known failed input" in prompt
+    assert "fresh after background" in prompt
+    assert unresolved["content"]["text"] not in prompt
     assert [
         m["content"]["status"]
         for m in service.db.list_studio_chat_messages(sid)

@@ -35,10 +35,10 @@ RESUME_TRANSCRIPT_FOOTER = "[此前对话记录结束。以下是用户的新消
 def build_resume_transcript(messages: list[dict[str, Any]]) -> str:
     """Rebuild a compact user/assistant transcript; "" when nothing usable.
 
-    #882/#1153: user input requires durable completion evidence, not merely a
-    delivery claim. Sharing restart's reconstruction preserves completed >
-    delivered > dropped and prevents every ambiguous input from auto-resending,
-    including an archived hidden reap that intentionally wrote no terminal.
+    #882/#1153: user input requires owned human completion evidence, not merely
+    a delivery claim or another platform turn's terminal. Sharing restart's
+    reconstruction preserves completed > delivered > dropped and prevents every
+    ambiguous input from auto-resending, including when session_resumed is absent.
     """
     states, _resolved_requests = _reconstruct(messages)
     entries: list[str] = []

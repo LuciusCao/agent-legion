@@ -20,6 +20,7 @@ from server.app.studio_chat.session_exit import finish_session_exit
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.token_keepalive import keepalive_run_token
 from server.app.studio_chat.tool_call_coalesce import clear_tool_call_ownership
+from server.app.studio_chat.turn_state import turn_completion_evidence
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -153,6 +154,7 @@ class AcpEventHandlers:
             content = {"event": "turn_timeout", "stop_reason": stop_reason, "detail": detail}
         else:
             content = {"event": "turn_end", "stop_reason": stop_reason}
+        content.update(turn_completion_evidence(runtime))
         self._backend.store.append_message(session_id, "status", "system", content)
         compaction.note_turn_closed(runtime)
         # Guarded (#158): turn_end only moves a live turn back to idle; a
@@ -170,11 +172,10 @@ class AcpEventHandlers:
             compaction.note_turn_closed(runtime, clear_delivery=False)
         # #1228 codex P2: turn error is a turn boundary too (see on_turn_end).
         clear_tool_call_ownership(runtime)
-        content = {"event": "error", "detail": detail}
-        if not fatal and runtime is not None and runtime.turn_retry_source is not None:
-            # Durable per-turn evidence lets startup reconciliation distinguish
-            # a completed agent refusal from an unfinished turn after restart.
-            content["message_id"] = runtime.turn_retry_source[0]
+        content = {"event": "error", "detail": detail, **turn_completion_evidence(runtime)}
+        if not fatal and content.get("turn_origin") == "human":
+            # Only an owned human failure proves completion; platform/unknown
+            # failures stay non-completing even when they end their own turn.
             content["outcome"] = "failed"
         self._backend.store.append_message(session_id, "status", "system", content)
         if not fatal:

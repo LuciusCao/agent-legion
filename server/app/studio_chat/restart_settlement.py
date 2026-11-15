@@ -34,6 +34,12 @@ def _timeline(service: StudioChatService, session_id: str) -> list[dict[str, Any
 
 
 def _reconstruct(messages: list[dict[str, Any]]) -> tuple[dict[str, str], set[str]]:
+    """Rebuild delivery and owned completion evidence from durable rows.
+
+    Human turn_end/timeout requires both turn_origin=human and the active
+    message_id. Platform/unknown or legacy unowned terminals cannot complete a
+    human input. Legacy failed rows remain attributable through message_id.
+    """
     states: dict[str, str] = {}
     resolved_requests: set[str] = set()
     active: str | None = None
@@ -71,13 +77,20 @@ def _reconstruct(messages: list[dict[str, Any]]) -> tuple[dict[str, str], set[st
             states[message_id] = "unknown"
             if active == message_id:
                 active = None
-        elif event == "error" and content.get("outcome") == "failed" and message_id:
+        elif (
+            event == "error"
+            and content.get("outcome") == "failed"
+            and message_id
+            and content.get("turn_origin") in (None, "human")
+        ):
+            # Legacy failed rows already identify their human message. Platform
+            # failures never acquire this outcome under the new producer.
             states[message_id] = "completed"
             if active == message_id:
                 active = None
         elif event in ("turn_end", "turn_timeout") and not content.get("unprompted"):
-            if active is not None:
-                states[active] = "completed"
+            if content.get("turn_origin") == "human" and message_id and active == message_id:
+                states[message_id] = "completed"
                 active = None
         elif event == "empty_turn_retry" and message_id:
             states[message_id] = "delivered"
