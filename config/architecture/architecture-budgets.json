@@ -2077,6 +2077,7 @@
     "server/app/studio_chat/prompts.py": 25,
     "server/app/studio_chat/registry.py": 59,
     "server/app/studio_chat/registry_revision.py": 24,
+    "server/app/studio_chat/restart_settlement.py": 159,
     "server/app/studio_chat/resume.py": 69,
     "server/app/studio_chat/resume_context.py": 60,
     "server/app/studio_chat/resume_preflight.py": 17,

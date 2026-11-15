@@ -103,22 +103,15 @@ class StudioChatQueriesMixin(
             )
         return session_id
 
-    def reap_zombie_studio_chat_sessions(self) -> int:
-        """Mark leftover live-status rows as error; returns the reaped count.
-
-        Sessions are in-process only: after a crash or restart their runtimes
-        are gone, so starting/idle/running/awaiting_permission rows are
-        zombies that would otherwise count against the active-session cap
-        forever (#158 review). Runs once at backend startup; idempotent.
-        """
-        with self.connect() as conn:
-            cursor = conn.execute(
-                "update studio_chat_sessions set status='error',"
-                " error_detail='backend restarted before the session ended',"
-                " updated_at=current_timestamp"
-                " where status in ('starting', 'idle', 'running', 'awaiting_permission')",
-            )
-            return cursor.rowcount
+    def list_zombie_studio_chat_sessions(self) -> list[dict[str, Any]]:
+        """Rows whose persisted timeline may need restart reconciliation."""
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                f"select {_SESSION_COLUMNS} from studio_chat_sessions"
+                " where status in ('starting','idle','running','awaiting_permission','error')"
+                " order by id"
+            ).fetchall()
+        return [_session_record(row) for row in rows]
 
     def get_studio_chat_session(self, session_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:

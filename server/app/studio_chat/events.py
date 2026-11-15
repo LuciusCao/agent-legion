@@ -167,9 +167,13 @@ class AcpEventHandlers:
         compaction.note_turn_closed(runtime)
         # #1228 codex P2: turn error is a turn boundary too (see on_turn_end).
         clear_tool_call_ownership(runtime)
-        self._backend.store.append_message(
-            session_id, "status", "system", {"event": "error", "detail": detail}
-        )
+        content = {"event": "error", "detail": detail}
+        if not fatal and runtime is not None and runtime.turn_retry_source is not None:
+            # Durable per-turn evidence lets startup reconciliation distinguish
+            # a completed agent refusal from an unfinished turn after restart.
+            content["message_id"] = runtime.turn_retry_source[0]
+            content["outcome"] = "failed"
+        self._backend.store.append_message(session_id, "status", "system", content)
         if fatal:
             # Guarded (#158): a close owns the final 'closed' state, and a
             # resume claim's 'starting' row is not ours to stamp — a stale

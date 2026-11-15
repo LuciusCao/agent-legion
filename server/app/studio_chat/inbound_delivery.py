@@ -81,7 +81,6 @@ def _deliver(
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
             elif (detail := _claim(service, session_id, runtime, message_id)) is None:
-                runtime.inbound_messages[message_id] = "delivered"
                 open_turn(runtime, text, message_id=message_id, prompt=prompt)
         except Exception:
             # #204 broad-except audit: a claim can commit and still surface a
@@ -89,7 +88,6 @@ def _deliver(
             # only a genuinely unclaimed message may be called undelivered.
             logger.warning("queued chat message delivery failed for %s", session_id, exc_info=True)
             if _has_delivery_proof(service, session_id, message_id):
-                runtime.inbound_messages[message_id] = "delivered"
                 open_turn(runtime, text, message_id=message_id, prompt=prompt)
                 return True
             detail = DROPPED_ERROR

@@ -35,5 +35,9 @@ def open_turn(
     runtime.turn_retry_source = (
         (message_id, text, prompt if prompt is not None else text) if message_id else None
     )
+    # Every accepted human turn (direct, queued, or explicit empty-turn retry)
+    # shares the same delivered identity until its terminal event clears it.
+    if message_id is not None:
+        runtime.inbound_messages[message_id] = "delivered"
     # #882: any new turn supersedes a pending empty-turn replay.
     runtime.empty_turn_retry = None

@@ -75,7 +75,7 @@ identity/closed CAS 拆除。runtime lock 不包住 join、wait 或 kill，旧 g
 | mid-turn process/stream death | 不写 turn_end；会话进入 `error`，可 resume；本代 pending permission 按 request id 写一次 `resolved` |
 | between-turns process/stream death | 与 mid-turn 共用 fatal 路径，不等待 prompt/journal timeout；已完成 turn 的消息不补 unknown |
 | 尚未 before_start 的 queued/held 消息 | 只按 message id 写一次 `queued_dropped`，明确表示未投递，可人工重发；不清除下一轮或 successor 的状态 |
-| 已写 queued_delivered、turn 尚未结束 | 写现有 `error` 状态行，携带 `message_id` 与 `outcome=unknown`；不得谎报未送达，也不得自动重发 |
+| direct accept 或 queued_delivered 已成功、turn 尚未结束 | direct 与 queued 都写现有 `error` 状态行，携带 `message_id` 与 `outcome=unknown`；不得谎报未送达，也不得自动重发 |
 | 显式 close / resume / shutdown | 沿用 closed CAS、显式权限拒绝和 close/join/kill fence，不写进程崩溃 error；close 赢得 death 竞态时不追加 crash 事件 |
 
 `queued_delivered` 只证明 `before_start` 的 token lock + idle claim + 状态行已在
@@ -91,7 +91,23 @@ timeout/cancel 与 durable resolved 之间也保留 request id，退出结算可
 wedged turn 等既有 fatal `on_error` 则保留原 detail，不被改写成第二次进程崩溃。
 两次即时 EOF 投影尝试之外，线程最终 `on_exit` 仍走同一幂等入口。append 使用
 live/status/error_detail 守卫，starting、closed 或 successor 拥有行时旧 generation
-不再写入。本片没有 DDL，也不声称后端进程崩溃后的跨进程 exactly-once。
+不再写入。以上是同代去重：它解决本进程内 fatal 重试与 ABA，不承担重启后的恢复。
+
+后端非正常重启后，`restart_settlement.py` 独立按持久证据恢复，不依赖 runtime
+内存。startup 对 live/error row 分页重放完整消息序列，重建 direct/queued 的
+queued→delivered→dropped/unknown/completed 状态：无 resolved 的 permission 补
+`deny(via=backend_restart)`，未 delivered queued 补 `queued_dropped`，delivered
+但没有完成证据的输入补 `outcome=unknown`。turn_end/turn_timeout 与带
+`message_id+outcome=failed` 的普通 turn error 证明完成；fatal、旧格式或模糊
+错误不能证明完成，宁可标 unknown 也不授权重放。已 unknown/dropped 的消息永不
+进入 fallback transcript，正常已完成历史仍照常注入。
+
+每次 reaper 都重读持久终态，只补缺项；permission/drop/unknown/status 任一阶段
+在提交后报错，下一次启动仍按 request/message id 跳过已落库行，不重复追加。
+单 session 全部缺失终态写妥后才做 live→error；任一 row 失败会在其他 row 修复后
+聚合抛出启动失败，阻止未结算输入提前 resume，下一次启动再按持久证据补齐。closed row
+或已被 successor 接管的 starting row 不归旧 reaper 写入。同代与 restart 两条路径共用同一事件语义，
+但不互相冒充：前者依赖 runtime/owner，后者只依赖持久 seq 与 id；无需新增 DDL。
 
 清理对象仅限本 handle 拉起的 direct ACP child 与该 child 经 ACP 登记的 terminal；
 不按 process group 清理 Kimi 内部的非 direct-child 后台任务。event-loop wedged 的

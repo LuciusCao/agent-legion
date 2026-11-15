@@ -279,8 +279,9 @@ def test_reap_zombie_sessions_marks_live_rows_error(chat, job_db) -> None:
     assert job_db.get_studio_chat_session(zombie)["status"] == "error"
     assert job_db.get_studio_chat_session(zombie)["error_detail"]
     assert job_db.get_studio_chat_session(closed)["status"] == "closed"
-    # Idempotent: a second run finds nothing to reap.
-    assert job_db.reap_zombie_studio_chat_sessions() == 0
+    # Idempotent: a second full startup reconciliation changes no terminal.
+    service.reap_zombie_sessions()
+    assert job_db.get_studio_chat_session(zombie)["status"] == "error"
 
 
 def test_agent_exit_tears_down_runtime_and_revokes_token(chat, job_db) -> None:

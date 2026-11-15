@@ -146,6 +146,37 @@ def test_kill_between_turns_is_error_without_marking_completed_message_unknown(c
     _finish_next_turn(service, sid, workspace, "resumed")
 
 
+def test_direct_mid_turn_death_is_unknown_and_fallback_resume_does_not_replay(chat) -> None:
+    service, _bus, register, workspace, user = chat
+    script_path = register({"on_prompt": [], "wait_for_cancel": True})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    direct = service.send_message(sid, workspace, "direct unknown payload")
+    _wait(lambda: len(_prompt_texts(script_path)) == 1)
+
+    _kill(runtime)
+    _wait(
+        lambda: (
+            service.get_session(sid)["status"] == "error"
+            and any(
+                event.get("message_id") == direct["id"] and event.get("outcome") == "unknown"
+                for event in _events(service, sid, workspace, "error")
+            )
+        )
+    )
+    assert not [
+        event
+        for event in _events(service, sid, workspace, "queued_dropped")
+        if event["message_id"] == direct["id"]
+    ]
+
+    _resume_with_text(service, script_path, sid, workspace, user)
+    _finish_next_turn(service, sid, workspace, "fresh direct question")
+    last_prompt = _prompt_texts(script_path)[-1]
+    assert "fresh direct question" in last_prompt
+    assert "direct unknown payload" not in last_prompt
+
+
 def test_delivered_queue_death_is_unknown_and_never_auto_replayed(chat) -> None:
     service, _bus, register, workspace, user = chat
     script_path = register(
@@ -253,6 +284,26 @@ def test_agent_request_error_remains_per_turn(chat) -> None:
     assert service.runtime(sid) is runtime
     assert process.returncode is None
     assert len(_prompt_texts(script_path)) == 2
+
+
+def test_direct_request_error_is_not_mislabeled_unknown_after_later_death(chat) -> None:
+    service, _bus, register, workspace, user = chat
+    register({"on_prompt": [{"fail": "ordinary agent refusal"}]})
+    sid = service.create_session(workspace, user, "fake-agent")["id"]
+    runtime = service.runtime(sid)
+    direct = service.send_message(sid, workspace, "known failed turn")
+    _wait(lambda: service.get_session(sid)["status"] == "idle")
+    failure = _events(service, sid, workspace, "error")[-1]
+    assert failure["message_id"] == direct["id"]
+    assert failure["outcome"] == "failed"
+
+    _kill(runtime)
+    _wait(lambda: service.get_session(sid)["status"] == "error")
+    assert not [
+        event
+        for event in _events(service, sid, workspace, "error")
+        if event.get("message_id") == direct["id"] and event.get("outcome") == "unknown"
+    ]
 
 
 def test_quiet_healthy_turn_can_still_cancel_without_exit_false_positive(chat) -> None:

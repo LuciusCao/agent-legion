@@ -210,8 +210,7 @@ def test_resume_reaped_error_session_tears_down_stale_runtime(chat, job_db) -> N
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
     session = service.create_session(workspace_id, user_id, "fake-agent")
-    reaped = job_db.reap_zombie_studio_chat_sessions()
-    assert reaped == 1
+    service.reap_zombie_sessions()
     assert service.get_session(session["id"])["status"] == "error"
     assert service.runtime(session["id"]) is not None  # 旧 runtime 仍在册
 
