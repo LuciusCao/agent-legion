@@ -32,26 +32,14 @@ async def run_prompt_start(
 class PromptStartGate:
     def __init__(self, allowed: Callable[[], bool]) -> None:
         self._allowed = allowed
-        self.starting = False
-        self.done = threading.Event()
-        self.done.set()
-
-    def begin(self) -> bool:
-        if self.starting or not self._allowed():
-            return False
-        self.starting = True
-        self.done.clear()
-        return True
-
-    def end(self) -> None:
-        self.starting = False
-        self.done.set()
+        self.mutex = threading.Lock()
 
     async def run(self, prompt: Callable[[], Awaitable[Any]]) -> Any:
-        if not self.begin():
-            return None
-        try:
+        # The mutex contains only atomic fence reads and coroutine creation. The
+        # second read is the final start/fatal linearization point: a candidate
+        # installed after it finds an already-admitted RPC for M19 settlement.
+        with self.mutex:
+            if not self._allowed() or not self._allowed():
+                return None
             request = prompt()
-        finally:
-            self.end()
         return await request

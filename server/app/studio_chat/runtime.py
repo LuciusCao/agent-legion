@@ -61,14 +61,13 @@ class SessionRuntime:
         # boundary (#1228 codex P2: a toolCallId is unique within one turn —
         # see tool_call_coalesce.clear_tool_call_ownership).
         self.tool_call_messages: dict[str, str] = {}
-        self.mcp_observed = False
+        self.mcp_observed = self.mcp_hint_shown = False
         # Set by resume_session when the fresh agent could not reload the
         # prior ACP session: the first post-resume prompt gets the persisted
         # transcript prepended (consumed and cleared in send_message).
         self.resume_transcript_pending = False
         # Whether the one-time advisory mcp_unverified hint was already
         # posted for this session (per-session, not per-turn).
-        self.mcp_hint_shown = False
         # Mid-turn token keepalive bookkeeping (#411): set only AFTER the
         # run_token_invalidated notice was successfully appended — later
         # tool_call updates then skip re-emitting it (one warning is enough;
@@ -115,7 +114,7 @@ class SessionRuntime:
         # on_update counts content updates, trailing ones included.
         self.turn_started_at: float | None = None
         self.turn_update_count = 0
-        self.turn_skip_empty_check = False
+        self.turn_skip_empty_check = self.turn_background = False
         # #882 (inbound_queue.py / empty_turn_retry.py): turn_background marks a
         # platform-initiated turn (background wakeup); turn_retry_source is the
         # (message_id, text, prompt) of the human message behind the open turn,
@@ -123,7 +122,6 @@ class SessionRuntime:
         # one replay 「继续对话」 may deliver (cleared by any new turn).
         # inbound_pending counts human messages queued behind the turn in
         # flight and not yet started.
-        self.turn_background = False
         self.turn_retry_source: tuple[str, str, str] | None = None
         self.empty_turn_retry: tuple[str, str, str] | None = None
         self.inbound_pending = 0
@@ -137,4 +135,6 @@ class SessionRuntime:
         # #1029: the Kimi Code wire watcher (unprompted_queue.GatedUnprompted-
         # Watcher) that holds human messages while an unprompted turn runs;
         # None for non-Kimi-Code runtimes.
-        self.unprompted_gate = self.turn_watchdog = cast(Any, None)
+        self.unprompted_gate = self.turn_watchdog = self.turn_admission = self.pending_cancel = (
+            cast(Any, None)
+        )

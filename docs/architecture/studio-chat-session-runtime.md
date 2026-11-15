@@ -187,6 +187,14 @@ fail-fast，显式 YAML 不构成第二配置通道，也不新增 UI、route �
 `before_start`，因此持锁回调也不能让后续自动 turn 绕过取消。正常取消完成后已接受人工输入
 保持既有 FIFO，自动 wakeup 仍须由后续人工消息 rearm。
 
+direct accept、queued delivery 与 empty-turn retry 在 DB claim 前先创建 admission token。
+若 cancel 发生于 token 已存在但 `open_turn`/watchdog 尚未创建时，runtime 只记录
+`(token, requested_at)` 为 `pending_cancel`；`open_turn` 创建同 owner watchdog 后按原请求时刻
+启动独立 grace，而不是把首次 `arm=False` 当作永久取消失败。重复 cancel 增加 cancel epoch 但不
+推迟首个 deadline；claim 失败、response 或 close 清理 token/pending。没有 active/accepted turn
+时不记录 pending，因此不会毒化下一次 prompt；successor 不继承旧 token。runtime.lock 永久持
+有会推迟 `open_turn` 本身，此时只有 DB accept/cancel 已记录，尚不能虚构已创建 turn watchdog。
+
 宽限耗尽分成两个阶段。`turn_watchdog_core.py` 的线外 `threading.Timer` 不获取
 `runtime.lock`、accept 侧 handle state lock 或全局 `_runtimes_lock`：先原子写入
 `handle._watchdog_candidate`，再用 handle-local 的 `callbacks.runtime`、turn watchdog、turn
@@ -197,12 +205,19 @@ registry 与 M19 的 DB/session 复核全部推迟到第二阶段。candidate �
 
 准入有明确的线性化边界。`send_prompt` 在 accept/DB 写入前和 accept 后 queue 前检查
 candidate，并在 `queue.put` 后再次读取 fence；post-put 已安装 candidate 时返回 False，不能
-假报成功。出队时 `prompt_loop` 统一检查 fence，实际 coroutine 创建再由
-`prompt_start.PromptStartGate` claim：candidate 在 claim 前已存在则跳过，不调用
-`conn.prompt`；candidate 在极短的创建临界区到达时，cleanup 等创建结束后 kill，而不是在
-check→queue→before_start→conn.prompt 之间留下未归属窗口。无 `before_start` 的直接项目与
-queued delivery 走同一 claim，已接受输入仍由 M19 unknown/drop 结算，不自动重放。
-即使 `owned_callback` 持 `runtime.lock`、accept 持 handle state lock，或另一 session 的
+假报成功。出队时 `prompt_loop` 统一检查 fence。`prompt_start.PromptStartGate` 的短 mutex 只覆盖
+两次 `_allowed()` 读取与 coroutine 创建：第二次读取是最终 start/fatal 线性化点，candidate 若在
+其后到达，该 RPC 已获准入并交给 M19 unknown/settlement；candidate 若在其前已存在，则不创建
+coroutine，也不调用 `conn.prompt`。watchdog 对同一 mutex 仅 non-blocking 使用，拿不到也立即
+candidate+kill，不再读取 `starting` 或等待 `done`，因此 begin 后不再 `end()` 的 wedged 也不会
+推迟 direct-child 清理。无 `before_start` 的直接项目与 queued delivery 走同一 claim，已接受输入
+仍由 M19 unknown/drop 结算，不自动重放。
+
+这里的 RPC 起点特指临界区内调用 `conn.prompt(...)` 并取得 awaitable，而不是把“coroutine 尚未
+执行”当成豁免：创建后 `await`/schedule 可只在已获准入的 awaitable 上继续，真实 JSON-RPC wire
+send 由 ACP SDK 与 M19 death task 裁决。fatal 之后不得新调用 `conn.prompt` 创建 awaitable；已在
+最终线性化点之前创建的 RPC 即使之后 await/wire，也只按 M19 unknown 结算，不宣称 wire 永不晚于
+fatal。即使 `owned_callback` 持 `runtime.lock`、accept 持 handle state lock，或另一 session 的
 spawn/close/background release 持全局 `_runtimes_lock`，第一阶段也能完成。
 
 第二阶段由独立 cleanup thread 复用 fatal `on_error`、M19 `report_connection_loss_sync` /
@@ -231,8 +246,11 @@ handle state lock 也被持有时，分别验证 cancel/总超时仍能线外 ki
 释放后幂等完成；response→cancel、response→close→cancel、慢终态和后继 runtime 也有独立回归。
 另有 `queue.put` 内强制 fatal 后跑真实 `_prompt_loop`，验证 direct/queued delivery 均
 `returned=False` 且 `conn.prompt.await_count=0`；cancel armed 后持有全局 `_runtimes_lock`，
-验证 candidate/kill 不等待释放，释放后分别完成 M19 结算或 successor ABA 隔离。真实 ACP
-回归继续证明普通 cancel 不杀健康进程、普通 `RequestError` 不转 fatal。
+验证 candidate/kill 不等待释放，释放后分别完成 M19 结算或 successor ABA 隔离。
+`tests/services/test_studio_chat_prompt_start.py` 进一步覆盖两次 `_allowed()` 之间强制 fatal、
+prompt 创建永不返回时仍能 kill、direct/queued DB accept 前 cancel 的同 owner grace 与 unknown，
+以及无 accepted turn 不残留 pending。真实 ACP 回归继续证明普通 cancel 不杀健康进程、普通
+`RequestError` 不转 fatal。
 `test_studio_chat_unprompted_queue.py` 正对照自发 turn 超时只释放 held，不调用 kill。
 所有异步等待均以事件、持久终态或进程状态为信号，不以延长固定 sleep 掩盖缺陷。
 

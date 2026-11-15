@@ -8,6 +8,7 @@
     "tests/routes/jobs/test_job_lifecycle.py",
     "tests/routes/test_auth_routes.py",
     "tests/services/test_studio_chat_process_exit.py",
+    "tests/services/test_studio_chat_prompt_start.py",
     "tests/services/test_studio_chat_restart_settlement.py",
     "tests/services/test_studio_chat_turn_watchdog.py",
     "tests/services/test_vault.py",

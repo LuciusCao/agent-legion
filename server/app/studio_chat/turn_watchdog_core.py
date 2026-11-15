@@ -47,13 +47,14 @@ class TurnWatchdog:
         with self._timer_lock:
             self._schedule_locked()
 
-    def request_cancel(self) -> bool:
+    def request_cancel(self, requested_at: float | None = None) -> bool:
         """Arm independently of runtime.lock; the first cancel deadline never slides."""
         with self._timer_lock:
             if self._disarmed or self._claimed:
                 return False
             self._cancel_epoch += 1
-            requested = time.monotonic() + self.handle.cancel_grace_seconds
+            requested = requested_at if requested_at is not None else time.monotonic()
+            requested += self.handle.cancel_grace_seconds
             self._cancel_deadline = (
                 requested
                 if self._cancel_deadline is None
@@ -116,38 +117,43 @@ class TurnWatchdog:
             if time.monotonic() < self._deadline:
                 self._schedule_locked()
                 return
-            # The candidate and process proof are handle-local: registry/DB locks
-            # are only needed after the direct child has been stopped.
-            self.handle._watchdog_candidate = self
-            if (
-                self.callbacks.runtime is not self.runtime
-                or self.runtime.turn_watchdog is not self
-                or self.runtime.closed
-                or self.handle._closed
-                or self.handle._process is not self.process
-                or not self.runtime.turn_open
-                or self.runtime.turn_owner is not self.owner
-                or self.runtime.handle is not self.handle
-                or (reason == "cancel" and cancel_epoch != self._cancel_epoch)
-            ):
-                if self.handle._watchdog_candidate is self:
-                    self.handle._watchdog_candidate = None
-                return
-            detail = self.handle._transport_failure
-            fatal = detail is None
-            if fatal:
-                grace = self.handle.cancel_grace_seconds
-                suffix = "user session/cancel" if reason == "cancel" else "session/cancel"
-                detail = str(
-                    PromptWedgedError(
-                        f"prompt turn wedged: no response within {grace}s after {suffix}"
+            start_mutex = self.handle._prompt_start_gate.mutex
+            locked = start_mutex.acquire(blocking=False)
+            try:
+                # The candidate and process proof are handle-local: registry/DB locks
+                # are only needed after the direct child has been stopped.
+                self.handle._watchdog_candidate = self
+                if (
+                    self.callbacks.runtime is not self.runtime
+                    or self.runtime.turn_watchdog is not self
+                    or self.runtime.closed
+                    or self.handle._closed
+                    or self.handle._process is not self.process
+                    or not self.runtime.turn_open
+                    or self.runtime.turn_owner is not self.owner
+                    or self.runtime.handle is not self.handle
+                    or (reason == "cancel" and cancel_epoch != self._cancel_epoch)
+                ):
+                    if self.handle._watchdog_candidate is self:
+                        self.handle._watchdog_candidate = None
+                    return
+                detail = self.handle._transport_failure
+                fatal = detail is None
+                if fatal:
+                    grace = self.handle.cancel_grace_seconds
+                    suffix = "user session/cancel" if reason == "cancel" else "session/cancel"
+                    detail = str(
+                        PromptWedgedError(
+                            f"prompt turn wedged: no response within {grace}s after {suffix}"
+                        )
                     )
-                )
-                self.handle._transport_failure = detail
-                self.handle._stop_requested = True
-            self._claimed = True
-            if not self.handle._prompt_start_gate.starting:
+                    self.handle._transport_failure = detail
+                    self.handle._stop_requested = True
+                self._claimed = True
                 self._kill_pinned_process()
+            finally:
+                if locked:
+                    start_mutex.release()
         self._start_cleanup(reason, detail, fatal)
 
     def _kill_pinned_process(self) -> None:
@@ -168,8 +174,6 @@ class TurnWatchdog:
         self.cleanup_thread.start()
 
     def _cleanup_after_start(self, reason: str, detail: str, fatal: bool) -> None:
-        if self.handle._prompt_start_gate.starting:
-            self.handle._prompt_start_gate.done.wait()
         self._kill_pinned_process()
         if self.service.runtime(self.session_id) is not self.runtime:
             self.service.teardown_runtime(self.session_id, self.runtime, expected=self.runtime)

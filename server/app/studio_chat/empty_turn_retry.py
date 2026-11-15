@@ -29,7 +29,11 @@ from server.app.studio_chat import compaction
 from server.app.studio_chat.inbound_queue import publish_committed
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
-from server.app.studio_chat.turn_watchdog import transport_failed
+from server.app.studio_chat.turn_watchdog import (
+    begin_turn_admission,
+    cancel_turn_admission,
+    transport_failed,
+)
 from server.app.studio_chat.unprompted_queue import holding, refresh
 
 if TYPE_CHECKING:
@@ -69,12 +73,21 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
         def accept() -> None:
             # Claim + replay notice commit together (no claimed turn without
             # its timeline record, and no record without the turn).
-            committed.update(
-                service.db.claim_studio_chat_turn_with_token(
-                    session_id, hash_token(runtime.token), notice
+            admission_token = begin_turn_admission(runtime)
+            try:
+                committed.update(
+                    service.db.claim_studio_chat_turn_with_token(
+                        session_id, hash_token(runtime.token), notice
+                    )
                 )
-            )
-            open_turn(runtime, text, message_id=message_id, prompt=prompt)
+                open_turn(
+                    runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
+                )
+            except Exception:
+                # #204 broad-except audit: only uncommitted admission/cancel identity
+                # is cleared; the original failure re-raises and durable proof is not rolled back.
+                cancel_turn_admission(runtime, admission_token)
+                raise
 
         try:
             queued = runtime.handle.send_prompt(prompt, accept=accept)

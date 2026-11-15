@@ -13,7 +13,11 @@ from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
-from server.app.studio_chat.turn_watchdog import transport_failed
+from server.app.studio_chat.turn_watchdog import (
+    begin_turn_admission,
+    cancel_turn_admission,
+    transport_failed,
+)
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -72,6 +76,7 @@ def _deliver(
             return False
         runtime.inbound_pending -= 1
         detail: str | None = None
+        admission_token = begin_turn_admission(runtime)
         try:
             if compaction.send_blocked(service.db, session_id, runtime, text):
                 detail = DROPPED_COMPACTING
@@ -79,17 +84,22 @@ def _deliver(
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
             elif (detail := _claim(service, session_id, runtime, message_id)) is None:
-                open_turn(runtime, text, message_id=message_id, prompt=prompt)
+                open_turn(
+                    runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
+                )
         except Exception:
             # #204 broad-except audit: a claim can commit and still surface a
             # transport/DB exception. Read its durable proof before deciding:
             # only a genuinely unclaimed message may be called undelivered.
             logger.warning("queued chat message delivery failed for %s", session_id, exc_info=True)
             if _has_delivery_proof(service, session_id, message_id):
-                open_turn(runtime, text, message_id=message_id, prompt=prompt)
+                open_turn(
+                    runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
+                )
                 return True
             detail = DROPPED_ERROR
         if detail is not None:
+            cancel_turn_admission(runtime, admission_token)
             _note_dropped(service, session_id, message_id, detail, runtime=runtime)
         return detail is None
 

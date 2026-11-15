@@ -6,16 +6,15 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
-from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compaction, inbound_queue, send_resume, unprompted_queue
+from server.app.studio_chat.admission_turn import accept_direct_turn
 from server.app.studio_chat.background_wakeup import prepare_rearm
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.resume_context import prepare_resume_prompt
 from server.app.studio_chat.session_orphan import reject_orphaned_session
 from server.app.studio_chat.token_admission import require_live_run_token
-from server.app.studio_chat.turn_state import open_turn
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
@@ -90,14 +89,9 @@ def send_message(
 
         def accept() -> None:
             nonlocal message
-            message = service._db.accept_studio_chat_message(
-                session_id, hash_token(runtime.token), text
+            message = accept_direct_turn(
+                service, session_id, runtime, text, prompt_text, commit_wakeup
             )
-            # Finish local state before the queue becomes visible: replay
-            # filtering can inspect loading before acquiring runtime.lock.
-            runtime.resume_transcript_pending = False
-            open_turn(runtime, text, message_id=str(message["id"]), prompt=prompt_text)
-            commit_wakeup()
 
         try:
             queued = runtime.handle.send_prompt(prompt_text, accept=accept)
