@@ -51,8 +51,8 @@ class StudioAgentNodeCodeTools:
 
     def _reject_start_node(self, workspace_id: str, workflow_key: str, node_key: str) -> None:
         """404 only for start nodes of the active revision (never execute, no
-        code to read). Draft-only/skeleton nodes are readable so an agent can
-        read back the draft it saved before the workflow revision exists."""
+        code to read or draft). Draft-only/skeleton nodes stay readable and
+        writable so an agent can save code before the workflow revision exists."""
         revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
         if revision is None:
             return
@@ -71,6 +71,7 @@ class StudioAgentNodeCodeTools:
         change_note: str | None,
         expected_capability: str | None = None,
     ) -> dict[str, Any]:
+        self._reject_start_node(workspace_id, workflow_key, node_key)
         revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
         capability = self._revision_node_capability(revision, node_key)
         if capability is None and expected_capability is None:

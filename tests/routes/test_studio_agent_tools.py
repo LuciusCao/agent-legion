@@ -350,6 +350,10 @@ def test_save_node_code_draft_empty_expected_capability_authorizes_capless_skele
     saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": ""})
     assert saved.status_code == 200, saved.text
     assert saved.json()["status"] == "draft"
+    state = scoped.get(url.removesuffix("/draft"))
+    assert state.status_code == 200
+    assert state.json()["has_draft"] is True
+    assert state.json()["draft_code"] == _NODE_CODE
 
 
 def test_existing_capless_code_echoes_string_and_matches_empty_expected_capability(
@@ -383,14 +387,49 @@ def test_existing_capless_code_echoes_string_and_matches_empty_expected_capabili
     assert mismatched.status_code == 400
 
 
-def test_node_code_tools_404_for_start_node(client, job_db) -> None:
-    # The injected `_start` entry node never executes: reading its code or
-    # saving a draft for it 404s (draft-only unknown nodes are allowed).
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {},
+        {"expected_capability": None},
+        {"expected_capability": ""},
+        {"expected_capability": "legacy"},
+    ],
+    ids=["omitted", "null", "empty", "nonempty"],
+)
+def test_node_code_tools_404_for_start_node(client, job_db, extra: dict) -> None:
+    from unittest.mock import patch
+
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     base = f"/api/studio-agent/tools/workspaces/{workspace_id}/nodes/_start/code"
     assert scoped.get(base).status_code == 404
-    assert scoped.put(f"{base}/draft", json={"code": _NODE_CODE}).status_code == 404
+
+    with patch(
+        "server.app.services.studio_agent_node_codes.NodeCodeService.save_draft"
+    ) as save_draft:
+        save_draft.return_value = {
+            "id": "draft-id",
+            "version": 1,
+            "status": "draft",
+            "code": _NODE_CODE,
+            "code_hash": "hash",
+            "created_by": "studio-agent:test",
+            "change_note": None,
+            "created_at": "2026-01-01T00:00:00Z",
+            "published_at": None,
+        }
+        response = scoped.put(f"{base}/draft", json={"code": _NODE_CODE, **extra})
+
+    assert response.status_code == 404, response.text
+    save_draft.assert_not_called()
+    with job_db._connect_read() as conn:
+        orphan = conn.execute(
+            "select count(*) as c from versioned_entities where entity_type='node_code'"
+            " and workspace_id=%s and entity_key=%s",
+            (workspace_id, f"{workspace_id}:_start"),
+        ).fetchone()
+    assert orphan["c"] == 0
 
 
 def test_save_node_code_draft_attributes_studio_agent(client, job_db) -> None:
@@ -503,7 +542,10 @@ def test_save_node_code_draft_expected_capability_allows_new_node(client, job_db
     assert payload["created_by"] == f"studio-agent:{admin_id}"
 
 
-def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> None:
+@pytest.mark.parametrize("expected_capability", ["first_capability", ""])
+def test_save_node_code_draft_skeleton_without_any_revision(
+    client, job_db, expected_capability: str
+) -> None:
     """From-scratch flow: no active revision at all. expected_capability gates
     the skeleton draft; without it the historic 404 stands."""
     scoped, _ = _scoped_client(client, job_db)
@@ -514,7 +556,7 @@ def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> N
     rejected = scoped.put(url, json={"code": _NODE_CODE})
     assert rejected.status_code == 404
 
-    saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": "first_capability"})
+    saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": expected_capability})
     assert saved.status_code == 200, saved.text
     assert saved.json()["status"] == "draft"
 
