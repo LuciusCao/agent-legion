@@ -51,6 +51,16 @@ terminated handles, and absence of durable starting/running rows. Existing
 admission, resume, generation-bound callbacks and fatal-loop tests retain their
 separate per-runtime guarantees. The invariant is `STUDIO-RUNTIME-001`.
 
+## 压缩窗口超时清理（#694/#1153）
+
+`compact_timer.py` 只负责 arm/cancel；`compact_timer_fire.py` 在 runtime identity 与
+`compacting_since` 代次校验后，于同一 runtime.lock 内执行 conditional DB clear。
+clear 抛错时没有可用的完成证明，保留窗口和代次并以 0.1 秒间隔、最多四次同代尝试；
+重试耗尽只停止 timer 并保留 traceback，不伪报已清理。re-arm 会更换代次并取消旧 timer，
+即使旧 firing 迟到也不能清掉新窗口。clear 成功后才最终清内存 flag/since/timer；
+后续通知或快照异常不回滚镜像，也不因提交点不明而盲目重复 `compact_timeout`。
+STUDIO-RUNTIME-001 同时约束该恢复路径。
+
 ## ACP 进程/流退出与幂等终态（#1153）
 
 `acp_consumer.py` 在每代 handle 的同一个 asyncio event loop 中同时观察 direct

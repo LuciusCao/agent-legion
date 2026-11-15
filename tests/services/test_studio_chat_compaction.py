@@ -334,12 +334,19 @@ def test_compact_timeout_timer_self_clears_and_recovers_input(direct, monkeypatc
         _ready(service, session_id)
         service._on_update(session_id, _chunk("Compacting conversation context\n"))
         assert runtime.compacting is True
-        # The timer flips the runtime flag first and writes the DB row after;
-        # wait on the DB row so the assertion cannot land between the two.
-        # Generous timeout: under gate-queue load the timer thread itself can
-        # be starved well past the shrunk 0.3s.
+        # A successful DB clear can become visible before the timeout notice
+        # is appended. Wait for both mirrors and that durable notice instead.
+        # The 30s budget still covers timer starvation under gate-queue load.
         wait_for_predicate(
-            lambda: service.get_session(session_id)["compacting"] is False, timeout=30
+            lambda: (
+                runtime.compacting is False
+                and service.get_session(session_id)["compacting"] is False
+                and any(
+                    e["event"] == "compact_timeout"
+                    for e in _status_events(service, session_id, workspace_id)
+                )
+            ),
+            timeout=30,
         )
         events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
         assert events == ["compact_start", "compact_timeout"]
