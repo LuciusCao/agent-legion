@@ -13,6 +13,7 @@ from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.turn_watchdog import transport_failed
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -64,13 +65,9 @@ def _deliver(
     if (gate := runtime.unprompted_gate) is not None and gate.defer(message_id, text, prompt):
         return False
     with runtime.lock:
-        transport_failure = getattr(runtime.handle, "transport_failure", lambda: None)()
-        if (
-            runtime.closed
-            or isinstance(transport_failure, str)
-            or service.runtime(session_id) is not runtime
-        ):
-            if not runtime.exit_started and not isinstance(transport_failure, str):
+        failed = transport_failed(runtime.handle)
+        if runtime.closed or failed or service.runtime(session_id) is not runtime:
+            if not runtime.exit_started and not failed:
                 runtime.inbound_pending = max(0, runtime.inbound_pending - 1)
             return False
         runtime.inbound_pending -= 1

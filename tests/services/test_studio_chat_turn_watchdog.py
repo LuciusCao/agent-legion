@@ -33,6 +33,14 @@ def _wait(condition, timeout: float = 10.0) -> None:
     wait_for_predicate(condition, timeout=timeout, interval=0.02)
 
 
+def _runtime_lock_held(runtime) -> bool:
+    acquired = runtime.lock.acquire(blocking=False)
+    if acquired:
+        runtime.lock.release()
+        return False
+    return True
+
+
 def _events(service, sid: str, workspace: str, name: str) -> list[dict]:
     return [
         message["content"]
@@ -166,6 +174,93 @@ def test_wedged_event_loop_is_cleaned_off_loop(admission, monkeypatch, trigger) 
     assert not handle._thread.is_alive()
 
 
+@pytest.mark.parametrize("trigger", ["cancel", "timeout"])
+def test_owned_callback_lock_does_not_block_off_loop_kill_or_deferred_settlement(
+    admission, monkeypatch, trigger
+) -> None:
+    service, _db, sid, workspace, runtime = admission
+    process = _install_fake_process(
+        service,
+        sid,
+        runtime,
+        StudioTimingConfig(
+            prompt_timeout_seconds=30 if trigger == "cancel" else 0.05,
+            cancel_grace_seconds=0.05,
+            close_grace_seconds=0.05,
+        ),
+    )
+    message = service.send_message(sid, workspace, f"owned callback {trigger}")
+    watchdog = runtime.turn_watchdog
+    if trigger == "cancel":
+        note_prompt_response(runtime.handle)
+    callback_started, release_callback = threading.Event(), threading.Event()
+    real_on_turn_end = service._on_turn_end
+
+    def blocking_on_turn_end(*args, **kwargs):
+        callback_started.set()
+        assert release_callback.wait(timeout=10)
+        real_on_turn_end(*args, **kwargs)
+
+    monkeypatch.setattr(service, "_on_turn_end", blocking_on_turn_end)
+    callback_thread = threading.Thread(
+        target=runtime.handle.callbacks.on_turn_end,
+        args=("end_turn",),
+        name="test-owned-callback",
+        daemon=True,
+    )
+    callback_thread.start()
+    assert callback_started.wait(timeout=2)
+    assert _runtime_lock_held(runtime)
+    handle_state = runtime.handle._state_lock
+    handle_state.acquire()
+    state_held = True
+    cancel_thread = None
+    try:
+        if trigger == "cancel":
+            cancel_thread = threading.Thread(
+                target=service.cancel, args=(sid, workspace), name="test-user-cancel", daemon=True
+            )
+            cancel_thread.start()
+            _wait(lambda: watchdog._cancel_epoch == 1, timeout=2)
+            assert cancel_thread.is_alive()
+
+        _wait(lambda: process.killed.is_set() and watchdog._claimed, timeout=2)
+        assert _runtime_lock_held(runtime) and callback_thread.is_alive()
+        assert handle_state.locked()
+        assert watchdog.cleanup_thread.is_alive()
+        assert service.runtime(sid) is runtime
+        assert service.get_session(sid)["status"] == "running"
+        handle_state.release()
+        state_held = False
+        assert not runtime.handle.send_prompt("must stay fenced while DB settlement waits")
+    finally:
+        if state_held:
+            handle_state.release()
+        release_callback.set()
+        callback_thread.join(timeout=2)
+        if cancel_thread is not None:
+            cancel_thread.join(timeout=2)
+
+    assert not callback_thread.is_alive()
+    watchdog.cleanup_thread.join(timeout=2)
+    _wait(lambda: service.runtime(sid) is None and service.get_session(sid)["status"] == "error")
+    expected = "user session/cancel" if trigger == "cancel" else "after session/cancel"
+    assert expected in service.get_session(sid)["error_detail"]
+    assert any(
+        event.get("message_id") == message["id"]
+        for event in _events(service, sid, workspace, "turn_end")
+    )
+
+    successor = SessionRuntime(Mock(), "successor-token")
+    successor_process = _FakeProcess()
+    successor.handle._process = successor_process
+    with service._runtimes_lock:
+        service._runtimes[sid] = successor
+    runtime.handle.callbacks.on_exit(close_initiated=False)
+    assert service.runtime(sid) is successor
+    assert not successor.closed and successor_process.kill_calls == 0
+
+
 def test_quiet_turn_before_total_deadline_is_not_killed(admission) -> None:
     service, _db, sid, workspace, runtime = admission
     process = _install_fake_process(
@@ -192,7 +287,6 @@ def test_prompt_response_disarms_total_timeout_but_not_user_cancel(admission, mo
     first_escalate = Mock()
     monkeypatch.setattr(first, "_escalate", first_escalate)
     note_prompt_response(runtime.handle)
-    first._deadline = 0
 
     first._fire(first._generation, first._reason, first._cancel_epoch)
 
@@ -206,6 +300,43 @@ def test_prompt_response_disarms_total_timeout_but_not_user_cancel(admission, mo
     note_turn_closed(runtime)
 
 
+def test_response_then_new_cancel_arms_independent_grace(admission) -> None:
+    service, _db, sid, workspace, runtime = admission
+    _process = _install_fake_process(
+        service, sid, runtime, StudioTimingConfig(prompt_timeout_seconds=30)
+    )
+    service.send_message(sid, workspace, "response precedes user cancel")
+    watchdog = runtime.turn_watchdog
+    note_prompt_response(runtime.handle)
+    assert watchdog._total_deadline is None and runtime.turn_open
+
+    service.cancel(sid, workspace)
+
+    assert watchdog._cancel_epoch == 1
+    assert watchdog._reason == "cancel"
+    assert watchdog._deadline is not None
+    assert not watchdog._disarmed
+    note_turn_closed(runtime)
+
+
+def test_response_then_close_does_not_arm_late_cancel(admission) -> None:
+    service, _db, sid, workspace, runtime = admission
+    process = _install_fake_process(
+        service, sid, runtime, StudioTimingConfig(prompt_timeout_seconds=30)
+    )
+    service.send_message(sid, workspace, "close before late cancel")
+    watchdog = runtime.turn_watchdog
+    note_prompt_response(runtime.handle)
+    service._events().on_turn_end(sid, "end_turn")
+
+    result = service.cancel(sid, workspace)
+
+    assert result["status"] == "idle"
+    assert watchdog._cancel_epoch == 0
+    assert process.kill_calls == 0
+    assert watchdog.cleanup_thread is None
+
+
 def test_prompt_loop_disarms_total_timeout_before_turn_end(admission, monkeypatch) -> None:
     service, _db, sid, workspace, runtime = admission
     _process = _install_fake_process(
@@ -217,7 +348,7 @@ def test_prompt_loop_disarms_total_timeout_before_turn_end(admission, monkeypatc
     real_on_turn_end = service._on_turn_end
 
     def recording_on_turn_end(session_id, stop_reason, *, timed_out=False):
-        observed.append(watchdog._disarmed)
+        observed.append(watchdog._total_deadline is None)
         real_on_turn_end(session_id, stop_reason, timed_out=timed_out)
 
     class QuickConn:
@@ -246,9 +377,25 @@ def test_watchdog_fences_next_admission_before_cleanup(admission, monkeypatch) -
     watchdog._fire(watchdog._generation, watchdog._reason, watchdog._cancel_epoch)
 
     assert runtime.handle._stop_requested
+    assert runtime.handle._watchdog_candidate is watchdog
     assert "prompt turn wedged" in runtime.handle.transport_failure()
     assert not runtime.handle.send_prompt("must not overtake fatal cleanup")
+    watchdog.cleanup_thread.join(timeout=2)
     escalate.assert_called_once()
+
+
+def test_candidate_during_accept_cannot_enter_prompt_queue(admission) -> None:
+    _service, _db, _sid, _workspace, runtime = admission
+    accepted = []
+
+    def accept() -> None:
+        accepted.append(True)
+        runtime.handle._watchdog_candidate = object()
+
+    assert not runtime.handle.send_prompt("candidate lands during accept", accept=accept)
+    assert accepted == [True]
+    assert runtime.handle._queue.empty()
+    runtime.handle._watchdog_candidate = None
 
 
 def test_stale_cancel_and_process_identity_cannot_kill_next_turn(admission, monkeypatch) -> None:

@@ -8,7 +8,11 @@ from typing import TYPE_CHECKING
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
-from server.app.studio_chat.turn_watchdog import disarm_turn_watchdog
+from server.app.studio_chat.turn_watchdog import (
+    cancel_requested,
+    disarm_turn_watchdog,
+    transport_failed,
+)
 from server.app.studio_chat.unprompted_queue import DEQUEUE_STEP_TIMEOUT_SECONDS, holding, refresh
 
 if TYPE_CHECKING:
@@ -35,6 +39,8 @@ def wake_session(
         if (
             service.runtime(session_id) is not runtime
             or runtime.closed
+            or transport_failed(runtime.handle)
+            or cancel_requested(runtime)
             or not runtime.background_wakeup_enabled
             or runtime.compacting
             or runtime.turn_open
@@ -90,6 +96,8 @@ def wake_session(
                         service.runtime(session_id) is runtime
                         and runtime.turn_owner is owner
                         and not runtime.closed
+                        and not transport_failed(runtime.handle)
+                        and not cancel_requested(runtime)
                         and runtime.background_wakeup_enabled
                         and runtime.background_epoch == epoch
                         and not runtime.compacting

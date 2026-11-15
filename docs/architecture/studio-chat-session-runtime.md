@@ -182,28 +182,46 @@ fail-fast，显式 YAML 不构成第二配置通道，也不新增 UI、route �
 本 handle 的总时长加既有 300 秒余量，不再绑定模块常量。
 
 用户主动 cancel 在请求时绑定当前 runtime、turn owner、direct process 和 cancel epoch，
-启动独立 grace，并沿用 `cancel_wakeup` 停止自动 wakeup。取消未完成前后续队列不能越过
-当前 turn；正常取消完成后已接受人工输入保持既有 FIFO，自动 wakeup 仍须由后续人工消息
-rearm。宽限耗尽不是只写终态：`turn_watchdog.py` 的线外 `threading.Timer` 先在同一
-runtime 临界区复核身份并写入 transport/admission fence，再复用 fatal `on_error`、M19
-`report_connection_loss_sync` / exit settlement 与 `teardown_runtime`。总超时的线外期限是
-总时长加 cancel grace，但 prompt 已返回即撤销该 backstop，慢终态持久化不视为 wedged；
-主动 cancel 则直到 turn close 才解除。process/stream death 仍由 M19 death task 立即接管，不等看门狗。
+启动独立 grace，并在进入任何可能阻塞的 `runtime.lock` 区段之前 arm 和发送 `session/cancel`。
+`cancel_requested` 与 transport fence 同时约束自动 wakeup 的初次 DB claim 和实际
+`before_start`，因此持锁回调也不能让后续自动 turn 绕过取消。正常取消完成后已接受人工输入
+保持既有 FIFO，自动 wakeup 仍须由后续人工消息 rearm。
 
-看门狗只在 active cancel 或上述总超时条件仍成立时 claim 一次。触发时重新核对 registry
-中的 runtime、turn owner、cancel epoch、handle 与 direct process，旧 turn、旧 runtime 或
-替换后的 process 都不会被清理。fatal projection、death task、`on_exit`、`on_connection_lost`
-和显式 close 共享幂等终态；close join/kill 也复核本 handle 的 thread/process 身份。清理只
-对 direct child 发既有 `process.kill()`，不消费 waitpid，不扩大到 descendant，普通
-`RequestError` 仍走 per-turn containment。
+宽限耗尽分成两个阶段。`turn_watchdog_core.py` 的线外 `threading.Timer` 不获取
+`runtime.lock`，也不获取 accept 侧的 handle state lock：先原子写入
+`handle._watchdog_candidate` 封闭新准入，再复核 registry 中的 runtime、turn owner、cancel
+epoch、handle 与 direct process，写 transport failure 并直接 kill 已 pin 的 process 对象。
+`send_prompt` 在 accept/DB 写入前和 accept 后 queue 前各检查一次 candidate；后台 wakeup 的
+claim/before_start 也检查 candidate/transport。accept 已在途中时，candidate 会阻止 queue，
+已接受的输入交给 M19 unknown/drop 结算，不能越过 fatal cleanup。candidate 与代次不匹配会
+撤销，不会干扰新 turn。即使 `owned_callback` 持 `runtime.lock`、accept 同时持 handle state
+lock，watchdog 仍能完成第一阶段，不依赖这两把锁。
+
+第二阶段由独立 cleanup thread 复用 fatal `on_error`、M19 `report_connection_loss_sync` /
+exit settlement 与 `teardown_runtime`。这些 DB/session 步骤需要 `runtime.lock`，可以等
+`owned_callback` 释放，但绝不在 timer 线程内等待。若锁永久不释放，只能保证准入 fence 与
+direct-child 已停止，registry/DB/session 状态可能尚未结算，绝不虚报 complete；锁释放后，
+cleanup 与 M19 death task、`on_exit`、`on_connection_lost` 和显式 close 以同一 runtime 身份
+幂等完成应有清理，后继 runtime/turn 不受影响。清理不消费 waitpid，不扩大到非 direct
+descendant，close join/kill 仍复核本 handle 的 thread/process 身份，普通 `RequestError`
+仍走 per-turn containment。
+
+总超时的线外期限是总时长加 cancel grace。prompt response 只撤销总超时 backstop，不置
+turn-closed/disarmed：turn 仍 open 时新用户 cancel 可以重新 armed；已有 armed cancel 不因
+response 提前解除，独立 grace 持续到 turn close。慢终态持久化不再被误判为总超时，但
+response→cancel 与 response 后 wedged 终态仍有线外清理。process/stream death 仍由 M19
+death task 立即接管，不等看门狗；正常安静长 turn 与下一代 ABA 守卫不变。
 
 ### Quality Impact（有界 turn）
 
 `tests/configuration/test_studio_timing.py` 覆盖默认值、合法 env、不可变快照、YAML 拒绝及
 非法/非有限/非正数矩阵。`tests/services/test_studio_chat_turn_watchdog.py` 以隔离库、fake
 child 与临时目录覆盖主动 cancel 超时和队列停止、event loop 真阻塞时的 cancel/总超时应答、
-正常安静 turn、准入 fence、turn/process ABA、close 身份与 2x join、keepalive 和动态文案；
-真实 ACP 回归继续证明普通 cancel 不杀健康进程、普通 `RequestError` 不转 fatal。
+正常安静 turn、准入 fence、turn/process ABA、close 身份与 2x join、keepalive 和动态文案。
+真实 `ServiceCallbacks + owned_callback` 在持有 `runtime.lock` 的回调内等待、且 accept 侧
+handle state lock 也被持有时，分别验证 cancel/总超时仍能线外 kill，且 DB 在释放前尚未结算、释放后幂等完成；response→cancel、
+response→close→cancel、慢终态和后继 runtime 也有独立回归。真实 ACP 回归继续证明普通
+cancel 不杀健康进程、普通 `RequestError` 不转 fatal。
 `test_studio_chat_unprompted_queue.py` 正对照自发 turn 超时只释放 held，不调用 kill。
 所有异步等待均以事件、持久终态或进程状态为信号，不以延长固定 sleep 掩盖缺陷。
 

@@ -29,6 +29,7 @@ from server.app.studio_chat import compaction
 from server.app.studio_chat.inbound_queue import publish_committed
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.turn_watchdog import transport_failed
 from server.app.studio_chat.unprompted_queue import holding, refresh
 
 if TYPE_CHECKING:
@@ -47,6 +48,8 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
     with runtime.lock:
         if runtime.empty_turn_retry is None:
             return False
+        if transport_failed(runtime.handle):
+            raise ConflictError("Chat session agent is not running")
         require_live_run_token(service, session_id, runtime)
         if holding(runtime):
             # #1029: a replay into a Kimi Code unprompted turn is lost again.

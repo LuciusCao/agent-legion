@@ -141,6 +141,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         # winner-side teardown) would return at its idempotence gate without
         # joining or killing a turn that is still running (codex P1).
         self._stop_requested = False
+        self._watchdog_candidate: Any = None
         self._state_lock = threading.Lock()
         # Loop-owned handles, captured under _state_lock for cross-thread
         # cancel/kill; None until the connection is up.
@@ -181,6 +182,9 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             self._stop_requested = True
             return True
 
+    def _watchdog_fenced(self) -> bool:
+        return self._watchdog_candidate is not None
+
     def send_prompt(
         self,
         text: str,
@@ -195,10 +199,14 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         the unbounded queue is the final non-blocking handoff.
         """
         with self._state_lock:
-            if self._closed or self._stop_requested:
+            if self._closed or self._stop_requested or self._watchdog_fenced():
                 return False
             if accept is not None:
                 accept()
+            # A candidate armed during accept must settle the accepted input
+            # through M19 instead of letting it overtake fatal cleanup.
+            if self._watchdog_fenced():
+                return False
             self._queue.put((text, before_start) if before_start is not None else text)
             return True
 

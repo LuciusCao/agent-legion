@@ -245,13 +245,15 @@ class StudioChatService:
     def cancel(self, session_id: str, workspace_id: str) -> dict[str, Any]:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
-        if runtime is not None:
+        if runtime is not None and self.runtime(session_id) is runtime and not runtime.closed:
+            # Arm and send before any blocking runtime.lock acquisition: an ACP
+            # callback holding that lock cannot postpone the independent grace.
+            request_user_cancel(runtime)
+            runtime.handle.cancel()
             with runtime.lock:
                 if self.runtime(session_id) is runtime and not runtime.closed:
                     cancel_wakeup(runtime)
                     settle_pending_permissions(runtime)
-                    request_user_cancel(runtime)
-                    runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
             self.store.append_message(session_id, "status", "system", {"event": "cancel_requested"})
         return self.get_session(session_id)
