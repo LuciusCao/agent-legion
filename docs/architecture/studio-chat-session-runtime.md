@@ -94,13 +94,20 @@ live/status/error_detail 守卫，starting、closed 或 successor 拥有行时�
 不再写入。以上是同代去重：它解决本进程内 fatal 重试与 ABA，不承担重启后的恢复。
 
 后端非正常重启后，`restart_settlement.py` 独立按持久证据恢复，不依赖 runtime
-内存。startup 对 live/error row 分页重放完整消息序列，重建 direct/queued 的
-queued→delivered→dropped/unknown/completed 状态：无 resolved 的 permission 补
+内存。startup 用专用 `list_studio_chat_messages_forward` 以 `seq>cursor ORDER BY seq ASC LIMIT 500`
+真正前向分页，500/501/1000/1001 边界都覆盖早期 pending/direct/queued/delivered；
+共享 `list_studio_chat_messages_page` 继续保留 UI/API 的最新 limit 页语义，不能互相替代。
+随后重建 direct/queued 的 queued→delivered→dropped/unknown/completed 状态：无 resolved 的 permission 补
 `deny(via=backend_restart)`，未 delivered queued 补 `queued_dropped`，delivered
 但没有完成证据的输入补 `outcome=unknown`。turn_end/turn_timeout 与带
 `message_id+outcome=failed` 的普通 turn error 证明完成；fatal、旧格式或模糊
 错误不能证明完成，宁可标 unknown 也不授权重放。已 unknown/dropped 的消息永不
-进入 fallback transcript，正常已完成历史仍照常注入。
+进入 fallback transcript，正常已完成历史仍照常注入。终态优先级为 completed >
+delivered > dropped：legacy `queued_delivered→queued_dropped` 若没有完成证据，仍按
+unknown 补齐一次，不能被后 dropped 覆盖；transcript 则无条件排除 dropped/unknown，
+即使同 id 也有 delivered 行。startup 候选 SQL 与最终 live→error CAS 同时要求
+`deleted_at IS NULL` 和 `archived_at IS NULL`，因此已隐藏 row 以及读取后才隐藏
+的竞态都不会被改写，消息 append 的既有守卫不替代这条 row CAS。
 
 每次 reaper 都重读持久终态，只补缺项；permission/drop/unknown/status 任一阶段
 在提交后报错，下一次启动仍按 request/message id 跳过已落库行，不重复追加。

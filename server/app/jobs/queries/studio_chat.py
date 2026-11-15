@@ -108,8 +108,7 @@ class StudioChatQueriesMixin(
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_SESSION_COLUMNS} from studio_chat_sessions"
-                " where status in ('starting','idle','running','awaiting_permission','error')"
-                " order by id"
+                " where status in ('starting','idle','running','awaiting_permission','error') and deleted_at is null and archived_at is null order by id"
             ).fetchall()
         return [_session_record(row) for row in rows]
 
@@ -169,6 +168,7 @@ class StudioChatQueriesMixin(
         status_in: tuple[str, ...] | None = None,
         status_not_in: tuple[str, ...] | None = None,
         error_detail_is: str | None = None,
+        visible_only: bool = False,
         **fields: Any,
     ) -> bool:
         """Guarded update: apply only while the current status matches (#158).
@@ -178,6 +178,8 @@ class StudioChatQueriesMixin(
         and this write cannot be overwritten back to a live state.
         ``error_detail_is`` additionally pins the current ``error_detail``
         (e.g. undoing only one's own error stamp, not a later real failure).
+        ``visible_only`` also requires deleted_at/archived_at to be null inside
+        the same UPDATE, closing read-then-hide races for startup reconciliation.
         Returns True when a row was actually updated.
         """
         updates = _build_session_updates(fields)
@@ -197,6 +199,7 @@ class StudioChatQueriesMixin(
         if error_detail_is is not None:
             clauses.append("error_detail=%s")
             params.append(error_detail_is)
+        clauses.extend(("deleted_at is null and archived_at is null",) if visible_only else ())
         with self.connect() as conn:
             row = conn.execute(
                 f"update studio_chat_sessions set {assignments},"

@@ -13,7 +13,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Fixed
 
-- Studio ACP direct child 或接收流意外结束时，运行时立即封闭本代准入并进入可恢复的 error，不再把连接 EOF 当普通 turn 错误回 idle 或让 between-turn 死亡长期停留 idle；挂起权限与未开始队列按既有 id 幂等结算，direct accept 或 `queued_delivered` 后未结束的输入均明确标记结果未知且禁止恢复时自动重放，startup reconcile 也会按持久证据补齐重启前终态且重复执行不重复追加，显式 close/resume/shutdown、普通 `RequestError`、direct ACP child 与已登记 terminal 的既有清理边界不变（Refs #1153）。
+- Studio ACP direct child 或接收流意外结束时，运行时立即封闭本代准入并进入可恢复的 error，不再把连接 EOF 当普通 turn 错误回 idle 或让 between-turn 死亡长期停留 idle；挂起权限与未开始队列按既有 id 幂等结算，direct accept 或 `queued_delivered` 后未结束的输入均明确标记结果未知且禁止恢复时自动重放，startup reconcile 也会按持久证据补齐重启前终态且重复执行不重复追加，完整 seq 前向分页覆盖长会话早期消息，legacy delivered+dropped 按结果未知处理且 transcript 排除 dropped/unknown，软删除/归档 row 由候选与 CAS 双重可见性守卫跳过；显式 close/resume/shutdown、普通 `RequestError`、direct ACP child 与已登记 terminal 的既有清理边界不变（Refs #1153）。
 - Studio Agent 保存草稿并发起发布请求后，前端会及时重取并水合服务端草稿，Agent 确认发布不再被本地缺失的 compare 摘要误禁；确认仍由后端 draft_hash、发布校验与冲突门禁兜底，手动发布和未保存本地编辑保护不变（issue #1198）。
 - Studio 后台 agent 长任务时间线去噪（Refs #1152）：running agent 不再仅因 120 秒无输出产生 quiet 及后续重复 running 状态消息；Bash 的 quiet 预警保持不变，agent 创建、等待审批、心跳过期、状态不可读与 completed/failed/killed/lost/timed_out 终态回执照常记录，持久化成功后才 recorded 的去重/重试语义不变。
 - 悬挂产物 dry-run 的流式 hash 资源上限（issue #1507）：新增单对象累计 stored bytes、raw/gzip 解压后 content bytes 与协作式 deadline 限制及 CLI 配置，持续长流和 gzip 膨胀不再无限消耗 CPU/网络；任何超限均丢弃部分摘要、归类 `unknown` 并使健康门失败，apply 复用同一上限且不得覆盖计划值。

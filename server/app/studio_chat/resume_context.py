@@ -53,11 +53,17 @@ def build_resume_transcript(messages: list[dict[str, Any]]) -> str:
         and (message.get("content") or {}).get("event") == "error"
         and (message.get("content") or {}).get("outcome") == "unknown"
     }
+    dropped = {
+        (message.get("content") or {}).get("message_id")
+        for message in messages
+        if message.get("kind") == "status"
+        and (message.get("content") or {}).get("event") == "queued_dropped"
+    }
     entries: list[str] = []
     for message in messages:
         if message.get("kind") != "text" or message.get("role") not in ("user", "agent"):
             continue
-        if message.get("id") in unknown:
+        if message.get("id") in unknown or message.get("id") in dropped:
             continue
         if (message.get("content") or {}).get("queued") and message.get("id") not in delivered:
             continue

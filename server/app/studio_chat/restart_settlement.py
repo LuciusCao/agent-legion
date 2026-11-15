@@ -24,11 +24,9 @@ def _timeline(service: StudioChatService, session_id: str) -> list[dict[str, Any
     messages: list[dict[str, Any]] = []
     cursor = 0
     while True:
-        page, has_more = service.db.list_studio_chat_messages_page(
-            session_id, after_seq=cursor, limit=500
-        )
+        page = service.db.list_studio_chat_messages_forward(session_id, after_seq=cursor, limit=500)
         messages.extend(page)
-        if not has_more or not page:
+        if len(page) < 500:
             return messages
         cursor = int(page[-1]["seq"])
 
@@ -61,9 +59,12 @@ def _reconstruct(messages: list[dict[str, Any]]) -> tuple[dict[str, str], set[st
             states[message_id] = "delivered"
             active = message_id
         elif event == "queued_dropped" and message_id:
-            states[message_id] = "dropped"
-            if active == message_id:
-                active = None
+            # Legacy claim-then-error rows may contain both proofs. Delivered
+            # evidence dominates dropped unless a real turn terminal exists.
+            if states.get(message_id) not in ("delivered", "unknown", "completed"):
+                states[message_id] = "dropped"
+                if active == message_id:
+                    active = None
         elif event == "error" and content.get("outcome") == "unknown" and message_id:
             states[message_id] = "unknown"
             if active == message_id:
@@ -167,6 +168,7 @@ def reconcile_zombie_sessions(service: StudioChatService) -> None:
                 status_in=("starting", "idle", "running", "awaiting_permission"),
                 status="error",
                 error_detail=RESTART_ERROR_DETAIL,
+                visible_only=True,
             ):
                 reaped += 1
             service.store.publish_session(session_id)
