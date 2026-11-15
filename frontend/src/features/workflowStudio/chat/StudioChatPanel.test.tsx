@@ -234,6 +234,45 @@ describe('StudioChatPanel', () => {
     )
   })
 
+  it('answers only after the session reaches awaiting_permission', async () => {
+    mockApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'permission', 'agent', {
+        request_id: 'r1',
+        status: 'pending',
+        tool_call: { title: 'Bash' },
+        options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
+      }),
+    ])
+    mockApi.answerStudioChatPermission.mockResolvedValue(undefined)
+    renderPanel()
+
+    const allow = await screen.findByRole('button', { name: '允许一次' })
+    expect(allow).toBeDisabled()
+    await act(async () => {
+      fireEvent.click(allow)
+    })
+    expect(mockApi.answerStudioChatPermission).not.toHaveBeenCalled()
+
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    act(() => {
+      EventSourceMock.instances[0].emitMessage({
+        type: 'session',
+        session: sessionRecord({ status: 'awaiting_permission' }),
+      })
+    })
+    await waitFor(() => expect(allow).toBeEnabled())
+    await act(async () => {
+      fireEvent.click(allow)
+    })
+    expect(mockApi.answerStudioChatPermission).toHaveBeenCalledWith(
+      'ws1',
+      's1',
+      'r1',
+      { deny: false, option_id: 'o1' }
+    )
+  })
+
   it('answers a permission request inline', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'awaiting_permission' }),
@@ -250,6 +289,8 @@ describe('StudioChatPanel', () => {
     renderPanel()
 
     const allow = await screen.findByRole('button', { name: '允许一次' })
+    // 权限消息可能先于会话快照渲染；出现按钮不等于已经可回答。
+    await waitFor(() => expect(allow).toBeEnabled())
     await act(async () => {
       fireEvent.click(allow)
     })
