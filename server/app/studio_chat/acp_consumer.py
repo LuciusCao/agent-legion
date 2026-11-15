@@ -19,6 +19,7 @@ from server.app.studio_chat.process_exit import (
     report_connection_loss,
     watch_connection,
 )
+from server.app.studio_chat.prompt_start import prompt_admission_open
 from server.app.studio_chat.prompt_turn import PromptWedgedError
 from server.app.studio_chat.terminals import AcpTerminalStore
 from server.app.studio_chat.turn_watchdog import note_prompt_response
@@ -134,6 +135,8 @@ async def prompt_loop(
         item = await next_item(handle, death)
         if item is _CLOSE:
             return
+        if not prompt_admission_open(handle):
+            continue
         try:
             text, before_start = item if isinstance(item, tuple) else (str(item), None)
             result = await prompt_runner(
@@ -142,6 +145,7 @@ async def prompt_loop(
                 text,
                 on_timeout=handle.callbacks.on_turn_timeout,
                 death_task=death,
+                start_gate=handle._prompt_start_gate,
                 timeout_ladder=(handle.prompt_timeout_seconds, handle.cancel_grace_seconds),
                 **({"before_start": before_start} if before_start is not None else {}),
             )

@@ -17,6 +17,7 @@ from server.app.studio_chat.acp_session import _CLOSE
 from server.app.studio_chat.background_wakeup import wake_session
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.compaction import note_turn_closed
+from server.app.studio_chat.process_exit import AcpConnectionLost
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.timing import StudioTimingConfig
 from server.app.studio_chat.token_keepalive import keepalive_run_token
@@ -396,6 +397,108 @@ def test_candidate_during_accept_cannot_enter_prompt_queue(admission) -> None:
     assert accepted == [True]
     assert runtime.handle._queue.empty()
     runtime.handle._watchdog_candidate = None
+
+
+@pytest.mark.parametrize("queued", [False, True], ids=["direct", "queued-delivery"])
+def test_queue_put_fatal_interleave_never_reaches_conn_prompt(
+    admission, monkeypatch, queued
+) -> None:
+    service, _db, sid, workspace, runtime = admission
+    process = _install_fake_process(
+        service,
+        sid,
+        runtime,
+        StudioTimingConfig(
+            prompt_timeout_seconds=30, cancel_grace_seconds=0.05, close_grace_seconds=0.05
+        ),
+    )
+    service.send_message(sid, workspace, "open the watchdog turn")
+    watchdog = runtime.turn_watchdog
+    monkeypatch.setattr(watchdog, "_escalate", Mock())
+    original_put = runtime.handle._queue.put
+
+    def interleaved_put(item) -> None:
+        watchdog._deadline = 0
+        watchdog._fire(watchdog._generation, watchdog._reason, watchdog._cancel_epoch)
+        original_put(item)
+
+    monkeypatch.setattr(runtime.handle._queue, "put", interleaved_put)
+    before_start = Mock(return_value=True)
+    returned = runtime.handle.send_prompt(
+        "interleaved",
+        **({"before_start": before_start} if queued else {}),
+    )
+
+    assert process.kill_calls == 1
+    assert runtime.handle._queue.qsize() == 2
+    conn = SimpleNamespace(
+        prompt=AsyncMock(return_value=SimpleNamespace(stop_reason="end_turn")),
+        cancel=AsyncMock(),
+    )
+
+    async def consume() -> None:
+        death = asyncio.create_task(asyncio.Event().wait())
+        try:
+            original_put(_CLOSE)
+            await asyncio.wait_for(runtime.handle._prompt_loop(conn, "acp-session", death), 2)
+        except AcpConnectionLost:
+            pass
+        finally:
+            death.cancel()
+            await asyncio.gather(death, return_exceptions=True)
+
+    asyncio.run(consume())
+    actual = {
+        "returned": returned,
+        "kill_calls": process.kill_calls,
+        "prompt_calls": conn.prompt.await_count,
+    }
+    assert actual == {"returned": False, "kill_calls": 1, "prompt_calls": 0}
+    before_start.assert_not_called()
+    watchdog.cleanup_thread.join(timeout=2)
+
+
+@pytest.mark.parametrize("successor", [False, True], ids=["settle", "successor-aba"])
+def test_registry_lock_does_not_delay_candidate_or_direct_kill(
+    admission, monkeypatch, successor
+) -> None:
+    service, _db, sid, workspace, runtime = admission
+    process = _install_fake_process(
+        service,
+        sid,
+        runtime,
+        StudioTimingConfig(
+            prompt_timeout_seconds=30, cancel_grace_seconds=0.05, close_grace_seconds=0.05
+        ),
+    )
+    service.send_message(sid, workspace, "registry lock interleave")
+    watchdog = runtime.turn_watchdog
+    service.cancel(sid, workspace)
+    service._runtimes_lock.acquire()
+    replacement = None
+    try:
+        _wait(lambda: process.killed.is_set() and watchdog._claimed, timeout=2)
+        assert runtime.handle._watchdog_candidate is watchdog
+        assert watchdog.cleanup_thread.is_alive()
+        assert service.get_session(sid)["status"] == "running"
+        if successor:
+            replacement = SessionRuntime(Mock(), "successor-token")
+            replacement.handle._process = _FakeProcess()
+            service._runtimes[sid] = replacement
+    finally:
+        service._runtimes_lock.release()
+
+    watchdog.cleanup_thread.join(timeout=2)
+    assert not watchdog.cleanup_thread.is_alive()
+    if successor:
+        assert service.runtime(sid) is replacement
+        assert not replacement.closed
+        assert replacement.handle._process.kill_calls == 0
+    else:
+        _wait(
+            lambda: service.runtime(sid) is None and service.get_session(sid)["status"] == "error"
+        )
+        assert "user session/cancel" in service.get_session(sid)["error_detail"]
 
 
 def test_stale_cancel_and_process_identity_cannot_kill_next_turn(admission, monkeypatch) -> None:

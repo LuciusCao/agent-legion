@@ -188,14 +188,22 @@ fail-fast，显式 YAML 不构成第二配置通道，也不新增 UI、route �
 保持既有 FIFO，自动 wakeup 仍须由后续人工消息 rearm。
 
 宽限耗尽分成两个阶段。`turn_watchdog_core.py` 的线外 `threading.Timer` 不获取
-`runtime.lock`，也不获取 accept 侧的 handle state lock：先原子写入
-`handle._watchdog_candidate` 封闭新准入，再复核 registry 中的 runtime、turn owner、cancel
-epoch、handle 与 direct process，写 transport failure 并直接 kill 已 pin 的 process 对象。
-`send_prompt` 在 accept/DB 写入前和 accept 后 queue 前各检查一次 candidate；后台 wakeup 的
-claim/before_start 也检查 candidate/transport。accept 已在途中时，candidate 会阻止 queue，
-已接受的输入交给 M19 unknown/drop 结算，不能越过 fatal cleanup。candidate 与代次不匹配会
-撤销，不会干扰新 turn。即使 `owned_callback` 持 `runtime.lock`、accept 同时持 handle state
-lock，watchdog 仍能完成第一阶段，不依赖这两把锁。
+`runtime.lock`、accept 侧 handle state lock 或全局 `_runtimes_lock`：先原子写入
+`handle._watchdog_candidate`，再用 handle-local 的 `callbacks.runtime`、turn watchdog、turn
+owner、cancel epoch 和已 pin process 复核本机代次，写 transport failure 并直接 kill 已 pin
+的 process 对象。successor 使用新 handle/process，registry 暂不可读时也不会把 kill 导向后继；
+registry 与 M19 的 DB/session 复核全部推迟到第二阶段。candidate 与 handle-local 代次不匹配会
+撤销，不会干扰新 turn。
+
+准入有明确的线性化边界。`send_prompt` 在 accept/DB 写入前和 accept 后 queue 前检查
+candidate，并在 `queue.put` 后再次读取 fence；post-put 已安装 candidate 时返回 False，不能
+假报成功。出队时 `prompt_loop` 统一检查 fence，实际 coroutine 创建再由
+`prompt_start.PromptStartGate` claim：candidate 在 claim 前已存在则跳过，不调用
+`conn.prompt`；candidate 在极短的创建临界区到达时，cleanup 等创建结束后 kill，而不是在
+check→queue→before_start→conn.prompt 之间留下未归属窗口。无 `before_start` 的直接项目与
+queued delivery 走同一 claim，已接受输入仍由 M19 unknown/drop 结算，不自动重放。
+即使 `owned_callback` 持 `runtime.lock`、accept 持 handle state lock，或另一 session 的
+spawn/close/background release 持全局 `_runtimes_lock`，第一阶段也能完成。
 
 第二阶段由独立 cleanup thread 复用 fatal `on_error`、M19 `report_connection_loss_sync` /
 exit settlement 与 `teardown_runtime`。这些 DB/session 步骤需要 `runtime.lock`，可以等
@@ -219,9 +227,12 @@ death task 立即接管，不等看门狗；正常安静长 turn 与下一代 AB
 child 与临时目录覆盖主动 cancel 超时和队列停止、event loop 真阻塞时的 cancel/总超时应答、
 正常安静 turn、准入 fence、turn/process ABA、close 身份与 2x join、keepalive 和动态文案。
 真实 `ServiceCallbacks + owned_callback` 在持有 `runtime.lock` 的回调内等待、且 accept 侧
-handle state lock 也被持有时，分别验证 cancel/总超时仍能线外 kill，且 DB 在释放前尚未结算、释放后幂等完成；response→cancel、
-response→close→cancel、慢终态和后继 runtime 也有独立回归。真实 ACP 回归继续证明普通
-cancel 不杀健康进程、普通 `RequestError` 不转 fatal。
+handle state lock 也被持有时，分别验证 cancel/总超时仍能线外 kill，且 DB 在释放前尚未结算、
+释放后幂等完成；response→cancel、response→close→cancel、慢终态和后继 runtime 也有独立回归。
+另有 `queue.put` 内强制 fatal 后跑真实 `_prompt_loop`，验证 direct/queued delivery 均
+`returned=False` 且 `conn.prompt.await_count=0`；cancel armed 后持有全局 `_runtimes_lock`，
+验证 candidate/kill 不等待释放，释放后分别完成 M19 结算或 successor ABA 隔离。真实 ACP
+回归继续证明普通 cancel 不杀健康进程、普通 `RequestError` 不转 fatal。
 `test_studio_chat_unprompted_queue.py` 正对照自发 turn 超时只释放 held，不调用 kill。
 所有异步等待均以事件、持久终态或进程状态为信号，不以延长固定 sleep 掩盖缺陷。
 

@@ -33,7 +33,7 @@ def note_prompt_response(handle: Any) -> None:
 
 def request_user_cancel(runtime: SessionRuntime) -> bool:
     watchdog = runtime.turn_watchdog
-    if watchdog is None or watchdog.service.runtime(watchdog.session_id) is not runtime:
+    if watchdog is None or watchdog.callbacks.runtime is not runtime:
         return False
     if runtime.closed or not runtime.turn_open:
         return False

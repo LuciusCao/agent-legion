@@ -104,7 +104,6 @@ class TurnWatchdog:
         self._timer.start()
 
     def _fire(self, generation: int, reason: str, cancel_epoch: int) -> None:
-        registered = self.service.runtime(self.session_id)
         with self._timer_lock:
             if (
                 self._disarmed
@@ -117,18 +116,18 @@ class TurnWatchdog:
             if time.monotonic() < self._deadline:
                 self._schedule_locked()
                 return
-            # Atomic candidate admission precedes identity checks and does not
-            # depend on runtime.lock or the accept-side handle state lock.
+            # The candidate and process proof are handle-local: registry/DB locks
+            # are only needed after the direct child has been stopped.
             self.handle._watchdog_candidate = self
             if (
-                self.runtime.turn_watchdog is not self
+                self.callbacks.runtime is not self.runtime
+                or self.runtime.turn_watchdog is not self
                 or self.runtime.closed
                 or self.handle._closed
                 or self.handle._process is not self.process
                 or not self.runtime.turn_open
                 or self.runtime.turn_owner is not self.owner
                 or self.runtime.handle is not self.handle
-                or registered is not self.runtime
                 or (reason == "cancel" and cancel_epoch != self._cancel_epoch)
             ):
                 if self.handle._watchdog_candidate is self:
@@ -147,26 +146,35 @@ class TurnWatchdog:
                 self.handle._transport_failure = detail
                 self.handle._stop_requested = True
             self._claimed = True
-            if self.process.returncode is None:
-                # The watchdog pins the direct-child object, so a later resume
-                # cannot redirect this signal to a successor. No waitpid or
-                # process-group action is involved; expected death races match
-                # AcpSessionHandle._kill_process and are intentionally suppressed.
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    self.process.kill()
+            if not self.handle._prompt_start_gate.starting:
+                self._kill_pinned_process()
         self._start_cleanup(reason, detail, fatal)
 
+    def _kill_pinned_process(self) -> None:
+        if self.handle._process is not self.process or self.process.returncode is not None:
+            return
+        # Only the pinned direct-child object is signalled. Expected death races
+        # match AcpSessionHandle._kill_process; no waitpid/process group is used.
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            self.process.kill()
+
     def _start_cleanup(self, reason: str, detail: str, fatal: bool) -> None:
-        # DB/session settlement may wait for runtime.lock, but only after the
-        # direct child is dead and new ACP admission is fenced. Never block the
-        # timer thread on that lock; M19 on_exit remains an idempotent peer.
         self.cleanup_thread = threading.Thread(
-            target=self._escalate,
+            target=self._cleanup_after_start,
             args=(reason, detail, fatal),
             name="studio-turn-cleanup",
             daemon=True,
         )
         self.cleanup_thread.start()
+
+    def _cleanup_after_start(self, reason: str, detail: str, fatal: bool) -> None:
+        if self.handle._prompt_start_gate.starting:
+            self.handle._prompt_start_gate.done.wait()
+        self._kill_pinned_process()
+        if self.service.runtime(self.session_id) is not self.runtime:
+            self.service.teardown_runtime(self.session_id, self.runtime, expected=self.runtime)
+            return
+        self._escalate(reason, detail, fatal)
 
     def _escalate(self, reason: str, detail: str, fatal: bool) -> None:
         try:

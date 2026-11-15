@@ -37,10 +37,10 @@ def wake_session(
     """Accept one followup, with a second guard at the actual ACP prompt boundary."""
     with runtime.lock:
         if (
-            service.runtime(session_id) is not runtime
-            or runtime.closed
-            or transport_failed(runtime.handle)
+            transport_failed(runtime.handle)
             or cancel_requested(runtime)
+            or service.runtime(session_id) is not runtime
+            or runtime.closed
             or not runtime.background_wakeup_enabled
             or runtime.compacting
             or runtime.turn_open
@@ -93,11 +93,11 @@ def wake_session(
             with runtime.lock:
                 try:
                     valid = (
-                        service.runtime(session_id) is runtime
+                        not transport_failed(runtime.handle)
+                        and not cancel_requested(runtime)
+                        and service.runtime(session_id) is runtime
                         and runtime.turn_owner is owner
                         and not runtime.closed
-                        and not transport_failed(runtime.handle)
-                        and not cancel_requested(runtime)
                         and runtime.background_wakeup_enabled
                         and runtime.background_epoch == epoch
                         and not runtime.compacting

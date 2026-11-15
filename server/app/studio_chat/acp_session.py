@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from acp import spawn_agent_process
 from acp.schema import HttpMcpServer
 
+from server.app.studio_chat import prompt_start as start
 from server.app.studio_chat import prompt_turn
 from server.app.studio_chat.acp_consumer import (
     _CLOSE,
@@ -134,6 +135,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         # restored the prior ACP session (False on the session/new fallback).
         self.loaded_existing = False
         self._queue: queue.Queue[Any] = queue.Queue()
+        self._prompt_start_gate = start.PromptStartGate(lambda: start.prompt_admission_open(self))
         self._thread: threading.Thread | None = None
         self._closed = False
         # request_stop() only asks for a graceful post-turn exit; unlike
@@ -182,9 +184,6 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             self._stop_requested = True
             return True
 
-    def _watchdog_fenced(self) -> bool:
-        return self._watchdog_candidate is not None
-
     def send_prompt(
         self,
         text: str,
@@ -199,16 +198,18 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         the unbounded queue is the final non-blocking handoff.
         """
         with self._state_lock:
-            if self._closed or self._stop_requested or self._watchdog_fenced():
+            if self._closed or self._stop_requested or start.watchdog_fenced(self):
                 return False
             if accept is not None:
                 accept()
             # A candidate armed during accept must settle the accepted input
             # through M19 instead of letting it overtake fatal cleanup.
-            if self._watchdog_fenced():
+            if start.watchdog_fenced(self):
                 return False
             self._queue.put((text, before_start) if before_start is not None else text)
-            return True
+            # queue.put itself is an interleaving point: admission succeeds only
+            # if the fatal fence is still absent after the handoff.
+            return start.prompt_admission_open(self)
 
     def cancel(self) -> None:
         """Send session/cancel even while a prompt turn is in flight."""

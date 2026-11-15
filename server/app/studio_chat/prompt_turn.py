@@ -17,10 +17,9 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from acp.schema import TextContentBlock
-
 from server.app.studio_chat.process_exit import AcpConnectionLost
 from server.app.studio_chat.prompt_outcome import PromptTurnResult, PromptWedgedError, _orphan
+from server.app.studio_chat.prompt_start import PromptStartGate, acp_prompt, run_prompt_start
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +40,7 @@ async def run_prompt_turn(
     before_start: Callable[[], bool] | None = None,
     death_task: asyncio.Task[str | None] | None = None,
     timeout_ladder: tuple[float, float] | None = None,
+    start_gate: PromptStartGate | None = None,
 ) -> PromptTurnResult:
     """One prompt turn, with connection death ahead of result and timeout."""
     total, grace = timeout_ladder or (PROMPT_TIMEOUT_SECONDS, CANCEL_GRACE_SECONDS)
@@ -51,7 +51,7 @@ async def run_prompt_turn(
         # thread, never on the ACP event loop.
         if before_start is not None and not await asyncio.to_thread(before_start):
             return None
-        return await conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
+        return await run_prompt_start(start_gate, acp_prompt(conn, acp_session_id, text))
 
     def death_result(timed_out: bool = False) -> PromptTurnResult:
         assert death_task is not None
