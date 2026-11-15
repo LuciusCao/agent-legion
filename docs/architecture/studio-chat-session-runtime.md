@@ -160,9 +160,52 @@ create/resume 活跃配额，不写隐藏 permission/queued/unknown 或 error �
 但不互相冒充：前者依赖 runtime/owner，后者只依赖持久 seq 与 id；无需新增 DDL。
 
 清理对象仅限本 handle 拉起的 direct ACP child 与该 child 经 ACP 登记的 terminal；
-不按 process group 清理 Kimi 内部的非 direct-child 后台任务。event-loop wedged 的
-线外看门狗、可配置 prompt/cancel/unprompted/close timeout 属于后续 A2，本片不以
-asyncio timer 或固定 sleep 伪造这些能力。
+不按 process group 清理 Kimi 内部的非 direct-child 后台任务。
+
+## 有界 turn 与线外看门狗（#1153 A2）
+
+`StudioTimingConfig` 是 frozen 的 per-handle 时序快照，在 `Settings → StudioChatService →
+spawn_session_runtime → AcpSessionHandle` 创建链上注入；已有 handle 不因之后修改 env 或
+重新加载 settings 而改变。仅提供 env-only 键，非法、非有限或非正数在 settings load 时
+fail-fast，显式 YAML 不构成第二配置通道，也不新增 UI、route 或 instance-settings schema：
+
+| env | 默认值 | 语义 |
+|---|---:|---|
+| `AGENT_LEGION_STUDIO_CHAT_PROMPT_TIMEOUT_SECONDS` | 3600 | 一次 ACP prompt 的明确总时长，不是无活动超时 |
+| `AGENT_LEGION_STUDIO_CHAT_CANCEL_GRACE_SECONDS` | 30 | 总超时或用户主动 cancel 后等待 turn 结束的宽限 |
+| `AGENT_LEGION_STUDIO_CHAT_UNPROMPTED_IDLE_TIMEOUT_SECONDS` | 900 | 自发 turn gate 的无进展释放时长，仅 drop held，不杀引擎 |
+| `AGENT_LEGION_STUDIO_CHAT_CLOSE_GRACE_SECONDS` | 5 | close 第一段 join 宽限；kill 后第二段 join 仍为其 2 倍 |
+
+直接 handle/prompt 测试仍可用参数或现有模块常量注入小值。startup 60 秒与权限 120 秒
+不在本配置面内。正常长 turn 只受明确总时长约束，安静但未到期不会触发 fatal。
+`turn_timeout` 文案按本 handle 的总时长格式化；tool_call keepalive 的续期阈值同样使用
+本 handle 的总时长加既有 300 秒余量，不再绑定模块常量。
+
+用户主动 cancel 在请求时绑定当前 runtime、turn owner、direct process 和 cancel epoch，
+启动独立 grace，并沿用 `cancel_wakeup` 停止自动 wakeup。取消未完成前后续队列不能越过
+当前 turn；正常取消完成后已接受人工输入保持既有 FIFO，自动 wakeup 仍须由后续人工消息
+rearm。宽限耗尽不是只写终态：`turn_watchdog.py` 的线外 `threading.Timer` 先在同一
+runtime 临界区复核身份并写入 transport/admission fence，再复用 fatal `on_error`、M19
+`report_connection_loss_sync` / exit settlement 与 `teardown_runtime`。总超时的线外期限是
+总时长加 cancel grace，但 prompt 已返回即撤销该 backstop，慢终态持久化不视为 wedged；
+主动 cancel 则直到 turn close 才解除。process/stream death 仍由 M19 death task 立即接管，不等看门狗。
+
+看门狗只在 active cancel 或上述总超时条件仍成立时 claim 一次。触发时重新核对 registry
+中的 runtime、turn owner、cancel epoch、handle 与 direct process，旧 turn、旧 runtime 或
+替换后的 process 都不会被清理。fatal projection、death task、`on_exit`、`on_connection_lost`
+和显式 close 共享幂等终态；close join/kill 也复核本 handle 的 thread/process 身份。清理只
+对 direct child 发既有 `process.kill()`，不消费 waitpid，不扩大到 descendant，普通
+`RequestError` 仍走 per-turn containment。
+
+### Quality Impact（有界 turn）
+
+`tests/configuration/test_studio_timing.py` 覆盖默认值、合法 env、不可变快照、YAML 拒绝及
+非法/非有限/非正数矩阵。`tests/services/test_studio_chat_turn_watchdog.py` 以隔离库、fake
+child 与临时目录覆盖主动 cancel 超时和队列停止、event loop 真阻塞时的 cancel/总超时应答、
+正常安静 turn、准入 fence、turn/process ABA、close 身份与 2x join、keepalive 和动态文案；
+真实 ACP 回归继续证明普通 cancel 不杀健康进程、普通 `RequestError` 不转 fatal。
+`test_studio_chat_unprompted_queue.py` 正对照自发 turn 超时只释放 held，不调用 kill。
+所有异步等待均以事件、持久终态或进程状态为信号，不以延长固定 sleep 掩盖缺陷。
 
 ## Kimi 后台任务活动与完成接续（#772/#806）
 

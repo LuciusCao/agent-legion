@@ -14,6 +14,7 @@ import threading
 from server.app.auth.scoped_tokens import revoke_scoped_token
 from server.app.jobs import JobQueries
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.turn_watchdog import disarm_turn_watchdog
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ def teardown_runtime(
                 runtimes.pop(session_id)
         runtime.closed = True
         runtime.background_stop.set()
+        disarm_turn_watchdog(runtime)
         # A pending compaction self-clear must not fire into a torn-down
         # runtime (its generation check would no-op anyway; cancel to be
         # exact, #694 review P1).

@@ -10,6 +10,7 @@ from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.studio_chat import compaction
 from server.app.studio_chat.payloads import serialize_message
+from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
 
@@ -77,7 +78,7 @@ def _deliver(
         try:
             if compaction.send_blocked(service.db, session_id, runtime, text):
                 detail = DROPPED_COMPACTING
-            elif not _token_alive(service, runtime.token):
+            elif not _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
             elif (detail := _claim(service, session_id, runtime, message_id)) is None:
@@ -115,7 +116,7 @@ def _claim(
             session_id, hash_token(runtime.token), notice
         )
     except StudioChatAdmissionRejected:
-        alive = _token_alive(service, runtime.token)
+        alive = _token_alive(service, runtime.token, prompt_timeout_for(runtime))
         if not alive:
             invalidate_run_token(service, session_id, runtime)
         return DROPPED_BUSY if alive else DROPPED_TOKEN

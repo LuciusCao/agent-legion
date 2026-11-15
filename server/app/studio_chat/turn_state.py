@@ -3,6 +3,7 @@
 import time
 
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.turn_watchdog import arm_turn_watchdog
 
 
 def open_turn(
@@ -41,6 +42,7 @@ def open_turn(
         runtime.inbound_messages[message_id] = "delivered"
     # #882: any new turn supersedes a pending empty-turn replay.
     runtime.empty_turn_retry = None
+    arm_turn_watchdog(runtime)
 
 
 def turn_completion_evidence(runtime: SessionRuntime | None) -> dict[str, str]:

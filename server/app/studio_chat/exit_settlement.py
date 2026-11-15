@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from server.app.studio_chat.background_wakeup import cancel_wakeup
+from server.app.studio_chat.turn_watchdog import disarm_turn_watchdog
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
@@ -71,6 +72,7 @@ def _capture(runtime: SessionRuntime) -> None:
     runtime.background_stop.set()
     cancel_wakeup(runtime)
     runtime.turn_open = False
+    disarm_turn_watchdog(runtime)
     runtime.empty_turn_retry = None
     for pending in runtime.pending_permissions.values():
         if not pending.event.is_set():

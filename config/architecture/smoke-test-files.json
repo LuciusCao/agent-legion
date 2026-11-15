@@ -1,6 +1,7 @@
 {
   "version": 1,
   "files": [
+    "tests/configuration/test_studio_timing.py",
     "tests/db/test_retry.py",
     "tests/executors/leases/test_claim_basics.py",
     "tests/executors/test_shard_contract.py",
@@ -8,6 +9,7 @@
     "tests/routes/test_auth_routes.py",
     "tests/services/test_studio_chat_process_exit.py",
     "tests/services/test_studio_chat_restart_settlement.py",
+    "tests/services/test_studio_chat_turn_watchdog.py",
     "tests/services/test_vault.py",
     "tests/workflows/test_sharding.py"
   ]

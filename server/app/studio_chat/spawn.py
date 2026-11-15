@@ -82,6 +82,7 @@ def spawn_session_runtime(
             env=None,
             callbacks=callbacks,
             resume_acp_session_id=resume_acp_session_id,
+            timing=settings.studio_timing,
             terminal_grant_required=lambda: terminal_grant_required(db),
         )
         runtime = SessionRuntime(handle, token)

@@ -46,6 +46,7 @@ from server.app.studio_chat.session_delete import delete_session
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
+from server.app.studio_chat.turn_watchdog import request_user_cancel
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
@@ -245,9 +246,12 @@ class StudioChatService:
         session = self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None:
-            cancel_wakeup(runtime)
-            settle_pending_permissions(runtime)
-            runtime.handle.cancel()
+            with runtime.lock:
+                if self.runtime(session_id) is runtime and not runtime.closed:
+                    cancel_wakeup(runtime)
+                    settle_pending_permissions(runtime)
+                    request_user_cancel(runtime)
+                    runtime.handle.cancel()
         if session["status"] in ("running", "awaiting_permission"):
             self.store.append_message(session_id, "status", "system", {"event": "cancel_requested"})
         return self.get_session(session_id)

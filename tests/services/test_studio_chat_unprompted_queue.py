@@ -20,6 +20,7 @@ from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import inbound_queue, unprompted_queue
 from server.app.studio_chat.background_wakeup import wake_session
 from server.app.studio_chat.empty_turn_retry import retry_empty_turn
+from server.app.studio_chat.timing import StudioTimingConfig
 from server.app.studio_chat.unprompted_queue import GatedUnpromptedWatcher
 from tests.helpers import studio_chat_fixtures
 
@@ -241,6 +242,24 @@ def test_stalled_turn_times_out_even_when_steps_keep_failing(gated, monkeypatch)
     assert _events(db, sid, "queued_dropped")[0]["message_id"] == held["id"]
     # The expired turn stays out of the gate until the projector forgets it.
     assert watcher.expired == {"3"}
+
+
+def test_configured_unprompted_timeout_drops_held_without_killing_engine(
+    gated, monkeypatch
+) -> None:
+    service, db, sid, workspace, runtime, watcher, write, _path = gated
+    write(PROMPT)
+    watcher.step()
+    held = service.send_message(sid, workspace, "held only")
+    kills = []
+    monkeypatch.setattr(runtime.handle, "_kill_process", lambda *args, **kwargs: kills.append(args))
+    runtime.handle.timing = StudioTimingConfig(unprompted_idle_timeout_seconds=1e-9)
+
+    watcher.step()
+
+    assert watcher.open == frozenset() and watcher.held == []
+    assert _events(db, sid, "queued_dropped")[0]["message_id"] == held["id"]
+    assert kills == []
 
 
 def test_empty_turn_replay_is_refused_while_held(gated) -> None:

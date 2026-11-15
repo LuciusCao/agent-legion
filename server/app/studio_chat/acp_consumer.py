@@ -21,6 +21,7 @@ from server.app.studio_chat.process_exit import (
 )
 from server.app.studio_chat.prompt_turn import PromptWedgedError
 from server.app.studio_chat.terminals import AcpTerminalStore
+from server.app.studio_chat.turn_watchdog import note_prompt_response
 
 if TYPE_CHECKING:
     from server.app.studio_chat.acp_session import AcpSessionHandle
@@ -141,8 +142,10 @@ async def prompt_loop(
                 text,
                 on_timeout=handle.callbacks.on_turn_timeout,
                 death_task=death,
+                timeout_ladder=(handle.prompt_timeout_seconds, handle.cancel_grace_seconds),
                 **({"before_start": before_start} if before_start is not None else {}),
             )
+            note_prompt_response(handle)
             if result.response is None:
                 continue
             if (failure := handle.transport_failure()) is not None:
@@ -163,6 +166,7 @@ async def prompt_loop(
             # #204 broad-except audit: only ordinary turn failures (in
             # particular agent RequestError) are contained here. Transport
             # families and the two fatal signals above never return idle.
+            note_prompt_response(handle)
             handle.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
             logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
 

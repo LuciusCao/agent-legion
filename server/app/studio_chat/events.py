@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from server.app.studio_chat import compaction, empty_turn, prompt_turn
+from server.app.studio_chat import compaction, empty_turn, prompt_turn, timing
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emit_mcp_hint
 from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
@@ -148,9 +148,9 @@ class AcpEventHandlers:
         if timed_out:
             # #693: the turn was ended by the prompt-timeout ladder, not by
             # the agent finishing — record it as its own visible event so the
-            # UI can say "terminated on timeout" instead of "done". Read the
-            # ladder constant through the module so tests can shrink it.
-            detail = f"运行超过 {int(prompt_turn.PROMPT_TIMEOUT_SECONDS // 3600)} 小时已被终止"
+            # UI can say "terminated on timeout" instead of "done". Use the
+            # current handle's frozen duration, with the legacy constant for direct tests.
+            detail = timing.turn_timeout_detail(runtime, prompt_turn.PROMPT_TIMEOUT_SECONDS)
             content = {"event": "turn_timeout", "stop_reason": stop_reason, "detail": detail}
         else:
             content = {"event": "turn_end", "stop_reason": stop_reason}

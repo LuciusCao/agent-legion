@@ -173,7 +173,11 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
             # releasing held messages) waits until every projected row —
             # the turn's end included — is persisted.
             self.open = observed if not self.pending else self.open | observed
-            stalled = time.monotonic() - self.activity >= IDLE_TIMEOUT_SECONDS
+            timing = getattr(self.runtime.handle, "timing", None)
+            idle_timeout = (
+                timing.unprompted_idle_timeout_seconds if timing else IDLE_TIMEOUT_SECONDS
+            )
+            stalled = time.monotonic() - self.activity >= idle_timeout
             if self.open and (broken or stalled):
                 self.expired |= self.open
                 self.open = frozenset()

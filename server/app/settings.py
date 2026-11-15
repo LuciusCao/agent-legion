@@ -17,6 +17,7 @@ from server.app.configuration.executor_runtime import (
 from server.app.configuration.instance_defaults import apply_instance_config_defaults
 from server.app.configuration.retired_config import reject_retired_config
 from server.app.skills.paths import default_skills_runs_dir
+from server.app.studio_chat.timing import StudioTimingConfig, reject_yaml_studio_timing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -38,6 +39,7 @@ class Settings:
     # domain) — per-process temp dirs pin it via AGENT_LEGION_SKILLS_RUNS_DIR.
     skills_runs_dir: Path = field(default_factory=default_skills_runs_dir)
     cors: CorsSettings = field(default_factory=CorsSettings)
+    studio_timing: StudioTimingConfig = field(default_factory=StudioTimingConfig)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -60,6 +62,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     config = loaded.config
     reject_retired_config(config)
     apply_database_url_env(config)
+    reject_yaml_studio_timing(config, os.environ)
     apply_env_overrides(config)
     apply_instance_config_defaults(config)
     if data_dir is None:
@@ -92,6 +95,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         config=config,
         skills_runs_dir=Path(skills_override) if skills_override else default_skills_runs_dir(),
         cors=load_cors_settings(config),
+        studio_timing=StudioTimingConfig.from_config(config),
         executor_runtime=executor_runtime,
     )
 

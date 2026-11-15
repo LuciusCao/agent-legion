@@ -5,8 +5,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.turn_watchdog import disarm_turn_watchdog
 from server.app.studio_chat.unprompted_queue import DEQUEUE_STEP_TIMEOUT_SECONDS, holding, refresh
 
 if TYPE_CHECKING:
@@ -42,7 +44,7 @@ def wake_session(
             or holding(runtime)
         ):
             return False
-        if not _token_alive(service, runtime.token):
+        if not _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
             invalidate_run_token(service, session_id, runtime)
             return False
         if not service.db.claim_studio_chat_turn(session_id):
@@ -56,6 +58,7 @@ def wake_session(
                 with service._runtimes_lock:
                     if service._runtimes.get(session_id) is runtime and runtime.turn_owner is owner:
                         runtime.turn_open = False
+                        disarm_turn_watchdog(runtime, owner)
                         if (
                             not error
                             and runtime.background_epoch == epoch
@@ -96,7 +99,7 @@ def wake_session(
                         # re-arms the task ids and the cursor retries later.
                         release()
                         return False
-                    if valid and _token_alive(service, runtime.token):
+                    if valid and _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
                         return True
                     release()
                     if valid:
@@ -119,6 +122,7 @@ def wake_session(
             )
             if service.runtime(session_id) is not runtime:
                 runtime.turn_open = False
+                disarm_turn_watchdog(runtime, owner)
                 return False
             if not runtime.handle.send_prompt(prompt, before_start=before_start):
                 release(error=True)

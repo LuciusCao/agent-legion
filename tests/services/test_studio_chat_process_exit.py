@@ -13,12 +13,12 @@ from unittest.mock import Mock
 import pytest
 
 from server.app.auth.sessions import hash_token
-from server.app.studio_chat import prompt_turn
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.background_wakeup import wake_session
 from server.app.studio_chat.exit_settlement import PROCESS_EXIT_DETAIL
 from server.app.studio_chat.process_exit import AcpConnectionLost
 from server.app.studio_chat.runtime import PendingPermission, SessionRuntime
+from server.app.studio_chat.timing import StudioTimingConfig
 from server.app.studio_chat.turn_state import open_turn
 from tests.helpers import pid_is_running, wait_for_predicate
 from tests.helpers import studio_chat_fixtures as fixtures
@@ -283,13 +283,12 @@ def test_delivered_queue_death_is_unknown_and_never_auto_replayed(chat) -> None:
     assert "unknown payload" not in last_prompt
 
 
-def test_direct_wedged_fatal_is_unknown_and_fallback_resume_does_not_replay(
-    chat, monkeypatch
-) -> None:
+def test_direct_wedged_fatal_is_unknown_and_fallback_resume_does_not_replay(chat) -> None:
     service, _bus, register, workspace, user = chat
     script_path = register({"on_prompt": [], "wait_for_cancel": True, "ignore_cancel": True})
-    monkeypatch.setattr(prompt_turn, "PROMPT_TIMEOUT_SECONDS", 0.05)
-    monkeypatch.setattr(prompt_turn, "CANCEL_GRACE_SECONDS", 0)
+    service._settings.studio_timing = StudioTimingConfig(
+        prompt_timeout_seconds=0.05, cancel_grace_seconds=0.01
+    )
     sid = service.create_session(workspace, user, "fake-agent")["id"]
     direct = service.send_message(sid, workspace, "direct wedged payload")
     _wait(lambda: len(_prompt_texts(script_path)) == 1)

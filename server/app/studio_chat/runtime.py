@@ -8,7 +8,7 @@ scoped token) lives in teardown.py.
 from __future__ import annotations
 
 import threading
-from typing import Any
+from typing import Any, cast
 
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.streaming import TurnStreamState
@@ -137,4 +137,4 @@ class SessionRuntime:
         # #1029: the Kimi Code wire watcher (unprompted_queue.GatedUnprompted-
         # Watcher) that holds human messages while an unprompted turn runs;
         # None for non-Kimi-Code runtimes.
-        self.unprompted_gate: Any = None
+        self.unprompted_gate = self.turn_watchdog = cast(Any, None)
