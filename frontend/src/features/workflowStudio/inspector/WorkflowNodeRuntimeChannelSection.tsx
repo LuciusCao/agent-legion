@@ -490,15 +490,13 @@ export function WorkflowNodeRuntimeChannelSection(props: {
               <span>{saveHint}</span>
             </div>
             <Button
-              variant="contained"
+              className={styles.saveButton}
+              variant="outlined"
               size="small"
-              fullWidth
               disabled={saveDisabled}
               onClick={() => void studio.saveRuntimeConfig()}
             >
-              {studio.runtimeSaving
-                ? '保存中…'
-                : '保存运行配置（立即生效，不产生版本）'}
+              {studio.runtimeSaving ? '保存中…' : '保存运行配置'}
             </Button>
           </div>
         )}
