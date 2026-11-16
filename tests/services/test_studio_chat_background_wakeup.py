@@ -116,11 +116,23 @@ def test_reader_rechecks_file_replaced_between_stat_and_open(tmp_path, monkeypat
 @pytest.fixture
 def chat(tmp_path, monkeypatch):
     existing_threads = set(threading.enumerate())
-    runtime = SessionRuntime(
-        SimpleNamespace(cwd=str(tmp_path), send_prompt=Mock(return_value=True)), "token"
-    )
-    runtime.kimi_agent = True
     service = Mock()
+    handle = SimpleNamespace(
+        cwd=str(tmp_path),
+        send_prompt=Mock(return_value=True),
+        control_lock=threading.Lock(),
+        active_lease=None,
+        fatal_lease=None,
+        _closed=False,
+        _stop_requested=False,
+        _process=SimpleNamespace(returncode=0),
+        prompt_timeout_seconds=3600,
+        cancel_grace_seconds=30,
+    )
+    handle.callbacks = SimpleNamespace(_service=service, _session_id="chat-1")
+    runtime = SessionRuntime(handle, "token")
+    handle.callbacks.runtime = runtime
+    runtime.kimi_agent = True
     service.runtime.return_value = runtime
     service._runtimes_lock = threading.Lock()
     service._runtimes = {"chat-1": runtime}
@@ -132,6 +144,8 @@ def chat(tmp_path, monkeypatch):
     monkeypatch.setattr(wake, "kimi_code_task_root", lambda *_: None)  # V1 layout
     monkeypatch.setattr(wake, "POLL_SECONDS", 0.01)
     yield service, runtime
+    if runtime.handle.active_lease is not None:
+        runtime.handle.active_lease.close()
     runtime.background_stop.set()
     for thread in set(threading.enumerate()) - existing_threads:
         if thread.name == "studio-kimi-completions":
@@ -163,6 +177,7 @@ def test_completion_wakes_once_without_user_prompt_and_records_receipt(chat, tmp
         )
     )
     assert runtime.handle.send_prompt.call_count == 1
+    delivery.disarm_turn_watchdog(runtime)
     runtime.turn_open = False
     wait_for_predicate(lambda: runtime.handle.send_prompt.call_count == 2)
 

@@ -18,6 +18,7 @@ from server.app.studio_chat.token_admission import require_live_run_token
 
 if TYPE_CHECKING:
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -85,13 +86,14 @@ def send_message(
                 raise ConflictError("Chat session agent is not running")
             _publish(service, session_id, queued_row)
             return queued_row
-        message = None
+        message: dict[str, Any] | None = None
 
-        def accept() -> None:
+        def accept() -> TurnLease:
             nonlocal message
-            message = accept_direct_turn(
+            message, lease = accept_direct_turn(
                 service, session_id, runtime, text, prompt_text, commit_wakeup
             )
+            return lease
 
         try:
             queued = runtime.handle.send_prompt(prompt_text, accept=accept)

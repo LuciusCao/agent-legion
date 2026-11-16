@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -46,7 +47,7 @@ from server.app.studio_chat.session_delete import delete_session
 from server.app.studio_chat.spawn import spawn_session_runtime
 from server.app.studio_chat.store import StudioChatStore
 from server.app.studio_chat.teardown import teardown_runtime
-from server.app.studio_chat.turn_watchdog import request_user_cancel
+from server.app.studio_chat.turn_watchdog import cancel_handle
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import AcpEventHandlers
@@ -243,13 +244,12 @@ class StudioChatService:
         return get_message(self, session_id, workspace_id, message_id)
 
     def cancel(self, session_id: str, workspace_id: str) -> dict[str, Any]:
-        session = self.get_session(session_id, workspace_id)
+        requested_at, session = time.monotonic(), self.get_session(session_id, workspace_id)
         runtime = self.runtime(session_id)
         if runtime is not None and self.runtime(session_id) is runtime and not runtime.closed:
             # Arm and send before any blocking runtime.lock acquisition: an ACP
             # callback holding that lock cannot postpone the independent grace.
-            request_user_cancel(runtime)
-            runtime.handle.cancel()
+            cancel_handle(runtime, requested_at)
             with runtime.lock:
                 if self.runtime(session_id) is runtime and not runtime.closed:
                     cancel_wakeup(runtime)

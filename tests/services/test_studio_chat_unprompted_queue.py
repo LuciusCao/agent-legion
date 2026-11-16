@@ -57,7 +57,8 @@ def gated(admission, tmp_path):
 def _queue_items(runtime) -> list[tuple]:
     items = []
     while not runtime.handle._queue.empty():
-        items.append(runtime.handle._queue.get_nowait())
+        item = runtime.handle._queue.get_nowait()
+        items.append((item.text, item.before_start))
     return items
 
 
@@ -417,7 +418,10 @@ def test_dequeue_decision_table(gated, monkeypatch, case, sent, put_back) -> Non
         with runtime.lock:
             runtime.closed = True
     with _step_in_progress(watcher, case == "step_busy"):
-        assert start() is sent
+        started = start()
+        assert bool(started) is sent
+        if sent:
+            assert started is runtime.turn_owner
     assert _held_ids(watcher) == ([message["id"]] if put_back else [])
     # inbound_pending == held + still-queued: a put-back message stays counted.
     assert runtime.inbound_pending == (1 if put_back else 0)
@@ -509,7 +513,10 @@ def test_wakeup_send_boundary_observes_the_journal(gated, monkeypatch, case, sen
     elif case == "step_busy":
         monkeypatch.setattr(background_delivery, "DEQUEUE_STEP_TIMEOUT_SECONDS", 0)
     with _step_in_progress(watcher, case == "step_busy"):
-        assert start() is sent
+        started = start()
+        assert bool(started) is sent
+        if sent:
+            assert started is runtime.turn_owner
     assert invalidate == []
     status = db.get_studio_chat_session(sid)["status"]
     assert status == ("running" if sent else "idle")

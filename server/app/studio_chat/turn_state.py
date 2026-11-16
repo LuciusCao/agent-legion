@@ -3,7 +3,7 @@
 import time
 
 from server.app.studio_chat.runtime import SessionRuntime
-from server.app.studio_chat.turn_watchdog import arm_turn_watchdog
+from server.app.studio_chat.turn_lease import activate_turn_lease
 
 
 def open_turn(
@@ -19,7 +19,7 @@ def open_turn(
     ``message_id`` / ``prompt`` identify the human message (and the exact
     prompt text sent for it) so an empty verdict can offer a replay (#882).
     """
-    runtime.turn_owner, runtime.turn_admission = (owner if owner is not None else object()), None
+    runtime.turn_owner = activate_turn_lease(owner)
     runtime.stream.reset()
     # #1228 codex P2: toolCallId 生命周期不跨 turn——新 turn 起点清空
     # coalescing 归属表（对齐 stream slots 的 reset；turn 内取消/超时无
@@ -42,7 +42,6 @@ def open_turn(
         runtime.inbound_messages[message_id] = "delivered"
     # #882: any new turn supersedes a pending empty-turn replay.
     runtime.empty_turn_retry = None
-    arm_turn_watchdog(runtime)
 
 
 def turn_completion_evidence(runtime: SessionRuntime | None) -> dict[str, str]:

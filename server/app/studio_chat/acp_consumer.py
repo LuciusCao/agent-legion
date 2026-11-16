@@ -19,7 +19,7 @@ from server.app.studio_chat.process_exit import (
     report_connection_loss,
     watch_connection,
 )
-from server.app.studio_chat.prompt_start import prompt_admission_open
+from server.app.studio_chat.prompt_admission import QueuedPrompt, prompt_admission_open
 from server.app.studio_chat.prompt_turn import PromptWedgedError
 from server.app.studio_chat.terminals import AcpTerminalStore
 from server.app.studio_chat.turn_watchdog import note_prompt_response
@@ -138,7 +138,13 @@ async def prompt_loop(
         if not prompt_admission_open(handle):
             continue
         try:
-            text, before_start = item if isinstance(item, tuple) else (str(item), None)
+            if isinstance(item, QueuedPrompt):
+                text, lease, before_start = item.text, item.lease, item.before_start
+                if lease is not None and not lease.can_start():
+                    continue
+            else:
+                text, before_start = item if isinstance(item, tuple) else (str(item), None)
+                lease = None
             result = await prompt_runner(
                 conn,
                 acp_session_id,
@@ -146,10 +152,11 @@ async def prompt_loop(
                 on_timeout=handle.callbacks.on_turn_timeout,
                 death_task=death,
                 start_gate=handle._prompt_start_gate,
+                lease=lease,
                 timeout_ladder=(handle.prompt_timeout_seconds, handle.cancel_grace_seconds),
                 **({"before_start": before_start} if before_start is not None else {}),
             )
-            note_prompt_response(handle)
+            note_prompt_response(handle, lease)
             if result.response is None:
                 continue
             if (failure := handle.transport_failure()) is not None:
@@ -170,7 +177,7 @@ async def prompt_loop(
             # #204 broad-except audit: only ordinary turn failures (in
             # particular agent RequestError) are contained here. Transport
             # families and the two fatal signals above never return idle.
-            note_prompt_response(handle)
+            note_prompt_response(handle, lease)
             handle.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
             logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
 

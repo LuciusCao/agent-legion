@@ -40,6 +40,7 @@ from server.app.studio_chat.acp_consumer import (
     run_acp_session,
 )
 from server.app.studio_chat.acp_session_config import SessionConfigHandleMixin
+from server.app.studio_chat.prompt_admission import send_prompt as send_queued_prompt
 from server.app.studio_chat.prompt_turn import run_prompt_turn
 from server.app.studio_chat.session_load import open_acp_session
 from server.app.studio_chat.timing import StudioTimingConfig
@@ -47,6 +48,7 @@ from server.app.studio_chat.timing import StudioTimingConfig
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.session_config_state import OpenedAcpSession
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +137,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         # restored the prior ACP session (False on the session/new fallback).
         self.loaded_existing = False
         self._queue: queue.Queue[Any] = queue.Queue()
-        self._prompt_start_gate = start.PromptStartGate(lambda: start.prompt_admission_open(self))
+        self.control_lock = threading.Lock()
+        self.rpc_mutex = threading.Lock()
+        self.active_lease: TurnLease | None = None
+        self.fatal_lease: TurnLease | None = None
+        self._prompt_start_gate = start.PromptStartGate(
+            self.control_lock, self.rpc_mutex, lambda: start.prompt_admission_open_locked(self)
+        )
         self._thread: threading.Thread | None = None
         self._closed = False
         # request_stop() only asks for a graceful post-turn exit; unlike
@@ -143,7 +151,6 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         # winner-side teardown) would return at its idempotence gate without
         # joining or killing a turn that is still running (codex P1).
         self._stop_requested = False
-        self._watchdog_candidate: Any = None
         self._state_lock = threading.Lock()
         # Loop-owned handles, captured under _state_lock for cross-thread
         # cancel/kill; None until the connection is up.
@@ -188,8 +195,9 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self,
         text: str,
         *,
-        before_start: Callable[[], bool] | None = None,
-        accept: Callable[[], None] | None = None,
+        lease: TurnLease | None = None,
+        before_start: Callable[[], Any] | None = None,
+        accept: Callable[[], Any] | None = None,
     ) -> bool:
         """Accept durable input only while the queue can still receive it.
 
@@ -197,19 +205,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         neither committed. Close/stop cannot interleave before queue.put;
         the unbounded queue is the final non-blocking handoff.
         """
-        with self._state_lock:
-            if self._closed or self._stop_requested or start.watchdog_fenced(self):
-                return False
-            if accept is not None:
-                accept()
-            # A candidate armed during accept must settle the accepted input
-            # through M19 instead of letting it overtake fatal cleanup.
-            if start.watchdog_fenced(self):
-                return False
-            self._queue.put((text, before_start) if before_start is not None else text)
-            # queue.put itself is an interleaving point: admission succeeds only
-            # if the fatal fence is still absent after the handoff.
-            return start.prompt_admission_open(self)
+        return send_queued_prompt(self, text, lease, before_start, accept)
 
     def cancel(self) -> None:
         """Send session/cancel even while a prompt turn is in flight."""

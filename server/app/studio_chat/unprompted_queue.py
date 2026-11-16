@@ -62,6 +62,7 @@ from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,9 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
         held, self.held, self.front = self.held, [], 0
         for message_id, text, prompt in held:
 
-            def before_start(m: str = message_id, t: str = text, p: str = prompt) -> bool:
+            def before_start(
+                m: str = message_id, t: str = text, p: str = prompt
+            ) -> TurnLease | bool:
                 return _deliver(service, session_id, runtime, m, t, p)
 
             if not runtime.handle.send_prompt(prompt, before_start=before_start):

@@ -22,6 +22,7 @@ from server.app.studio_chat.turn_watchdog import (
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ def _deliver(
     message_id: str,
     text: str,
     prompt: str,
-) -> bool:
+) -> TurnLease | bool:
     """Claim at the actual ACP start boundary, on a worker thread."""
     if (gate := runtime.unprompted_gate) is not None and gate.defer(message_id, text, prompt):
         return False
@@ -77,6 +78,8 @@ def _deliver(
         runtime.inbound_pending -= 1
         detail: str | None = None
         admission_token = begin_turn_admission(runtime)
+        if admission_token is None:
+            return False
         try:
             if compaction.send_blocked(service.db, session_id, runtime, text):
                 detail = DROPPED_COMPACTING
@@ -96,12 +99,13 @@ def _deliver(
                 open_turn(
                     runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
                 )
-                return True
+                return admission_token
             detail = DROPPED_ERROR
         if detail is not None:
-            cancel_turn_admission(runtime, admission_token)
+            cancel_turn_admission(admission_token)
             _note_dropped(service, session_id, message_id, detail, runtime=runtime)
-        return detail is None
+            return False
+        return admission_token
 
 
 def _has_delivery_proof(service: StudioChatService, session_id: str, message_id: str) -> bool:

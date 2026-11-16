@@ -39,6 +39,7 @@ __all__ = [
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 
 def should_queue(runtime: SessionRuntime, status: str) -> bool:
@@ -72,7 +73,7 @@ def enqueue(
         runtime.resume_transcript_pending = False
         commit_wakeup()
 
-    def before_start() -> bool:
+    def before_start() -> TurnLease | bool:
         assert message is not None
         return _deliver(service, session_id, runtime, str(message["id"]), text, prompt)
 

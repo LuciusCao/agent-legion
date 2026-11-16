@@ -70,10 +70,12 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
         notice = {"event": "empty_turn_retry", "message_id": message_id, "detail": RETRY_DETAIL}
         committed: dict[str, Any] = {}
 
-        def accept() -> None:
+        def accept():
             # Claim + replay notice commit together (no claimed turn without
             # its timeline record, and no record without the turn).
             admission_token = begin_turn_admission(runtime)
+            if admission_token is None:
+                raise ConflictError("Chat session already has an active or fatal turn")
             try:
                 committed.update(
                     service.db.claim_studio_chat_turn_with_token(
@@ -83,10 +85,11 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
                 open_turn(
                     runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
                 )
+                return admission_token
             except Exception:
                 # #204 broad-except audit: only uncommitted admission/cancel identity
                 # is cleared; the original failure re-raises and durable proof is not rolled back.
-                cancel_turn_admission(runtime, admission_token)
+                cancel_turn_admission(admission_token)
                 raise
 
         try:

@@ -41,8 +41,8 @@ def _drain(runtime) -> list[str]:
     items = []
     while not runtime.handle._queue.empty():
         item = runtime.handle._queue.get_nowait()
-        if isinstance(item, (str, tuple)):  # skip the handle's close sentinel
-            items.append(item if isinstance(item, str) else item[0])
+        if isinstance(item, str) or hasattr(item, "text"):  # skip the close sentinel
+            items.append(item if isinstance(item, str) else item.text)
     return items
 
 

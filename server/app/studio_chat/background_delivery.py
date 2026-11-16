@@ -10,6 +10,7 @@ from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_
 from server.app.studio_chat.turn_state import open_turn
 from server.app.studio_chat.turn_watchdog import (
     cancel_requested,
+    claim_turn_lease,
     disarm_turn_watchdog,
     transport_failed,
 )
@@ -18,6 +19,7 @@ from server.app.studio_chat.unprompted_queue import DEQUEUE_STEP_TIMEOUT_SECONDS
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +55,10 @@ def wake_session(
         if not _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
             invalidate_run_token(service, session_id, runtime)
             return False
-        if not service.db.claim_studio_chat_turn(session_id):
+        owner = claim_turn_lease(runtime, lambda: service.db.claim_studio_chat_turn(session_id))
+        if owner is None:
             return False
         epoch = runtime.background_epoch
-        owner = object()
 
         def release(*, error: bool = False) -> bool:
             # Never stamp a replacement runtime's durable row or turn flags.
@@ -85,7 +87,7 @@ def wake_session(
             _publish(service, session_id)
             return True
 
-        def before_start() -> bool:
+        def before_start() -> TurnLease | bool:
             # #1109: the claim above read the last poll (our caller holds
             # runtime.lock, so it cannot step); observe the journal here, at
             # the send boundary, on the worker thread with no lock held.
@@ -108,7 +110,7 @@ def wake_session(
                         release()
                         return False
                     if valid and _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
-                        return True
+                        return owner
                     release()
                     if valid:
                         invalidate_run_token(service, session_id, runtime)
@@ -132,7 +134,7 @@ def wake_session(
                 runtime.turn_open = False
                 disarm_turn_watchdog(runtime, owner)
                 return False
-            if not runtime.handle.send_prompt(prompt, before_start=before_start):
+            if not runtime.handle.send_prompt(prompt, lease=owner, before_start=before_start):
                 release(error=True)
                 return False
         except Exception:

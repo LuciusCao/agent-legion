@@ -187,5 +187,14 @@ terms:
     retired_in: '#440（code capability 可选化首片）'
     note: 仅禁止 code 按 capability 路由/派发的表述；Worker admission 按协议、
       code 容量与 workspace ACL，远程身份按 node_key+code_hash
+  - pattern: 'turn_watchdog_core\.py'
+    retired_in: '#1153（A2 r4 TurnLease 整体协议替换）'
+    note: 旧 candidate/pending 状态机模块已删除；统一由 TurnLease 与 control_lock/rpc_mutex 协议表达
+  - pattern: '_watchdog_candidate'
+    retired_in: '#1153（A2 r4 TurnLease 整体协议替换）'
+    note: 不再使用可撤销 candidate；到期直接对同一 lease 安装不可逆 KILLING fence
+  - pattern: 'pending_cancel'
+    retired_in: '#1153（A2 r4 TurnLease 整体协议替换）'
+    note: cancel 直接 arm active TurnLease，不在 open_turn 后补偿消费 pending tuple
 
 exemptions: []
