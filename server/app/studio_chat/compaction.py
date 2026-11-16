@@ -166,9 +166,9 @@ def note_turn_closed(runtime: SessionRuntime | None, *, clear_delivery: bool = T
     if runtime is None:
         return
     with runtime.lock:
+        closed_cleanly = disarm_turn_watchdog(runtime, runtime.turn_owner)
         runtime.turn_open = False
-        disarm_turn_watchdog(runtime, runtime.turn_owner)
-        if clear_delivery and (source := runtime.turn_retry_source) is not None:
+        if clear_delivery and closed_cleanly and (source := runtime.turn_retry_source) is not None:
             runtime.inbound_messages.pop(source[0], None)
 
 

@@ -22,18 +22,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
-from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compaction
+from server.app.studio_chat.admission_recovery import claim_retry_notice, fail_accepted_turn
 from server.app.studio_chat.inbound_queue import publish_committed
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
-from server.app.studio_chat.turn_watchdog import (
-    begin_turn_admission,
-    cancel_turn_admission,
-    transport_failed,
-)
+from server.app.studio_chat.turn_watchdog import begin_turn_admission, transport_failed
 from server.app.studio_chat.unprompted_queue import holding, refresh
 
 if TYPE_CHECKING:
@@ -76,21 +72,28 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
             admission_token = begin_turn_admission(runtime)
             if admission_token is None:
                 raise ConflictError("Chat session already has an active or fatal turn")
-            try:
-                committed.update(
-                    service.db.claim_studio_chat_turn_with_token(
-                        session_id, hash_token(runtime.token), notice
-                    )
+            committed.update(
+                claim_retry_notice(
+                    service, session_id, runtime, message_id, text, prompt, notice, admission_token
                 )
+            )
+            try:
                 open_turn(
                     runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
                 )
-                return admission_token
-            except Exception:
-                # #204 broad-except audit: only uncommitted admission/cancel identity
-                # is cleared; the original failure re-raises and durable proof is not rolled back.
-                cancel_turn_admission(admission_token)
+            except Exception as exc:
+                # #204 broad-except audit: the retry claim and original user row
+                # are durable; preserve their shared identity for M19 unknown.
+                fail_accepted_turn(
+                    runtime,
+                    admission_token,
+                    exc,
+                    text=text,
+                    message_id=message_id,
+                    prompt=prompt,
+                )
                 raise
+            return admission_token
 
         try:
             queued = runtime.handle.send_prompt(prompt, accept=accept)

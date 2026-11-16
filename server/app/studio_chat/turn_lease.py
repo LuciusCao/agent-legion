@@ -76,13 +76,14 @@ class TurnLease:
                 self.deadline = None
                 self._arm_timer_locked()
 
-    def close(self) -> None:
+    def close(self) -> bool:
         with self.handle.control_lock:
             if self.state in _TERMINAL:
-                return
+                return False
             self.state = "CLOSED"
             self.deadline = self.total_deadline = self.cancel_deadline = None
             self._arm_timer_locked()
+            return True
 
     def abort(self) -> None:
         with self.handle.control_lock:
@@ -133,6 +134,35 @@ class TurnLease:
         self.timer.daemon = True
         self.timer.start()
 
+    def fatal_for_prompt(self) -> bool:
+        with self.handle.control_lock:
+            return self.state in ("KILLING", "FATAL")
+
+    def fail_claim_uncertain(self, detail: str) -> None:
+        with self.handle.control_lock:
+            if self.state not in _ACTIVE or not self._fatal_identity_locked():
+                return
+            self._install_killing_locked(detail)
+        self._kill_pinned_process()
+        self._start_cleanup("claim")
+
+    def _fatal_identity_locked(self) -> bool:
+        return (
+            self.handle.active_lease is self
+            and self.handle.fatal_lease is None
+            and self.callbacks.runtime is self.runtime
+            and self.runtime.handle is self.handle
+            and self.handle._process is self.process
+            and not self.handle._closed
+            and self.runtime.turn_owner is self
+        )
+
+    def _install_killing_locked(self, detail: str) -> None:
+        self.state = "KILLING"
+        self.handle.fatal_lease = self
+        if self.handle._transport_failure is None and self.fatal_detail is None:
+            self.fatal_detail = detail
+
     def _fire(self, generation: int, reason: str, cancel_epoch: int) -> None:
         with self.handle.control_lock:
             if (
@@ -145,28 +175,18 @@ class TurnLease:
             if time.monotonic() < self.deadline:
                 self._arm_timer_locked()
                 return
-            if (
-                self.handle.active_lease is not self
-                or self.handle.fatal_lease is not None
-                or self.callbacks.runtime is not self.runtime
-                or self.runtime.handle is not self.handle
-                or self.handle._process is not self.process
-                or self.handle._closed
-                or (self.state != "CLAIMING" and not self.runtime.turn_open)
-                or self.runtime.turn_owner is not self
-                or (reason == "cancel" and cancel_epoch != self.cancel_epoch)
+            if not self._fatal_identity_locked() or (
+                reason == "cancel" and cancel_epoch != self.cancel_epoch
             ):
                 return
-            self.state = "KILLING"
-            self.handle.fatal_lease = self
-            if self.handle._transport_failure is None:
-                suffix = "user session/cancel" if reason == "cancel" else "session/cancel"
-                self.fatal_detail = str(
-                    PromptWedgedError(
-                        f"prompt turn wedged: no response within {self._cancel_grace_seconds}s "
-                        f"after {suffix}"
-                    )
+            suffix = "user session/cancel" if reason == "cancel" else "session/cancel"
+            detail = str(
+                PromptWedgedError(
+                    f"prompt turn wedged: no response within {self._cancel_grace_seconds}s "
+                    f"after {suffix}"
                 )
+            )
+            self._install_killing_locked(detail)
         self._kill_pinned_process()
         self._start_cleanup(reason)
 
@@ -243,19 +263,6 @@ def cancel_turn_admission(lease: TurnLease | None) -> None:
         lease.abort()
 
 
-def claim_turn_lease(runtime: SessionRuntime, claim: Any) -> TurnLease | None:
-    lease = begin_turn_admission(runtime)
-    if lease is None:
-        return None
-    claimed = False
-    try:
-        claimed = claim()
-        return lease if claimed else None
-    finally:
-        if not claimed:
-            cancel_turn_admission(lease)
-
-
 def activate_turn_lease(owner: object | None) -> object | None:
     if isinstance(owner, TurnLease):
         owner.activate()
@@ -294,14 +301,16 @@ def note_prompt_response(handle: Any, owner: object | None = None) -> None:
         current.note_response()
 
 
-def disarm_turn_watchdog(runtime: SessionRuntime, owner: object | None = None) -> None:
+def disarm_turn_watchdog(runtime: SessionRuntime, owner: object | None = None) -> bool:
     lease = runtime.turn_owner
-    if not isinstance(lease, TurnLease) or (owner is not None and lease is not owner):
-        return
+    if not isinstance(lease, TurnLease):
+        return True
+    if owner is not None and lease is not owner:
+        return False
     with runtime.handle.control_lock:
         if runtime.turn_owner is not lease:
-            return
-    lease.close()
+            return False
+    return lease.close()
 
 
 def transport_failed(handle: Any) -> bool:

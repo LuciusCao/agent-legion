@@ -188,7 +188,9 @@ direct accept、queued `before_start`、empty-turn retry 和 background wake 都
 cancel epoch/deadline 与 Timer 代次。direct/empty 的 accept 回调显式返回新 lease，queue 的
 `QueuedPrompt` 显式携带它；尚在 background turn 后排队的普通人工消息不继承 background lease，
 其实际 `before_start` claim 返回自己的 lease 给同一个 prompt-start gate。`open_turn` 只激活传入的
-同一 lease 并维护 M19 镜像，不再创建匿名 owner 或第二套 watchdog。
+同一 lease 并维护 M19 镜像，不再创建匿名 owner 或第二套 watchdog。CLAIMING→OPEN 激活先于
+`runtime.turn_open=True` 镜像；有效 OPEN lease 自身即证明活跃，Timer 不得把这个合法窗口当作
+stale/inactive 而丢弃当前代 deadline。
 
 | 状态 | 含义与合法迁移 |
 |---|---|
@@ -196,18 +198,27 @@ cancel epoch/deadline 与 Timer 代次。direct/empty 的 accept 回调显式返
 | `OPEN` | 已接受并激活总期限；可 `RESPONDED`、`CLOSED`，可进入 `KILLING` |
 | `RESPONDED` | prompt response 已到，只撤销总期限；已有 cancel 继续计时，新 cancel 仍可 arm |
 | `CLOSED` | 正常终态持久化完成，Timer 停止，不得影响 successor |
-| `ABORTED` | claim 在启动前失败，未创建 RPC；恢复原 owner，不 kill，不遗留取消状态 |
-| `KILLING` | 到期后不可逆 fence；禁止新准入，立即 kill 已 pin direct child |
+| `ABORTED` | 明确 pre-claim 拒绝或持久证明未接受；恢复原 owner，不 kill，不遗留取消状态 |
+| `KILLING` | 到期或 commit/open 结果不明时不可逆 fence；禁止新准入，立即 kill 已 pin direct child |
 | `FATAL` | cleanup 与预准入 RPC 创建完成排序后的终态；禁止任何新 awaitable，进入 M19 settlement |
 
 用户 cancel 在 service 入口记录 `requested_at`，先对 `active_lease` arm 并发送 `session/cancel`，
 再做 wakeup/permission 等需要 `runtime.lock` 的工作。CLAIMING、OPEN、RESPONDED 使用同一个 lease；
 首次 `requested_at` 决定首个 cancel deadline，重复 cancel 只增加 epoch，不滑动期限。没有活动 turn、
-closed/aborted/fatal turn 都不保存“以后补偿”的取消记录，successor 从 epoch 0 开始。claim 失败只
-abort CLAIMING；若失败返回时已经 KILLING，abort 不得撤销 fatal fence。
+closed/aborted/fatal turn 都不保存“以后补偿”的取消记录，successor 从 epoch 0 开始。若失败返回时
+已经 KILLING，任何 abort/close 都不得撤销 fatal fence。
+
+DB claim exception 不等价于“未接受”。direct 以 claim 前 `seq` 之后的新非 queued 用户行、queued 以
+`queued_delivered`、empty-retry 以同名状态行、background 以 running session 行作为各自持久证明；
+证明存在时恢复同一 lease 和 open/queue 交接，不新写用户行、不自动重放。只有明确 pre-claim rejection，
+或持久读取证明 session 仍 idle 且没有对应交付行时，direct/empty/background 才可 ABORTED，queued 才可
+按未投递 drop。证明读取失败、running 但无法归属、或 open 镜像失败都选择保守 KILLING；已知人工
+message id 先保留为 delivered，再由同代 M19 恰好一次 unknown/settlement 或重启重建补齐，不能留下
+running 但无 owner/deadline/queue 的输入。
 
 prompt response 只把 OPEN 改为 RESPONDED 并清除 total deadline，不直接 CLOSED，也不清除 cancel。
-response→cancel、response→close→late-cancel 因而保持不同语义；正常取消完成后人工 FIFO 不变，
+response→cancel、response→close→late-cancel 因而保持不同语义；正常 close 先关闭同代 lease，再更新
+`runtime.turn_open` 镜像，且只有 clean close 才能清除 delivered identity。正常取消完成后人工 FIFO 不变，
 自动 wakeup 仍须后续人工消息 rearm。
 
 ### 锁与两阶段清理
@@ -228,15 +239,18 @@ process；它不等待 rpc_mutex、gate done、runtime.lock、state lock 或 reg
 cleanup thread 再按 `rpc_mutex → control_lock` 把同一 lease 从 KILLING 写成 FATAL，然后复核
 registry 并复用 fatal `on_error`、M19 `report_connection_loss_sync` / exit settlement 与
 `teardown_runtime`。因此 KILLING 后最多当前已经持有 rpc_mutex 的预准入路径还能完成一次 awaitable
-创建；它必须走 M19 unknown/settlement。FATAL 后不得再创建任何 RPC awaitable。这里的 RPC 起点是
-`conn.prompt(...)` 返回 awaitable，不是 coroutine 首次执行，也不是底层 wire send；协议不宣称真实
-wire 永不可能晚于 FATAL，只禁止 FATAL 后新 awaitable，并保留已准入请求的 unknown 语义。
+创建；它必须走 M19 unknown/settlement。即使该 RPC 在 cleanup 尚未写 FATAL/transport failure 时立即
+返回 response 或普通 `RequestError`，consumer 也必须按 envelope 绑定的 lease KILLING/FATAL 状态跳过
+正常 `on_turn_end/on_turn_error`，保留 delivered identity，不能回 idle 或把 unknown 改成正常完成。
+FATAL 后不得再创建任何 RPC awaitable。这里的 RPC 起点是 `conn.prompt(...)` 返回 awaitable，不是
+coroutine 首次执行，也不是底层 wire send；协议不宣称真实 wire 永不可能晚于 FATAL，只禁止 FATAL 后
+新 awaitable，并保留已准入请求的 unknown 语义。
 
 永久持有 rpc_mutex 时只能保证 KILLING fence 与 direct-child kill，不能声称 FATAL 已完成；永久持有
 runtime/registry 等 settlement 锁时也不能声称 registry、DB 或 session 已完成。锁释放后，cleanup
 与 M19 death task、`on_exit`、`on_connection_lost` 和显式 close 按同一 runtime 幂等完成，successor
-不受影响。清理不消费 waitpid，不杀非 direct descendant；普通 `RequestError` 仍走 per-turn
-containment，process/stream death 仍由 M19 立即接管。
+不受影响。清理不消费 waitpid，不杀非 direct descendant；未进入 fatal 的普通 `RequestError` 仍走
+per-turn containment，process/stream death 仍由 M19 立即接管。
 
 ### Quality Impact（有界 turn）
 
@@ -263,6 +277,9 @@ containment，process/stream death 仍由 M19 立即接管。
 | T15 | 普通 RequestError、未到期安静 turn、unprompted gate expiry 均不转 fatal/kill | `test_studio_chat_process_exit.py`、`test_studio_chat_turn_watchdog.py`、`test_studio_chat_unprompted_queue.py` |
 | T16 | death、`on_connection_lost`、`on_exit`、close 与 off-loop cleanup 幂等；delivered=unknown、unstarted=drop | `test_studio_chat_process_exit.py`、`test_studio_chat_generation_boundary.py` |
 | T17 | 真实 ACP 忽略 `session/cancel` 时，线外 grace 仍 kill 并停止后续队列 | `test_studio_chat_turn_watchdog.py` |
+| T18 | direct/queued 的预准入 RPC 在 KILLING 后立即 response/RequestError、cleanup 延后；不写正常终态，仅一次 unknown | `test_studio_chat_turn_lease_recovery.py` |
+| T19 | direct/queued/empty/background 在 activate 后、open 镜像前让真实 cancel Timer 到期；当前代 kill，successor 隔离 | `test_studio_chat_turn_lease_recovery.py` |
+| T20 | direct/empty/background post-commit 与四路 open 异常；证明恢复或保守 fatal，真正未接受才 abort，不自动重放 | `test_studio_chat_turn_lease_recovery.py` |
 
 真实 ACP 回归还证明普通 cancel 不杀健康进程、普通 RequestError 不转 fatal。测试另覆盖 direct
 第二 turn、background 后 queued human 与 empty-retry 的 lease 显式传递，防止恢复旧的隐式 owner

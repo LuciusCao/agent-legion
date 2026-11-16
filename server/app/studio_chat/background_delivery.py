@@ -5,12 +5,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from server.app.studio_chat.background_admission import (
+    background_prompt,
+    claim_background_turn,
+    open_background_turn,
+)
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
 from server.app.studio_chat.turn_watchdog import (
     cancel_requested,
-    claim_turn_lease,
     disarm_turn_watchdog,
     transport_failed,
 )
@@ -55,7 +59,7 @@ def wake_session(
         if not _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
             invalidate_run_token(service, session_id, runtime)
             return False
-        owner = claim_turn_lease(runtime, lambda: service.db.claim_studio_chat_turn(session_id))
+        owner = claim_background_turn(service, session_id, runtime)
         if owner is None:
             return False
         epoch = runtime.background_epoch
@@ -123,13 +127,8 @@ def wake_session(
                     return False
 
         try:
-            open_turn(runtime, "", owner=owner)
-            prompt = (
-                "[Studio 系统通知] 你先前派发的后台子代理任务已到终态："
-                + ", ".join(task_ids)
-                + "。请处理原生 completion notification，必要时用 TaskOutput 核对结果，"
-                "完成验收并向用户汇报；不要重复派发这些任务。"
-            )
+            open_background_turn(runtime, owner, open_turn)
+            prompt = background_prompt(task_ids)
             if service.runtime(session_id) is not runtime:
                 runtime.turn_open = False
                 disarm_turn_watchdog(runtime, owner)
@@ -138,9 +137,10 @@ def wake_session(
                 release(error=True)
                 return False
         except Exception:
-            # #204 broad-except audit: enqueue failed before ownership transfer;
-            # release this runtime's claim and let watcher retry with traceback.
-            release()
+            # #204 broad-except audit: ordinary enqueue failure releases only a
+            # nonfatal claim; accepted open uncertainty retains its fatal owner.
+            if not owner.fatal_for_prompt():
+                release()
             raise
         _publish(service, session_id)
         return True

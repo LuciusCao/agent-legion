@@ -22,7 +22,7 @@ from server.app.studio_chat.process_exit import (
 from server.app.studio_chat.prompt_admission import QueuedPrompt, prompt_admission_open
 from server.app.studio_chat.prompt_turn import PromptWedgedError
 from server.app.studio_chat.terminals import AcpTerminalStore
-from server.app.studio_chat.turn_watchdog import note_prompt_response
+from server.app.studio_chat.turn_watchdog import note_prompt_response, prompt_fatal
 
 if TYPE_CHECKING:
     from server.app.studio_chat.acp_session import AcpSessionHandle
@@ -157,10 +157,12 @@ async def prompt_loop(
                 **({"before_start": before_start} if before_start is not None else {}),
             )
             note_prompt_response(handle, lease)
+            if prompt_fatal(handle, lease):
+                if (failure := handle.transport_failure()) is not None:
+                    raise AcpConnectionLost(failure)
+                continue
             if result.response is None:
                 continue
-            if (failure := handle.transport_failure()) is not None:
-                raise AcpConnectionLost(failure)
             handle.callbacks.on_turn_end(
                 str(result.response.stop_reason), timed_out=result.timed_out
             )
@@ -178,6 +180,11 @@ async def prompt_loop(
             # particular agent RequestError) are contained here. Transport
             # families and the two fatal signals above never return idle.
             note_prompt_response(handle, lease)
+            if prompt_fatal(handle, lease):
+                logger.warning("studio prompt failed after its fatal fence: %s", exc, exc_info=True)
+                if (failure := handle.transport_failure()) is not None:
+                    raise AcpConnectionLost(failure) from exc
+                continue
             handle.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
             logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
 

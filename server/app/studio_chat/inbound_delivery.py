@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.studio_chat import compaction
+from server.app.studio_chat.admission_recovery import fail_accepted_turn, status_claim_proof
 from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
@@ -86,35 +87,39 @@ def _deliver(
             elif not _token_alive(service, runtime.token, prompt_timeout_for(runtime)):
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
-            elif (detail := _claim(service, session_id, runtime, message_id)) is None:
-                open_turn(
-                    runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
-                )
-        except Exception:
-            # #204 broad-except audit: a claim can commit and still surface a
-            # transport/DB exception. Read its durable proof before deciding:
-            # only a genuinely unclaimed message may be called undelivered.
+            else:
+                detail = _claim(service, session_id, runtime, message_id)
+        except Exception as exc:
+            # #204 broad-except audit: only the transaction's own delivery proof
+            # can recover; proven idle may drop, all other outcomes stay fatal.
             logger.warning("queued chat message delivery failed for %s", session_id, exc_info=True)
-            if _has_delivery_proof(service, session_id, message_id):
-                open_turn(
-                    runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
+            proof, status = status_claim_proof(service, session_id, message_id, "queued_delivered")
+            if proof is None and status is not False:
+                fail_accepted_turn(
+                    runtime,
+                    admission_token,
+                    exc,
+                    text=text,
+                    message_id=message_id,
+                    prompt=prompt,
                 )
-                return admission_token
-            detail = DROPPED_ERROR
+                return False
+            detail = None if proof is not None else DROPPED_ERROR
         if detail is not None:
             cancel_turn_admission(admission_token)
             _note_dropped(service, session_id, message_id, detail, runtime=runtime)
             return False
+        try:
+            open_turn(runtime, text, owner=admission_token, message_id=message_id, prompt=prompt)
+        except Exception as exc:
+            # #204 broad-except audit: queued_delivered is durable; keep its id
+            # for exactly one M19 unknown and do not retry the open mirror.
+            logger.warning("queued chat open mirror failed for %s", session_id, exc_info=True)
+            fail_accepted_turn(
+                runtime, admission_token, exc, text=text, message_id=message_id, prompt=prompt
+            )
+            return False
         return admission_token
-
-
-def _has_delivery_proof(service: StudioChatService, session_id: str, message_id: str) -> bool:
-    return any(
-        message.get("kind") == "status"
-        and (content := message.get("content") or {}).get("event") == "queued_delivered"
-        and content.get("message_id") == message_id
-        for message in service.db.list_studio_chat_messages(session_id)
-    )
 
 
 def _claim(

@@ -458,7 +458,7 @@ def test_claim_rejection_aborts_without_killing_or_poisoning_successor(admission
     successor.abort()
 
 
-def test_claim_exception_also_aborts_and_restores_previous_owner(admission) -> None:
+def test_proven_unclaimed_exception_aborts_and_restores_previous_owner(admission) -> None:
     service, _db, sid, _workspace, runtime = admission
     process = _install(service, sid, runtime, cancel_grace=5)
     previous_owner = runtime.turn_owner = object()
@@ -467,7 +467,7 @@ def test_claim_exception_also_aborts_and_restores_previous_owner(admission) -> N
         raise RuntimeError("claim failed")
 
     with pytest.raises(RuntimeError, match="claim failed"):
-        claim_turn_lease(runtime, fail_claim)
+        claim_turn_lease(runtime, fail_claim, claim_status=lambda: False)
     rejected = runtime.handle.active_lease
     assert rejected.state == "ABORTED"
     assert runtime.turn_owner is previous_owner
