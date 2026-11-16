@@ -110,13 +110,20 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     expect(screen.getByRole('button', { name: '版本历史' })).toBeInTheDocument()
   })
 
-  it('keeps the save button disabled without runtime changes and enables it with changes', () => {
+  it('uses the same compact outlined save action as the other inspector save controls', () => {
     const studio = makeStudio({
       runtimeChangedKeys: ['nodes.generate_key_info.model'],
     })
     renderSection({}, studio)
 
-    expect(screen.getByRole('button', { name: /保存运行配置/ })).toBeEnabled()
+    const saveButton = screen.getByRole('button', { name: '保存运行配置' })
+    expect(saveButton).toBeEnabled()
+    expect(saveButton).toHaveClass('MuiButton-outlined', 'MuiButton-sizeSmall')
+    expect(saveButton.className).toContain('saveButton')
+    expect(saveButton).not.toHaveClass(
+      'MuiButton-contained',
+      'MuiButton-fullWidth'
+    )
   })
 
   it('disables the save button when nothing changed', () => {
