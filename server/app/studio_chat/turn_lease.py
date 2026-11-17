@@ -73,9 +73,8 @@ class TurnLease:
                 return
             self.state = "RESPONDED"
             self.total_deadline = None
-            if self.cancel_deadline is None:
-                self.deadline = None
-                self._arm_timer_locked()
+            self.deadline = self.cancel_deadline
+            self._arm_timer_locked()
 
     def close(self) -> bool:
         with self.handle.control_lock:

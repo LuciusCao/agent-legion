@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -589,6 +590,19 @@ def test_resume_skips_session_resumed_row_when_close_races(chat, monkeypatch) ->
 class _StubHandle:
     """ACP handle stand-in: registered runtimes without a subprocess."""
 
+    def __init__(self) -> None:
+        self.control_lock = threading.Lock()
+        self.rpc_mutex = threading.Lock()
+        self.active_lease = None
+        self.fatal_lease = None
+        self._process = None
+        self._closed = False
+        self._stop_requested = False
+        self._transport_failure = None
+        self.prompt_timeout_seconds = 3600
+        self.cancel_grace_seconds = 30
+        self.callbacks = SimpleNamespace(_service=None, _session_id=None, runtime=None)
+
     def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
         if accept is not None:
@@ -598,6 +612,12 @@ class _StubHandle:
     def cancel(self) -> None: ...
 
     def close(self) -> None: ...
+
+    def transport_failure(self) -> str | None:
+        return self._transport_failure
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
 
 
 def _resume_aba_setup(chat, job_db):

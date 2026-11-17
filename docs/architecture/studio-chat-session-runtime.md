@@ -224,6 +224,9 @@ queued 的 baseline 读取也属于队列所有权协议，在 `begin_turn_admis
 `queued_delivered` 的输入仍走 unknown，不与 baseline 未开始 drop 混用。
 
 prompt response 只把 OPEN 改为 RESPONDED 并清除 total deadline，不直接 CLOSED，也不清除 cancel。
+清 total 后始终按剩余有效 cancel deadline 重建 Timer：更新 `deadline` 与 `reason`、递增 generation 并取消旧
+Timer，首个 cancel deadline/epoch 不滑动；无 cancel 时则取消旧 Timer 且不重建。重复 response 不重复
+rearm，旧 total-timeout Timer 不得越过剩余 cancel grace 错误 kill，正常 close/KILLING identity 不变。
 `begin_normal_close` 在 control_lock 内验证 lease/runtime/owner/fence 后把 OPEN 或 RESPONDED 改为 CLOSED，
 这是正常终态与 Timer/KILLING 的共同线性化点，不在锁内做 DB/I/O。response→cancel 只在该仲裁之前有效；
 仲裁后不再接受新 cancel deadline，迟到 Timer 不写 unknown，KILLING 先发生则正常 append 不得开始。
@@ -300,6 +303,7 @@ per-turn containment，process/stream death 仍由 M19 立即接管。
 | T21 | direct/queued response/RequestError 在 consumer、真实回调入口、append→close 三处与 KILLING 交错；正常 close 先仲裁则正常完成，否则仅 unknown | `test_studio_chat_terminal_arbitration.py` |
 | T22 | 第二次 empty/queued pre-claim、foreign running、append/idle/proof-read 失败及历史完成行；只接受本次 admission/complete proof，startup reconcile 幂等 | `test_studio_chat_admission_proof.py`、`test_studio_chat_terminal_arbitration.py` |
 | T23 | 真实 prompt_loop 首次 baseline 失败→恢复→第二条发送、持续读/drop 写失败与恢复期 cancel；FIFO 不越过，queued 仅一次 drop，delivered 仅 unknown | `test_studio_chat_inbound_baseline.py` |
+| T24 | total=10/grace=5，12s cancel→13s response→16s 慢终态不 kill，17s cancel deadline 清理；重复 response/close/旧 Timer 不影响 successor | `test_studio_chat_response_timer.py` |
 
 真实 ACP 回归还证明普通 cancel 不杀健康进程、普通 RequestError 不转 fatal。测试另覆盖 direct
 第二 turn、background 后 queued human 与 empty-retry 的 lease 显式传递，防止恢复旧的隐式 owner

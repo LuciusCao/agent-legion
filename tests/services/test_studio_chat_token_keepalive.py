@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from server.app.auth import scoped_tokens
 from server.app.auth.sessions import hash_token
@@ -51,6 +53,17 @@ class _StubHandle:
 
     def __init__(self) -> None:
         self.request_stop_calls = 0
+        self.control_lock = threading.Lock()
+        self.rpc_mutex = threading.Lock()
+        self.active_lease = None
+        self.fatal_lease = None
+        self._process = None
+        self._closed = False
+        self._stop_requested = False
+        self._transport_failure = None
+        self.prompt_timeout_seconds = 3600
+        self.cancel_grace_seconds = 30
+        self.callbacks = SimpleNamespace(_service=None, _session_id=None, runtime=None)
 
     def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
@@ -62,8 +75,12 @@ class _StubHandle:
 
     def close(self) -> None: ...
 
+    def transport_failure(self) -> str | None:
+        return self._transport_failure
+
     def request_stop(self) -> None:
         self.request_stop_calls += 1
+        self._stop_requested = True
 
 
 def _tool_call(update_id: str) -> dict:
