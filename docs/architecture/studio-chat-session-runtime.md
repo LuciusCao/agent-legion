@@ -197,7 +197,7 @@ stale/inactive 而丢弃当前代 deadline。
 | `CLAIMING` | lease 已创建，DB claim/open 尚可暂停；可 `OPEN`、`ABORTED`、`CLOSED`，cancel 可直接 arm |
 | `OPEN` | 已接受并激活总期限；可 `RESPONDED`、`CLOSED`，可进入 `KILLING` |
 | `RESPONDED` | prompt response 已到，只撤销总期限；已有 cancel 继续计时，新 cancel 仍可 arm |
-| `CLOSED` | 正常终态持久化完成，Timer 停止，不得影响 successor |
+| `CLOSED` | 已取得正常 close 仲裁；append/proof 成功后保持，未提交失败回滚原状态，不得影响 successor |
 | `ABORTED` | 明确 pre-claim 拒绝或持久证明未接受；恢复原 owner，不 kill，不遗留取消状态 |
 | `KILLING` | 到期或 commit/open 结果不明时不可逆 fence；禁止新准入，立即 kill 已 pin direct child |
 | `FATAL` | cleanup 与预准入 RPC 创建完成排序后的终态；禁止任何新 awaitable，进入 M19 settlement |
@@ -208,18 +208,28 @@ stale/inactive 而丢弃当前代 deadline。
 closed/aborted/fatal turn 都不保存“以后补偿”的取消记录，successor 从 epoch 0 开始。若失败返回时
 已经 KILLING，任何 abort/close 都不得撤销 fatal fence。
 
-DB claim exception 不等价于“未接受”。direct 以 claim 前 `seq` 之后的新非 queued 用户行、queued 以
-`queued_delivered`、empty-retry 以同名状态行、background 以 running session 行作为各自持久证明；
-证明存在时恢复同一 lease 和 open/queue 交接，不新写用户行、不自动重放。只有明确 pre-claim rejection，
-或持久读取证明 session 仍 idle 且没有对应交付行时，direct/empty/background 才可 ABORTED，queued 才可
-按未投递 drop。证明读取失败、running 但无法归属、或 open 镜像失败都选择保守 KILLING；已知人工
-message id 先保留为 delivered，再由同代 M19 恰好一次 unknown/settlement 或重启重建补齐，不能留下
-running 但无 owner/deadline/queue 的输入。
+DB claim exception 不等价于“未接受”。direct 只接受 claim 前 `seq` 之后的新非 queued 用户行，queued 与
+empty-retry 也只接受各自 baseline 之后、事件与 message id 相符的交付状态行；证明存在时恢复同一 lease
+和 open/queue 交接，不新写用户行、不自动重放。background 的现有 `claim_studio_chat_turn` 没有 attempt
+身份，裸 running 不再是 accepted proof，commit 不明一律保守 KILLING，绝不能 OPEN+queue。只有明确
+pre-claim rejection，或持久读取证明 session 仍 idle 且没有本次交付行时，direct/empty/background 才可
+ABORTED，queued 才可按未投递 drop。证明读取失败、归属不明或 open 镜像失败同样选择保守 KILLING；
+已知人工 message id 先保留为 delivered，再由同代 M19 恰好一次 unknown/settlement 或重启重建补齐。
 
 prompt response 只把 OPEN 改为 RESPONDED 并清除 total deadline，不直接 CLOSED，也不清除 cancel。
-response→cancel、response→close→late-cancel 因而保持不同语义；正常 close 先关闭同代 lease，再更新
-`runtime.turn_open` 镜像，且只有 clean close 才能清除 delivered identity。正常取消完成后人工 FIFO 不变，
-自动 wakeup 仍须后续人工消息 rearm。
+`begin_normal_close` 在 control_lock 内验证 lease/runtime/owner/fence 后把 OPEN 或 RESPONDED 改为 CLOSED，
+这是正常终态与 Timer/KILLING 的共同线性化点，不在锁内做 DB/I/O。response→cancel 只在该仲裁之前有效；
+仲裁后不再接受新 cancel deadline，迟到 Timer 不写 unknown，KILLING 先发生则正常 append 不得开始。
+正常 close 先取得 ownership，再在锁外 append、更新 turn_open 镜像与 session 状态。慢 DB 不重新开放
+cancel；append 未提交则恢复原 OPEN/RESPONDED 与原 deadline，post-commit 按 baseline 后完整内容证明
+完成，proof 不可读则回滚后保守 fatal。idle/publish 等后续失败也不能留下半应用 CLOSED：当前 attempt 的
+正常完成证明交给 M19 终结为 error 而非 unknown，没有该证明才走 delivered unknown。
+
+direct 的 `delivery_seq` 是本次用户行 seq，queued/empty-retry 是本次 `queued_delivered` /
+`empty_turn_retry` 状态行 seq。M19 exit settlement 只把 `seq > delivery_seq` 的 human turn_end/timeout
+或 failed 视为本次完成；第一次 turn 的历史 turn_end 不得吞掉第二次 empty/queued delivery 的 unknown。
+startup `_reconstruct` 继续按完整事件顺序处理 delivery→terminal，不引入第二套持久状态。正常取消完成后
+人工 FIFO 不变，自动 wakeup 仍须后续人工消息 rearm。
 
 ### 锁与两阶段清理
 
@@ -279,7 +289,9 @@ per-turn containment，process/stream death 仍由 M19 立即接管。
 | T17 | 真实 ACP 忽略 `session/cancel` 时，线外 grace 仍 kill 并停止后续队列 | `test_studio_chat_turn_watchdog.py` |
 | T18 | direct/queued 的预准入 RPC 在 KILLING 后立即 response/RequestError、cleanup 延后；不写正常终态，仅一次 unknown | `test_studio_chat_turn_lease_recovery.py` |
 | T19 | direct/queued/empty/background 在 activate 后、open 镜像前让真实 cancel Timer 到期；当前代 kill，successor 隔离 | `test_studio_chat_turn_lease_recovery.py` |
-| T20 | direct/empty/background post-commit 与四路 open 异常；证明恢复或保守 fatal，真正未接受才 abort，不自动重放 | `test_studio_chat_turn_lease_recovery.py` |
+| T20 | direct/empty post-commit 证明恢复、background 无 attempt 证明保守 fatal、四路 open 异常；真正未接受才 abort，不自动重放 | `test_studio_chat_turn_lease_recovery.py` |
+| T21 | direct/queued response/RequestError 在 consumer、真实回调入口、append→close 三处与 KILLING 交错；正常 close 先仲裁则正常完成，否则仅 unknown | `test_studio_chat_terminal_arbitration.py` |
+| T22 | 第二次 empty/queued pre-claim、foreign running、append/idle/proof-read 失败及历史完成行；只接受本次 admission/complete proof，startup reconcile 幂等 | `test_studio_chat_admission_proof.py`、`test_studio_chat_terminal_arbitration.py` |
 
 真实 ACP 回归还证明普通 cancel 不杀健康进程、普通 RequestError 不转 fatal。测试另覆盖 direct
 第二 turn、background 后 queued human 与 empty-retry 的 lease 显式传递，防止恢复旧的隐式 owner

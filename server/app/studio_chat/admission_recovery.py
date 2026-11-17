@@ -22,7 +22,7 @@ def latest_message_seq(service: StudioChatService, session_id: str) -> int:
 
 
 def session_claim_status(service: StudioChatService, session_id: str) -> bool | None:
-    """True=claimed, False=proven idle/unclaimed, None=commit outcome unknown."""
+    """False=proven idle/unclaimed, None=accepted or outcome cannot be attributed."""
     try:
         row = service.db.get_studio_chat_session(session_id)
     except Exception:
@@ -32,20 +32,19 @@ def session_claim_status(service: StudioChatService, session_id: str) -> bool | 
         return None
     if row is None:
         return None
-    if row.get("status") == "running":
-        return True
     return False if row.get("status") == "idle" else None
 
 
 def status_claim_proof(
-    service: StudioChatService, session_id: str, message_id: str, event: str
+    service: StudioChatService, session_id: str, message_id: str, event: str, after_seq: int
 ) -> tuple[dict[str, Any] | None, bool | None]:
     try:
         proof = next(
             (
                 message
                 for message in service.db.list_studio_chat_messages(session_id)
-                if message.get("kind") == "status"
+                if int(message["seq"]) > after_seq
+                and message.get("kind") == "status"
                 and (content := message.get("content") or {}).get("event") == event
                 and content.get("message_id") == message_id
             ),
@@ -146,19 +145,29 @@ def claim_retry_notice(
     notice: dict[str, Any],
     owner: TurnLease,
 ) -> dict[str, Any]:
+    after_seq: int | None = None
     try:
-        return service.db.claim_studio_chat_turn_with_token(
+        after_seq = latest_message_seq(service, session_id)
+        claimed = service.db.claim_studio_chat_turn_with_token(
             session_id, hash_token(runtime.token), notice
         )
+        owner.delivery_seq = int(claimed["seq"])
+        return claimed
     except StudioChatAdmissionRejected:
         owner.abort()
         raise
     except Exception as exc:
-        # #204 broad-except audit: only the transaction's own durable retry
-        # proof can recover; proven idle aborts, uncertainty is fatal.
-        row, status = status_claim_proof(service, session_id, message_id, "empty_turn_retry")
+        # #204 broad-except audit: only a post-baseline row from this attempt can
+        # recover; a baseline-read failure never reached the claim and may abort.
+        if after_seq is None:
+            owner.abort()
+            raise
+        row, status = status_claim_proof(
+            service, session_id, message_id, "empty_turn_retry", after_seq
+        )
         if row is not None:
             logger.warning("empty-turn claim recovered for %s", session_id, exc_info=True)
+            owner.delivery_seq = int(row["seq"])
             return row
         if status is False:
             owner.abort()

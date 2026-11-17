@@ -7,10 +7,14 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.sessions import hash_token
-from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.studio_chat import compaction
-from server.app.studio_chat.admission_recovery import fail_accepted_turn, status_claim_proof
+from server.app.studio_chat.admission_recovery import (
+    fail_accepted_turn,
+    latest_message_seq,
+    status_claim_proof,
+)
 from server.app.studio_chat.payloads import serialize_message
+from server.app.studio_chat.queued_admission import DROPPED_TOKEN, claim_queued_turn
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
@@ -27,10 +31,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DELIVERED_DETAIL = "排队消息已开始处理"
 DROPPED_COMPACTING = "上下文压缩中，排队消息未投递，请稍后重发"
-DROPPED_TOKEN = "工具通道已失效，排队消息未投递；请点「继续对话」重建后重发"
-DROPPED_BUSY = "会话状态已变化，排队消息未投递，请重发"
 DROPPED_ERROR = "排队消息投递失败，请重发"
 
 
@@ -76,6 +77,7 @@ def _deliver(
             if not runtime.exit_started and not failed:
                 runtime.inbound_pending = max(0, runtime.inbound_pending - 1)
             return False
+        after_seq = latest_message_seq(service, session_id)
         runtime.inbound_pending -= 1
         detail: str | None = None
         admission_token = begin_turn_admission(runtime)
@@ -88,12 +90,16 @@ def _deliver(
                 invalidate_run_token(service, session_id, runtime)
                 detail = DROPPED_TOKEN
             else:
-                detail = _claim(service, session_id, runtime, message_id)
+                detail = claim_queued_turn(
+                    service, session_id, runtime, message_id, admission_token, publish_committed
+                )
         except Exception as exc:
             # #204 broad-except audit: only the transaction's own delivery proof
             # can recover; proven idle may drop, all other outcomes stay fatal.
             logger.warning("queued chat message delivery failed for %s", session_id, exc_info=True)
-            proof, status = status_claim_proof(service, session_id, message_id, "queued_delivered")
+            proof, status = status_claim_proof(
+                service, session_id, message_id, "queued_delivered", after_seq
+            )
             if proof is None and status is not False:
                 fail_accepted_turn(
                     runtime,
@@ -104,6 +110,8 @@ def _deliver(
                     prompt=prompt,
                 )
                 return False
+            if proof is not None:
+                admission_token.delivery_seq = int(proof["seq"])
             detail = None if proof is not None else DROPPED_ERROR
         if detail is not None:
             cancel_turn_admission(admission_token)
@@ -120,24 +128,6 @@ def _deliver(
             )
             return False
         return admission_token
-
-
-def _claim(
-    service: StudioChatService, session_id: str, runtime: SessionRuntime, message_id: str
-) -> str | None:
-    """Commit token lock, idle claim and delivery proof in one transaction."""
-    notice = {"event": "queued_delivered", "message_id": message_id, "detail": DELIVERED_DETAIL}
-    try:
-        row = service.db.claim_studio_chat_turn_with_token(
-            session_id, hash_token(runtime.token), notice
-        )
-    except StudioChatAdmissionRejected:
-        alive = _token_alive(service, runtime.token, prompt_timeout_for(runtime))
-        if not alive:
-            invalidate_run_token(service, session_id, runtime)
-        return DROPPED_BUSY if alive else DROPPED_TOKEN
-    publish_committed(service, session_id, row)
-    return None
 
 
 def publish_committed(service: StudioChatService, session_id: str, row: dict[str, Any]) -> None:

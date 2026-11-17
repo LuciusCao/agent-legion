@@ -40,6 +40,7 @@ class TurnLease:
         self.timer: threading.Timer | None = None
         self.cleanup_thread: threading.Thread | None = None
         self.fatal_detail: str | None = None
+        self.delivery_seq = 0
 
     @property
     def _cancel_grace_seconds(self) -> float:
@@ -310,7 +311,7 @@ def disarm_turn_watchdog(runtime: SessionRuntime, owner: object | None = None) -
     with runtime.handle.control_lock:
         if runtime.turn_owner is not lease:
             return False
-    return lease.close()
+    return lease.state == "CLOSED" or lease.close()
 
 
 def transport_failed(handle: Any) -> bool:

@@ -33,6 +33,7 @@ def accept_direct_turn(
     if token is None:
         raise StudioChatAdmissionRejected("Chat session already has an active or fatal turn")
     message = claim_direct_message(service, session_id, runtime, text, after_seq, token)
+    token.delivery_seq = int(message["seq"])
     try:
         runtime.resume_transcript_pending = False
         open_turn(runtime, text, owner=token, message_id=str(message["id"]), prompt=prompt_text)

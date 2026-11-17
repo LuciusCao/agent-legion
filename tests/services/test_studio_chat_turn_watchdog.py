@@ -247,10 +247,16 @@ def test_owned_callback_lock_does_not_block_off_loop_kill_or_deferred_settlement
     _wait(lambda: service.runtime(sid) is None and service.get_session(sid)["status"] == "error")
     expected = "user session/cancel" if trigger == "cancel" else "after session/cancel"
     assert expected in service.get_session(sid)["error_detail"]
-    assert any(
+    assert not any(
         event.get("message_id") == message["id"]
         for event in _events(service, sid, workspace, "turn_end")
     )
+    unknown = [
+        event
+        for event in _events(service, sid, workspace, "error")
+        if event.get("message_id") == message["id"] and event.get("outcome") == "unknown"
+    ]
+    assert len(unknown) == 1
 
     successor = SessionRuntime(Mock(), "successor-token")
     successor_process = _FakeProcess()

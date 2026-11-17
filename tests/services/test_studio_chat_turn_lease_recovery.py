@@ -265,16 +265,13 @@ def test_real_cancel_timer_between_activate_and_open_mirror_kills_current_lease(
     assert successor_process.kill_calls == 0 and not successor.closed
 
 
-@pytest.mark.parametrize("path", ["direct", "empty", "background"])
+@pytest.mark.parametrize("path", ["direct", "empty"])
 def test_post_commit_claim_exception_recovers_same_lease(admission, monkeypatch, path: str) -> None:
     service, db, sid, workspace, runtime = admission
     process = _install(service, sid, runtime)
-    message = None
     if path == "empty":
         message = _prepare_empty(service, sid, workspace, runtime)
         real_claim = db.claim_studio_chat_turn_with_token
-    elif path == "background":
-        real_claim = db.claim_studio_chat_turn
     else:
         real_claim = db.accept_studio_chat_message
 
@@ -284,23 +281,19 @@ def test_post_commit_claim_exception_recovers_same_lease(admission, monkeypatch,
 
     if path == "empty":
         monkeypatch.setattr(db, "claim_studio_chat_turn_with_token", committed_then_error)
-    elif path == "background":
-        monkeypatch.setattr(db, "claim_studio_chat_turn", committed_then_error)
     else:
         monkeypatch.setattr(db, "accept_studio_chat_message", committed_then_error)
 
     if path == "direct":
         message = service.send_message(sid, workspace, "committed direct input")
-    elif path == "empty":
-        assert retry_module.retry_empty_turn(service, sid, runtime)
     else:
-        assert wake_session(service, sid, runtime, ["finished-task"])
+        assert retry_module.retry_empty_turn(service, sid, runtime)
 
     lease = runtime.handle.active_lease
     assert lease.state == "OPEN" and runtime.turn_open
     assert runtime.handle._queue.qsize() == 1
     assert db.get_studio_chat_session(sid)["status"] == "running"
-    assert db.count_studio_chat_user_messages(sid) == (0 if path == "background" else 1)
+    assert db.count_studio_chat_user_messages(sid) == 1
     lease.deadline = 0
     lease._fire(lease.generation, lease.reason, lease.cancel_epoch)
     lease.cleanup_thread.join(timeout=5)
@@ -310,12 +303,11 @@ def test_post_commit_claim_exception_recovers_same_lease(admission, monkeypatch,
         )
     )
     assert process.kill_calls == 1
-    if message is not None:
-        assert len(_unknowns(db, sid, message["id"])) == 1
-        runtime.handle.callbacks.on_exit(close_initiated=False)
-        assert reconcile_zombie_session(service, db.get_studio_chat_session(sid))
-        assert len(_unknowns(db, sid, message["id"])) == 1
-    assert db.count_studio_chat_user_messages(sid) == (0 if path == "background" else 1)
+    assert len(_unknowns(db, sid, message["id"])) == 1
+    runtime.handle.callbacks.on_exit(close_initiated=False)
+    assert reconcile_zombie_session(service, db.get_studio_chat_session(sid))
+    assert len(_unknowns(db, sid, message["id"])) == 1
+    assert db.count_studio_chat_user_messages(sid) == 1
 
 
 @pytest.mark.parametrize("path", ["direct", "queued", "empty", "background"])
