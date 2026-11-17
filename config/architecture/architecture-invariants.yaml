@@ -35,6 +35,9 @@ invariants:
         target: tests/services/test_studio_chat_response_timer.py
         gate: quick
       - kind: integration
+        target: tests/services/test_studio_chat_stub_contract.py
+        gate: quick
+      - kind: integration
         target: tests/services/test_studio_chat_inbound_queue.py
         gate: quick
       - kind: integration

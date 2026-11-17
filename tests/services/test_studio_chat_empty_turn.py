@@ -15,16 +15,26 @@ from __future__ import annotations
 
 import threading
 import time
-from types import SimpleNamespace
 
 import pytest
 
 from server.app.auth.scoped_tokens import mint_scoped_token
 from server.app.studio_chat import empty_turn
+from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.service import StudioChatService
 from server.app.studio_chat.session_config_state import OpenedAcpSession
 from server.app.studio_chat.turn_state import open_turn
+
+
+class _DirectProcess:
+    def __init__(self) -> None:
+        self.returncode = None
+        self.kill_calls = 0
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
 
 
 class _StubHandle:
@@ -39,7 +49,7 @@ class _StubHandle:
         self._transport_failure = None
         self.prompt_timeout_seconds = 3600
         self.cancel_grace_seconds = 30
-        self.callbacks = SimpleNamespace(_service=None, _session_id=None, runtime=None)
+        self.callbacks = None
 
     def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
@@ -56,6 +66,13 @@ class _StubHandle:
 
     def request_stop(self) -> None:
         self._stop_requested = True
+
+
+def _bind_stub_runtime(service, session_id, runtime) -> None:
+    callbacks = ServiceCallbacks(service, session_id)
+    callbacks.runtime = runtime
+    runtime.handle.callbacks = callbacks
+    runtime.handle._process = _DirectProcess()
 
 
 class _GatedTimer(threading.Timer):
@@ -98,6 +115,7 @@ def direct(job_db, settings, monkeypatch):
     runtime = SessionRuntime(
         _StubHandle(), token=mint_scoped_token(job_db, user_id, workspace_id=workspace_id)
     )
+    _bind_stub_runtime(service, session_id, runtime)
     with service._runtimes_lock:
         service._runtimes[session_id] = runtime
     yield service, session_id, runtime, workspace_id
