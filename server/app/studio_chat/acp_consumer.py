@@ -13,14 +13,17 @@ from acp.schema import Implementation
 from server.app.studio_chat.acp_client import AcpClient
 from server.app.studio_chat.acp_session_config import studio_client_capabilities
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.normal_terminal import prompt_can_finish, prompt_can_finish_item
 from server.app.studio_chat.process_exit import (
     AcpConnectionLost,
     race_with_death,
     report_connection_loss,
     watch_connection,
 )
+from server.app.studio_chat.prompt_admission import QueuedPrompt, prompt_admission_open
 from server.app.studio_chat.prompt_turn import PromptWedgedError
 from server.app.studio_chat.terminals import AcpTerminalStore
+from server.app.studio_chat.turn_watchdog import note_prompt_response, prompt_fatal
 
 if TYPE_CHECKING:
     from server.app.studio_chat.acp_session import AcpSessionHandle
@@ -133,20 +136,35 @@ async def prompt_loop(
         item = await next_item(handle, death)
         if item is _CLOSE:
             return
+        admission_open = prompt_admission_open(handle)
+        if not admission_open and not prompt_can_finish_item(item):
+            continue
         try:
-            text, before_start = item if isinstance(item, tuple) else (str(item), None)
+            if isinstance(item, QueuedPrompt):
+                text, lease, before_start = item.text, item.lease, item.before_start
+                if lease is not None and not prompt_can_finish(lease):
+                    continue
+            else:
+                text, before_start = item if isinstance(item, tuple) else (str(item), None)
+                lease = None
             result = await prompt_runner(
                 conn,
                 acp_session_id,
                 text,
                 on_timeout=handle.callbacks.on_turn_timeout,
                 death_task=death,
+                start_gate=handle._prompt_start_gate,
+                lease=lease,
+                timeout_ladder=(handle.prompt_timeout_seconds, handle.cancel_grace_seconds),
                 **({"before_start": before_start} if before_start is not None else {}),
             )
+            note_prompt_response(handle, lease)
+            if prompt_fatal(handle, lease):
+                if (failure := handle.transport_failure()) is not None:
+                    raise AcpConnectionLost(failure)
+                continue
             if result.response is None:
                 continue
-            if (failure := handle.transport_failure()) is not None:
-                raise AcpConnectionLost(failure)
             handle.callbacks.on_turn_end(
                 str(result.response.stop_reason), timed_out=result.timed_out
             )
@@ -163,6 +181,12 @@ async def prompt_loop(
             # #204 broad-except audit: only ordinary turn failures (in
             # particular agent RequestError) are contained here. Transport
             # families and the two fatal signals above never return idle.
+            note_prompt_response(handle, lease)
+            if prompt_fatal(handle, lease):
+                logger.warning("studio prompt failed after its fatal fence: %s", exc, exc_info=True)
+                if (failure := handle.transport_failure()) is not None:
+                    raise AcpConnectionLost(failure) from exc
+                continue
             handle.callbacks.on_turn_error(f"{type(exc).__name__}: {exc}")
             logger.warning("studio chat prompt turn failed: %s", exc, exc_info=True)
 

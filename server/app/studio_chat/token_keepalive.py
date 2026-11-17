@@ -21,6 +21,7 @@ from server.app.auth.scoped_tokens import renew_scoped_token
 from server.app.auth.sessions import hash_token
 from server.app.studio_chat.prompt_turn import PROMPT_TIMEOUT_SECONDS
 from server.app.studio_chat.session_escalation import escalate_dead_token_session
+from server.app.studio_chat.timing import prompt_timeout_for
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
@@ -32,22 +33,22 @@ TOKEN_INVALIDATED_DETAIL = (
     "工具通道已失效（运行凭证过期或被吊销），agent 暂时无法调用平台工具；"
     "点「继续对话」重建工具通道即可恢复，会话上下文将保留。"
 )
-# A checked-live token must outlive the current turn: the threshold is the
-# turn-duration ceiling plus grace, NOT the turn-start 4h one (#411 review).
-_KEEPALIVE_RENEW_THRESHOLD = timedelta(seconds=PROMPT_TIMEOUT_SECONDS + 300)
 
 
-def _token_alive(backend: ServiceBackend, token: str) -> bool:
-    """Dead (revoked / expired / user disabled) tokens no longer resolve to a
-    user; a live one is slid forward, never revoked or revived — the same
-    leaked-token guarantees as turn-start renewal. The slide's rowcount
-    closes the check→update race: dying between the SELECT and the UPDATE
-    matches zero rows, and one re-check tells "no slide needed" apart from
-    "died under us" (#411 review)."""
+def _token_alive(
+    backend: ServiceBackend, token: str, prompt_timeout_seconds: float = PROMPT_TIMEOUT_SECONDS
+) -> bool:
+    """Dead tokens never revive; live ones slide using this handle's turn ceiling.
+
+    The threshold is one full prompt duration plus 300s, not the turn-start 4h
+    default. The conditional UPDATE's rowcount closes the check→update race;
+    a second read separates "no slide needed" from death under the race.
+    """
     token_hash = hash_token(token)
     if backend.db.get_scoped_token_user(token_hash) is None:
         return False
-    return renew_scoped_token(backend.db, token, threshold=_KEEPALIVE_RENEW_THRESHOLD) or (
+    threshold = timedelta(seconds=prompt_timeout_seconds + 300)
+    return renew_scoped_token(backend.db, token, threshold=threshold) or (
         backend.db.get_scoped_token_user(token_hash) is not None
     )
 
@@ -76,7 +77,7 @@ def keepalive_run_token(backend: ServiceBackend, session_id: str) -> None:
 def _keepalive_locked(backend: ServiceBackend, session_id: str, runtime: SessionRuntime) -> None:
     """Keep authentication, escalation and stop on the same runtime generation."""
     try:
-        alive = _token_alive(backend, runtime.token)
+        alive = _token_alive(backend, runtime.token, prompt_timeout_for(runtime))
     except Exception:
         # #204 broad-except audit: best-effort keepalive on the notification
         # path. The tool_call message is already persisted by the caller, so

@@ -30,6 +30,8 @@ from typing import TYPE_CHECKING, Any, Protocol
 from acp import spawn_agent_process
 from acp.schema import HttpMcpServer
 
+from server.app.studio_chat import prompt_start as start
+from server.app.studio_chat import prompt_turn
 from server.app.studio_chat.acp_consumer import (
     _CLOSE,
     drain_stderr,
@@ -38,12 +40,15 @@ from server.app.studio_chat.acp_consumer import (
     run_acp_session,
 )
 from server.app.studio_chat.acp_session_config import SessionConfigHandleMixin
+from server.app.studio_chat.prompt_admission import send_prompt as send_queued_prompt
 from server.app.studio_chat.prompt_turn import run_prompt_turn
 from server.app.studio_chat.session_load import open_acp_session
+from server.app.studio_chat.timing import StudioTimingConfig
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.session_config_state import OpenedAcpSession
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +116,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         env: Mapping[str, str] | None,
         callbacks: AcpSessionCallbacks,
         resume_acp_session_id: str | None = None,
+        timing: StudioTimingConfig | None = None,
         terminal_grant_required: Callable[[], bool] | None = None,
     ) -> None:
         self.command = command
@@ -119,6 +125,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self.mcp_server = mcp_server
         self.env = dict(env or {})
         self.callbacks = callbacks
+        self.timing = timing
         # #1136: the #921 grant fence is opt-in (engine in auto permission
         # mode never sends request_permission, so no grant can ever be minted
         # and Bash is dead). None = fence off (pre-#921 direct execution).
@@ -130,6 +137,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         # restored the prior ACP session (False on the session/new fallback).
         self.loaded_existing = False
         self._queue: queue.Queue[Any] = queue.Queue()
+        self.control_lock = threading.Lock()
+        self.rpc_mutex = threading.Lock()
+        self.active_lease: TurnLease | None = None
+        self.fatal_lease: TurnLease | None = None
+        self._prompt_start_gate = start.PromptStartGate(
+            self.control_lock, self.rpc_mutex, lambda: start.prompt_admission_open_locked(self)
+        )
         self._thread: threading.Thread | None = None
         self._closed = False
         # request_stop() only asks for a graceful post-turn exit; unlike
@@ -157,6 +171,18 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         with self._state_lock:
             return self._transport_failure
 
+    @property
+    def prompt_timeout_seconds(self) -> float:
+        return (
+            self.timing.prompt_timeout_seconds
+            if self.timing
+            else prompt_turn.PROMPT_TIMEOUT_SECONDS
+        )
+
+    @property
+    def cancel_grace_seconds(self) -> float:
+        return self.timing.cancel_grace_seconds if self.timing else prompt_turn.CANCEL_GRACE_SECONDS
+
     def _note_connection_lost(self, detail: str) -> bool:
         with self._state_lock:
             if self._closed:
@@ -169,8 +195,9 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         self,
         text: str,
         *,
-        before_start: Callable[[], bool] | None = None,
-        accept: Callable[[], None] | None = None,
+        lease: TurnLease | None = None,
+        before_start: Callable[[], Any] | None = None,
+        accept: Callable[[], Any] | None = None,
     ) -> bool:
         """Accept durable input only while the queue can still receive it.
 
@@ -178,13 +205,7 @@ class AcpSessionHandle(SessionConfigHandleMixin):
         neither committed. Close/stop cannot interleave before queue.put;
         the unbounded queue is the final non-blocking handoff.
         """
-        with self._state_lock:
-            if self._closed or self._stop_requested:
-                return False
-            if accept is not None:
-                accept()
-            self._queue.put((text, before_start) if before_start is not None else text)
-            return True
+        return send_queued_prompt(self, text, lease, before_start, accept)
 
     def cancel(self) -> None:
         """Send session/cancel even while a prompt turn is in flight."""
@@ -213,18 +234,19 @@ class AcpSessionHandle(SessionConfigHandleMixin):
 
     def close(self) -> None:
         """Stop the loop and reap the subprocess; safe to call more than once."""
+        grace = self.timing.close_grace_seconds if self.timing else CLOSE_GRACE_SECONDS
         with self._state_lock:
             if self._closed:
                 return
             self._closed = True
             self._queue.put(_CLOSE)
-        thread = self._thread
+            thread, process = self._thread, self._process
         if thread is None:
             return
-        thread.join(timeout=CLOSE_GRACE_SECONDS)
+        thread.join(timeout=grace)
         if thread.is_alive():
-            self._kill_process()
-            thread.join(timeout=CLOSE_GRACE_SECONDS * 2)
+            self._kill_process(expected=(thread, process))
+            thread.join(timeout=grace * 2)
             if thread.is_alive():
                 logger.warning("studio chat ACP session thread did not stop in time")
 
@@ -255,9 +277,13 @@ class AcpSessionHandle(SessionConfigHandleMixin):
             self._stop_requested = True
             self._queue.put(_CLOSE)
 
-    def _kill_process(self) -> None:
+    def _kill_process(self, *, expected: tuple[threading.Thread | None, Any] | None = None) -> None:
         with self._state_lock:
             process = self._process
+            if expected is not None:
+                expected_thread, expected_process = expected
+                if self._thread is not expected_thread or process is not expected_process:
+                    return
         # Re-validate identity and liveness right before the cross-process
         # action: only kill the child this handle spawned, only while alive.
         if process is None or process.returncode is not None:

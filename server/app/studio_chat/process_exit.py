@@ -90,13 +90,12 @@ async def race_with_death(awaitable: Awaitable[Any], death: asyncio.Task[str | N
     return None
 
 
-async def report_connection_loss(callbacks: Any, detail: str) -> None:
-    """Fence and project before transport teardown; the thread-final on_exit
-    remains another idempotent retry if both immediate attempts fail."""
+def report_connection_loss_sync(callbacks: Any, detail: str) -> None:
+    """Synchronous form for the ACP thread offload and off-loop watchdog."""
     logger.warning("studio chat ACP connection lost: %s", detail)
     for attempt in range(2):
         try:
-            await asyncio.to_thread(callbacks.on_connection_lost, detail)
+            callbacks.on_connection_lost(detail)
             return
         except Exception:
             # #204 broad-except audit: projection includes DB and snapshot I/O.
@@ -105,3 +104,9 @@ async def report_connection_loss(callbacks: Any, detail: str) -> None:
             logger.warning(
                 "studio chat exit projection attempt %d failed", attempt + 1, exc_info=True
             )
+
+
+async def report_connection_loss(callbacks: Any, detail: str) -> None:
+    """Fence and project before transport teardown; the thread-final on_exit
+    remains another idempotent retry if both immediate attempts fail."""
+    await asyncio.to_thread(report_connection_loss_sync, callbacks, detail)

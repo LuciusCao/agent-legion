@@ -24,6 +24,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from server.app.studio_chat import compact_markers, compact_timer
+from server.app.studio_chat.turn_watchdog import disarm_turn_watchdog
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
@@ -165,8 +166,9 @@ def note_turn_closed(runtime: SessionRuntime | None, *, clear_delivery: bool = T
     if runtime is None:
         return
     with runtime.lock:
+        closed_cleanly = disarm_turn_watchdog(runtime, runtime.turn_owner)
         runtime.turn_open = False
-        if clear_delivery and (source := runtime.turn_retry_source) is not None:
+        if clear_delivery and closed_cleanly and (source := runtime.turn_retry_source) is not None:
             runtime.inbound_messages.pop(source[0], None)
 
 

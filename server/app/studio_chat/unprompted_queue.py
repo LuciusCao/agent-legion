@@ -54,14 +54,16 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver, _note_dropped
+from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver
 from server.app.studio_chat.inbound_delivery import hold as hold
 from server.app.studio_chat.kimi_wire import kimi_code_homes, locate_wire
+from server.app.studio_chat.queued_drop import _note_dropped
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +175,11 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
             # releasing held messages) waits until every projected row —
             # the turn's end included — is persisted.
             self.open = observed if not self.pending else self.open | observed
-            stalled = time.monotonic() - self.activity >= IDLE_TIMEOUT_SECONDS
+            timing = getattr(self.runtime.handle, "timing", None)
+            idle_timeout = (
+                timing.unprompted_idle_timeout_seconds if timing else IDLE_TIMEOUT_SECONDS
+            )
+            stalled = time.monotonic() - self.activity >= idle_timeout
             if self.open and (broken or stalled):
                 self.expired |= self.open
                 self.open = frozenset()
@@ -198,7 +204,9 @@ class GatedUnpromptedWatcher(UnpromptedTurnWatcher):
         held, self.held, self.front = self.held, [], 0
         for message_id, text, prompt in held:
 
-            def before_start(m: str = message_id, t: str = text, p: str = prompt) -> bool:
+            def before_start(
+                m: str = message_id, t: str = text, p: str = prompt
+            ) -> TurnLease | bool:
                 return _deliver(service, session_id, runtime, m, t, p)
 
             if not runtime.handle.send_prompt(prompt, before_start=before_start):

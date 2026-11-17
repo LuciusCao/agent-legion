@@ -24,8 +24,7 @@ admission = studio_chat_fixtures.admission
 
 def _next_item(runtime):
     item = runtime.handle._queue.get_nowait()
-    assert isinstance(item, tuple), item
-    return item
+    return item.text, item.before_start
 
 
 def _events(db, sid: str, name: str) -> list[dict]:

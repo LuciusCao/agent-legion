@@ -89,6 +89,14 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_WORKER_CONSOLE_URL": (("agent_workers", "console_url"), _str_parser),
 }
 
+for _suffix, _key in (
+    ("PROMPT_TIMEOUT_SECONDS", "prompt_timeout_seconds"),
+    ("CANCEL_GRACE_SECONDS", "cancel_grace_seconds"),
+    ("UNPROMPTED_IDLE_TIMEOUT_SECONDS", "unprompted_idle_timeout_seconds"),
+    ("CLOSE_GRACE_SECONDS", "close_grace_seconds"),
+):
+    _ENV_OVERRIDES[f"AGENT_LEGION_STUDIO_CHAT_{_suffix}"] = (("studio_chat", _key), _str_parser)
+
 _DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
 
 

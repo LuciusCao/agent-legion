@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from server.app.auth import scoped_tokens
 from server.app.auth.sessions import hash_token
+from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.service import StudioChatService
@@ -45,12 +47,33 @@ class RecordingBus:
         del channel, queue
 
 
+class _DirectProcess:
+    def __init__(self) -> None:
+        self.returncode = None
+        self.kill_calls = 0
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
+
+
 class _StubHandle:
     """Minimal ACP handle stand-in: tests drive the service callbacks
     directly (no subprocess) to control interleaving precisely."""
 
     def __init__(self) -> None:
         self.request_stop_calls = 0
+        self.control_lock = threading.Lock()
+        self.rpc_mutex = threading.Lock()
+        self.active_lease = None
+        self.fatal_lease = None
+        self._process = None
+        self._closed = False
+        self._stop_requested = False
+        self._transport_failure = None
+        self.prompt_timeout_seconds = 3600
+        self.cancel_grace_seconds = 30
+        self.callbacks = None
 
     def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
@@ -62,8 +85,19 @@ class _StubHandle:
 
     def close(self) -> None: ...
 
+    def transport_failure(self) -> str | None:
+        return self._transport_failure
+
     def request_stop(self) -> None:
         self.request_stop_calls += 1
+        self._stop_requested = True
+
+
+def _bind_stub_runtime(service, session_id, runtime) -> None:
+    callbacks = ServiceCallbacks(service, session_id)
+    callbacks.runtime = runtime
+    runtime.handle.callbacks = callbacks
+    runtime.handle._process = _DirectProcess()
 
 
 def _tool_call(update_id: str) -> dict:
@@ -85,6 +119,7 @@ def _direct_session(job_db, settings, token: str):
     session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
     job_db.update_studio_chat_session(session_id, status="running")
     runtime = SessionRuntime(_StubHandle(), token=token)
+    _bind_stub_runtime(service, session_id, runtime)
     with service._runtimes_lock:
         service._runtimes[session_id] = runtime
     return service, bus, session_id, runtime, workspace_id

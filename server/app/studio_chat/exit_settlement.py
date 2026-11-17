@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from server.app.studio_chat.background_wakeup import cancel_wakeup
+from server.app.studio_chat.normal_terminal import record_normal_completion
+from server.app.studio_chat.turn_watchdog import disarm_turn_watchdog
 
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
@@ -19,11 +21,14 @@ UNKNOWN_PROCESS_EXIT = (
 _LIVE = ("idle", "running", "awaiting_permission", "error")
 
 
-def _content_sets(messages: list[dict[str, Any]]) -> tuple[set[str], set[str], set[str], set[str]]:
+def _content_sets(
+    messages: list[dict[str, Any]],
+) -> tuple[set[str], set[str], set[str], set[str], dict[str, int]]:
     resolved: set[str] = set()
     delivered: set[str] = set()
     dropped: set[str] = set()
     unknown: set[str] = set()
+    completed: dict[str, int] = {}
     for message in messages:
         content = message.get("content") or {}
         if (
@@ -35,13 +40,15 @@ def _content_sets(messages: list[dict[str, Any]]) -> tuple[set[str], set[str], s
         if message.get("kind") != "status":
             continue
         message_id = str(content.get("message_id") or "")
-        if content.get("event") == "queued_delivered":
+        event = content.get("event")
+        if event == "queued_delivered":
             delivered.add(message_id)
-        elif content.get("event") == "queued_dropped":
+        elif event == "queued_dropped":
             dropped.add(message_id)
-        elif content.get("event") == "error" and content.get("outcome") == "unknown" and message_id:
+        elif event == "error" and content.get("outcome") == "unknown" and message_id:
             unknown.add(message_id)
-    return resolved, delivered, dropped, unknown
+        record_normal_completion(completed, message)
+    return resolved, delivered, dropped, unknown, completed
 
 
 def _append(
@@ -71,6 +78,7 @@ def _capture(runtime: SessionRuntime) -> None:
     runtime.background_stop.set()
     cancel_wakeup(runtime)
     runtime.turn_open = False
+    disarm_turn_watchdog(runtime)
     runtime.empty_turn_retry = None
     for pending in runtime.pending_permissions.values():
         if not pending.event.is_set():
@@ -113,8 +121,13 @@ def _settle_inbound(
     delivered: set[str],
     dropped: set[str],
     unknown: set[str],
+    completed: dict[str, int],
 ) -> bool:
+    delivery_seq = getattr(runtime.turn_owner, "delivery_seq", 0)
     for message_id, state in list(runtime.inbound_messages.items()):
+        if completed.get(message_id, 0) > delivery_seq:
+            runtime.inbound_messages.pop(message_id, None)
+            continue
         was_delivered = state == "delivered" or message_id in delivered
         if was_delivered and message_id not in unknown:
             content = {
@@ -166,11 +179,13 @@ def project_process_exit(backend: ServiceBackend, session_id: str, runtime: Sess
         if not runtime.exit_started:
             _capture(runtime)
         messages = backend.db.list_studio_chat_messages(session_id)
-        resolved, delivered, dropped, unknown = _content_sets(messages)
+        resolved, delivered, dropped, unknown, completed = _content_sets(messages)
         if not _settle_permissions(backend, session_id, runtime, row, resolved):
             runtime.exit_projection_done = True
             return
-        if not _settle_inbound(backend, session_id, runtime, row, delivered, dropped, unknown):
+        if not _settle_inbound(
+            backend, session_id, runtime, row, delivered, dropped, unknown, completed
+        ):
             runtime.exit_projection_done = True
             return
         # A pre-existing fatal on_error (startup refusal, wedged turn, loop

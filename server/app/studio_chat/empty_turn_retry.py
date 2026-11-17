@@ -22,13 +22,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.auth.scoped_tokens import renew_scoped_token
-from server.app.auth.sessions import hash_token
 from server.app.jobs.queries.studio_chat_admission import StudioChatAdmissionRejected
 from server.app.services.job_errors import ConflictError
 from server.app.studio_chat import compaction
+from server.app.studio_chat.admission_recovery import claim_retry_notice, fail_accepted_turn
 from server.app.studio_chat.inbound_queue import publish_committed
 from server.app.studio_chat.token_admission import require_live_run_token
 from server.app.studio_chat.turn_state import open_turn
+from server.app.studio_chat.turn_watchdog import begin_turn_admission, transport_failed
 from server.app.studio_chat.unprompted_queue import holding, refresh
 
 if TYPE_CHECKING:
@@ -47,6 +48,8 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
     with runtime.lock:
         if runtime.empty_turn_retry is None:
             return False
+        if transport_failed(runtime.handle):
+            raise ConflictError("Chat session agent is not running")
         require_live_run_token(service, session_id, runtime)
         if holding(runtime):
             # #1029: a replay into a Kimi Code unprompted turn is lost again.
@@ -63,15 +66,34 @@ def retry_empty_turn(service: StudioChatService, session_id: str, runtime: Sessi
         notice = {"event": "empty_turn_retry", "message_id": message_id, "detail": RETRY_DETAIL}
         committed: dict[str, Any] = {}
 
-        def accept() -> None:
+        def accept():
             # Claim + replay notice commit together (no claimed turn without
             # its timeline record, and no record without the turn).
+            admission_token = begin_turn_admission(runtime)
+            if admission_token is None:
+                raise ConflictError("Chat session already has an active or fatal turn")
             committed.update(
-                service.db.claim_studio_chat_turn_with_token(
-                    session_id, hash_token(runtime.token), notice
+                claim_retry_notice(
+                    service, session_id, runtime, message_id, text, prompt, notice, admission_token
                 )
             )
-            open_turn(runtime, text, message_id=message_id, prompt=prompt)
+            try:
+                open_turn(
+                    runtime, text, owner=admission_token, message_id=message_id, prompt=prompt
+                )
+            except Exception as exc:
+                # #204 broad-except audit: the retry claim and original user row
+                # are durable; preserve their shared identity for M19 unknown.
+                fail_accepted_turn(
+                    runtime,
+                    admission_token,
+                    exc,
+                    text=text,
+                    message_id=message_id,
+                    prompt=prompt,
+                )
+                raise
+            return admission_token
 
         try:
             queued = runtime.handle.send_prompt(prompt, accept=accept)

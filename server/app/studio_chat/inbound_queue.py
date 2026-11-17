@@ -12,16 +12,13 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.auth.sessions import hash_token
 from server.app.studio_chat.inbound_delivery import (
-    DELIVERED_DETAIL,
-    DROPPED_BUSY,
     DROPPED_COMPACTING,
     DROPPED_ERROR,
-    DROPPED_TOKEN,
     _deliver,
-    _note_dropped,
     note_enqueued,
-    publish_committed,
 )
+from server.app.studio_chat.queued_admission import DELIVERED_DETAIL, DROPPED_BUSY, DROPPED_TOKEN
+from server.app.studio_chat.queued_drop import _note_dropped, publish_committed
 
 __all__ = [
     "DELIVERED_DETAIL",
@@ -39,6 +36,7 @@ __all__ = [
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
     from server.app.studio_chat.service import StudioChatService
+    from server.app.studio_chat.turn_lease import TurnLease
 
 
 def should_queue(runtime: SessionRuntime, status: str) -> bool:
@@ -72,7 +70,7 @@ def enqueue(
         runtime.resume_transcript_pending = False
         commit_wakeup()
 
-    def before_start() -> bool:
+    def before_start() -> TurnLease | bool:
         assert message is not None
         return _deliver(service, session_id, runtime, str(message["id"]), text, prompt)
 

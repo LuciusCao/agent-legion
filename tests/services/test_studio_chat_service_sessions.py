@@ -19,6 +19,7 @@ import pytest
 
 from server.app.auth.scoped_tokens import authenticate_scoped_token, mint_scoped_token
 from server.app.services.job_errors import ConflictError, NotFoundError
+from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import SessionRuntime
@@ -367,9 +368,32 @@ def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
     assert thought_events
 
 
+class _DirectProcess:
+    def __init__(self) -> None:
+        self.returncode = None
+        self.kill_calls = 0
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
+
+
 class _StubHandle:
     """Minimal ACP handle stand-in for tests that drive the service callbacks
     directly (no subprocess) to control interleaving precisely (#98)."""
+
+    def __init__(self) -> None:
+        self.control_lock = threading.Lock()
+        self.rpc_mutex = threading.Lock()
+        self.active_lease = None
+        self.fatal_lease = None
+        self._process = None
+        self._closed = False
+        self._stop_requested = False
+        self._transport_failure = None
+        self.prompt_timeout_seconds = 3600
+        self.cancel_grace_seconds = 30
+        self.callbacks = None
 
     def send_prompt(self, text: str, *, accept=None) -> bool:
         del text
@@ -380,6 +404,19 @@ class _StubHandle:
     def cancel(self) -> None: ...
 
     def close(self) -> None: ...
+
+    def transport_failure(self) -> str | None:
+        return self._transport_failure
+
+    def request_stop(self) -> None:
+        self._stop_requested = True
+
+
+def _bind_stub_runtime(service, session_id, runtime) -> None:
+    callbacks = ServiceCallbacks(service, session_id)
+    callbacks.runtime = runtime
+    runtime.handle.callbacks = callbacks
+    runtime.handle._process = _DirectProcess()
 
 
 def _direct_session(job_db, settings):
@@ -393,6 +430,7 @@ def _direct_session(job_db, settings):
     runtime = SessionRuntime(
         _StubHandle(), token=mint_scoped_token(job_db, user_id, workspace_id=workspace_id)
     )
+    _bind_stub_runtime(service, session_id, runtime)
     with service._runtimes_lock:
         service._runtimes[session_id] = runtime
     return service, session_id, runtime, workspace_id

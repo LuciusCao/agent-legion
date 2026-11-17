@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
-from server.app.studio_chat import compaction, empty_turn, prompt_turn
+from server.app.studio_chat import compaction, empty_turn, prompt_turn, timing
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call, maybe_emit_mcp_hint
+from server.app.studio_chat.normal_terminal import complete_normal_terminal
 from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.session_config_state import apply_config_update, session_config_fields
@@ -148,21 +149,15 @@ class AcpEventHandlers:
         if timed_out:
             # #693: the turn was ended by the prompt-timeout ladder, not by
             # the agent finishing — record it as its own visible event so the
-            # UI can say "terminated on timeout" instead of "done". Read the
-            # ladder constant through the module so tests can shrink it.
-            detail = f"运行超过 {int(prompt_turn.PROMPT_TIMEOUT_SECONDS // 3600)} 小时已被终止"
+            # UI can say "terminated on timeout" instead of "done". Use the
+            # current handle's frozen duration, with the legacy constant for direct tests.
+            detail = timing.turn_timeout_detail(runtime, prompt_turn.PROMPT_TIMEOUT_SECONDS)
             content = {"event": "turn_timeout", "stop_reason": stop_reason, "detail": detail}
         else:
             content = {"event": "turn_end", "stop_reason": stop_reason}
         content.update(turn_completion_evidence(runtime))
-        self._backend.store.append_message(session_id, "status", "system", content)
-        compaction.note_turn_closed(runtime)
-        # Guarded (#158): turn_end only moves a live turn back to idle; a
-        # concurrent close/error owns the final state.
-        self._backend.db.update_studio_chat_session_if(
-            session_id, status_in=("running", "awaiting_permission"), status="idle"
-        )
-        self._backend.store.publish_session(session_id)
+        if not complete_normal_terminal(self._backend, session_id, runtime, content):
+            return
 
     def on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
         runtime = self._backend.runtime(session_id)
@@ -177,12 +172,8 @@ class AcpEventHandlers:
             # Only an owned human failure proves completion; platform/unknown
             # failures stay non-completing even when they end their own turn.
             content["outcome"] = "failed"
-        self._backend.store.append_message(session_id, "status", "system", content)
-        if not fatal:
-            # Only a durable failed row authorizes delivery cleanup. A failed
-            # append leaves the identity for fatal/startup unknown settlement.
-            compaction.note_turn_closed(runtime)
         if fatal:
+            self._backend.store.append_message(session_id, "status", "system", content)
             # Guarded (#158): a close owns the final 'closed' state, and a
             # resume claim's 'starting' row is not ours to stamp — a stale
             # thread's kill echo (teardown of the OLD runtime racing the new
@@ -194,11 +185,9 @@ class AcpEventHandlers:
                 status="error",
                 error_detail=detail[:500],
             )
-        else:
-            self._backend.db.update_studio_chat_session_if(
-                session_id, status_in=("running", "awaiting_permission"), status="idle"
-            )
-        self._backend.store.publish_session(session_id)
+            self._backend.store.publish_session(session_id)
+        elif not complete_normal_terminal(self._backend, session_id, runtime, content):
+            return
 
     def on_connection_lost(
         self, session_id: str, detail: str, *, expected: SessionRuntime | None

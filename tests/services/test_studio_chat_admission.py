@@ -54,11 +54,10 @@ def test_stale_automatic_queue_entry_cannot_release_accepted_human_turn(admissio
 
     service, db, sid, workspace, runtime = admission
     assert wake_session(service, sid, runtime, ["finished-task"])
-    _, guard = runtime.handle._queue.get_nowait()
+    guard = runtime.handle._queue.get_nowait().before_start
     cancel_wakeup(runtime)
     # The prior cancellation settled before the queued automatic task runs.
-    db.update_studio_chat_session(sid, status="idle")
-    runtime.turn_open = False
+    service._events().on_turn_end(sid, "end_turn")
     service.send_message(sid, workspace, "new human turn")
     owner = runtime.turn_owner
     assert not guard()

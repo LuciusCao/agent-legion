@@ -3,6 +3,7 @@
 import time
 
 from server.app.studio_chat.runtime import SessionRuntime
+from server.app.studio_chat.turn_lease import activate_turn_lease
 
 
 def open_turn(
@@ -18,7 +19,7 @@ def open_turn(
     ``message_id`` / ``prompt`` identify the human message (and the exact
     prompt text sent for it) so an empty verdict can offer a replay (#882).
     """
-    runtime.turn_owner = owner if owner is not None else object()
+    runtime.turn_owner = activate_turn_lease(owner)
     runtime.stream.reset()
     # #1228 codex P2: toolCallId 生命周期不跨 turn——新 turn 起点清空
     # coalescing 归属表（对齐 stream slots 的 reset；turn 内取消/超时无

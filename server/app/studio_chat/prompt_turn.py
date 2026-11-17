@@ -17,10 +17,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from acp.schema import TextContentBlock
-
 from server.app.studio_chat.process_exit import AcpConnectionLost
+from server.app.studio_chat.prompt_admission import run_prompt_start
 from server.app.studio_chat.prompt_outcome import PromptTurnResult, PromptWedgedError, _orphan
+from server.app.studio_chat.prompt_start import PromptStartGate, acp_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +38,22 @@ async def run_prompt_turn(
     text: str,
     *,
     on_timeout: Callable[[], None],
-    before_start: Callable[[], bool] | None = None,
+    before_start: Callable[[], Any] | None = None,
     death_task: asyncio.Task[str | None] | None = None,
+    timeout_ladder: tuple[float, float] | None = None,
+    start_gate: PromptStartGate | None = None,
+    lease: Any = None,
 ) -> PromptTurnResult:
     """One prompt turn, with connection death ahead of result and timeout."""
+    total, grace = timeout_ladder or (PROMPT_TIMEOUT_SECONDS, CANCEL_GRACE_SECONDS)
 
     async def start() -> Any:
         # The dequeue guard takes runtime.lock and may step the Kimi wire
         # watcher (journal read + DB writes, #1109): run it on a worker
         # thread, never on the ACP event loop.
-        if before_start is not None and not await asyncio.to_thread(before_start):
-            return None
-        return await conn.prompt(acp_session_id, [TextContentBlock(type="text", text=text)])
+        return await run_prompt_start(
+            start_gate, acp_prompt(conn, acp_session_id, text), lease, before_start
+        )
 
     def death_result(timed_out: bool = False) -> PromptTurnResult:
         assert death_task is not None
@@ -61,9 +65,7 @@ async def run_prompt_turn(
 
     prompt_task = asyncio.create_task(start())
     waiters = {prompt_task} | ({death_task} if death_task is not None else set())
-    done, _pending = await asyncio.wait(
-        waiters, timeout=PROMPT_TIMEOUT_SECONDS, return_when=asyncio.FIRST_COMPLETED
-    )
+    done, _pending = await asyncio.wait(waiters, timeout=total, return_when=asyncio.FIRST_COMPLETED)
     if death_task in done:
         return death_result()
     timed_out = prompt_task not in done
@@ -89,15 +91,12 @@ async def run_prompt_turn(
             # of being retried or dropped into per-turn containment.
             _orphan(prompt_task)
             raise PromptWedgedError(f"prompt timed out and session/cancel failed: {exc}") from exc
-        done, _pending = await asyncio.wait(
-            waiters, timeout=CANCEL_GRACE_SECONDS, return_when=asyncio.FIRST_COMPLETED
-        )
+        done, _ = await asyncio.wait(waiters, timeout=grace, return_when=asyncio.FIRST_COMPLETED)
         if death_task in done:
             return death_result(timed_out=True)
         if prompt_task not in done:
             _orphan(prompt_task)
             raise PromptWedgedError(
-                f"prompt turn wedged: no response within {CANCEL_GRACE_SECONDS}s "
-                "after session/cancel"
+                f"prompt turn wedged: no response within {grace}s after session/cancel"
             )
     return PromptTurnResult(response=prompt_task.result(), timed_out=timed_out)
