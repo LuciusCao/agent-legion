@@ -8,6 +8,7 @@ from typing import Any
 
 from acp.schema import TextContentBlock
 
+from server.app.studio_chat.normal_terminal import _can_finish_locked
 from server.app.studio_chat.turn_lease import TurnLease
 
 
@@ -38,7 +39,11 @@ class PromptStartGate:
     async def run(self, lease: TurnLease | None, prompt: Callable[[], Awaitable[Any]]) -> Any:
         with self.rpc_mutex:
             with self.control_lock:
-                allowed = lease._can_start_locked() if lease is not None else self._allowed()
+                allowed = (
+                    _can_finish_locked(lease.handle, lease, lease.runtime)
+                    if lease is not None
+                    else self._allowed()
+                )
                 if not allowed:
                     return None
             # Awaitable creation is the RPC-start linearization point. FATAL can

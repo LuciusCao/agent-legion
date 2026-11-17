@@ -13,6 +13,7 @@ from acp.schema import Implementation
 from server.app.studio_chat.acp_client import AcpClient
 from server.app.studio_chat.acp_session_config import studio_client_capabilities
 from server.app.studio_chat.capabilities import capability_snapshot
+from server.app.studio_chat.normal_terminal import prompt_can_finish_item
 from server.app.studio_chat.process_exit import (
     AcpConnectionLost,
     race_with_death,
@@ -135,12 +136,13 @@ async def prompt_loop(
         item = await next_item(handle, death)
         if item is _CLOSE:
             return
-        if not prompt_admission_open(handle):
+        admission_open = prompt_admission_open(handle)
+        if not admission_open and not prompt_can_finish_item(item):
             continue
         try:
             if isinstance(item, QueuedPrompt):
                 text, lease, before_start = item.text, item.lease, item.before_start
-                if lease is not None and not lease.can_start():
+                if admission_open and lease is not None and not lease.can_start():
                     continue
             else:
                 text, before_start = item if isinstance(item, tuple) else (str(item), None)

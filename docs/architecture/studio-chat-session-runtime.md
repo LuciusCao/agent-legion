@@ -235,6 +235,13 @@ cancel；append 未提交则恢复原 OPEN/RESPONDED 与原 deadline，post-comm
 完成，proof 不可读则回滚后保守 fatal。idle/publish 等后续失败也不能留下半应用 CLOSED：当前 attempt 的
 正常完成证明交给 M19 终结为 error 而非 unknown，没有该证明才走 delivered unknown。
 
+`request_stop()` 的 `_stop_requested` 只表示 graceful post-turn stop：禁止新 prompt/admission，但当前已绑定 lease
+可在 response/普通 RequestError 后完成正常 close。consumer、PromptStartGate 与 begin_normal_close 共用
+`prompt_can_finish` 判定，保留 `_closed`、fatal lease、transport failure、active lease/runtime/turn owner
+校验，不把 graceful stop 当 fatal。token 失效已将 session 置 error 时，running/awaiting_permission→idle
+的 guarded update 不覆盖它；正常 turn_end/failed 恰好一次，不写 unknown，startup reconcile 与 fallback
+transcript 可使用该完成证明。KILLING/FATAL、transport failure 或真正不可结算 close 仍禁止正常 append。
+
 direct 的 `delivery_seq` 是本次用户行 seq，queued/empty-retry 是本次 `queued_delivered` /
 `empty_turn_retry` 状态行 seq。M19 exit settlement 只把 `seq > delivery_seq` 的 human turn_end/timeout
 或 failed 视为本次完成；第一次 turn 的历史 turn_end 不得吞掉第二次 empty/queued delivery 的 unknown。

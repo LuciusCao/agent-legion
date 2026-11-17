@@ -45,22 +45,34 @@ class NormalCloseClaim:
         return self.lease.fatal_for_prompt()
 
 
+def _can_finish_locked(handle: Any, lease: TurnLease, runtime: SessionRuntime) -> bool:
+    return (
+        lease.state in ("OPEN", "RESPONDED")
+        and handle.active_lease is lease
+        and handle.fatal_lease is None
+        and not handle._closed
+        and handle._transport_failure is None
+        and runtime.turn_owner is lease
+    )
+
+
+def prompt_can_finish(lease: TurnLease) -> bool:
+    with lease.handle.control_lock:
+        return _can_finish_locked(lease.handle, lease, lease.runtime)
+
+
+def prompt_can_finish_item(item: Any) -> bool:
+    lease = getattr(item, "lease", None)
+    return isinstance(lease, TurnLease) and prompt_can_finish(lease)
+
+
 def begin_normal_close(runtime: SessionRuntime | None) -> NormalCloseClaim | None:
     lease = runtime.turn_owner if runtime is not None else None
     if not isinstance(lease, TurnLease):
         return NormalCloseClaim(None)
     handle = lease.handle
     with handle.control_lock:
-        if (
-            runtime is None
-            or lease.state not in ("OPEN", "RESPONDED")
-            or handle.active_lease is not lease
-            or handle.fatal_lease is not None
-            or handle._closed
-            or handle._stop_requested
-            or handle._transport_failure is not None
-            or runtime.turn_owner is not lease
-        ):
+        if runtime is None or not _can_finish_locked(handle, lease, runtime):
             return None
         claim = NormalCloseClaim(lease)
         lease.state = "CLOSED"
