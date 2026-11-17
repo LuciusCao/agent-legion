@@ -12,8 +12,10 @@ import pytest
 from acp import RequestError
 
 from server.app.auth.sessions import hash_token
+from server.app.studio_chat import acp_consumer
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.process_exit import AcpConnectionLost
+from server.app.studio_chat.prompt_admission import QueuedPrompt
 from server.app.studio_chat.restart_settlement import reconcile_zombie_session
 from server.app.studio_chat.resume_context import build_resume_transcript
 from server.app.studio_chat.timing import StudioTimingConfig
@@ -152,3 +154,54 @@ def test_fatal_stop_still_uses_unknown(admission, outcome: str) -> None:
     assert _normal_events(db, sid, message["id"], outcome) == []
     assert len(_unknowns(db, sid, message["id"])) == 1
     assert db.get_studio_chat_session(sid)["status"] == "error"
+
+
+@pytest.mark.parametrize("queued", [False, True], ids=["direct", "bound-queued"])
+@pytest.mark.parametrize("outcome", ["response", "error"])
+def test_stop_between_admission_snapshot_and_start_still_finishes_accepted_lease(
+    admission, monkeypatch, queued: bool, outcome: str
+) -> None:
+    service, db, sid, workspace, runtime = admission
+    process = _install(service, sid, runtime)
+    message = service.send_message(sid, workspace, "accepted before snapshot stop")
+    if queued:
+        accepted = runtime.handle._queue.get_nowait()
+        assert accepted.lease is runtime.handle.active_lease
+        runtime.handle._queue.put(
+            QueuedPrompt(
+                accepted.text,
+                accepted.lease,
+                before_start=Mock(return_value=accepted.lease),
+            )
+        )
+
+    db.revoke_scoped_token(hash_token(runtime.token))
+    keepalive_run_token(service, sid)
+    monkeypatch.setattr(acp_consumer, "prompt_admission_open", lambda _handle: True)
+
+    async def immediate_response():
+        return SimpleNamespace(stop_reason="end_turn")
+
+    async def immediate_error():
+        raise RequestError(-32000, "ordinary refusal")
+
+    conn = SimpleNamespace(
+        prompt=Mock(
+            side_effect=lambda *_args: (
+                immediate_response() if outcome == "response" else immediate_error()
+            )
+        ),
+        cancel=AsyncMock(),
+    )
+    _consume(runtime, conn)
+    runtime.handle.callbacks.on_exit(close_initiated=False)
+
+    assert runtime.handle._stop_requested
+    assert conn.prompt.call_count == 1
+    assert len(_normal_events(db, sid, message["id"], outcome)) == 1
+    assert _unknowns(db, sid, message["id"]) == []
+    assert db.get_studio_chat_session(sid)["error_detail"] == TOKEN_DEAD_DETAIL
+    assert not runtime.handle.send_prompt("new admission must stay fenced")
+    assert process.kill_calls == 0
+    assert reconcile_zombie_session(service, db.get_studio_chat_session(sid))
+    assert _unknowns(db, sid, message["id"]) == []

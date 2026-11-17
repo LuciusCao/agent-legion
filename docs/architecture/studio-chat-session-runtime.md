@@ -238,7 +238,11 @@ cancel；append 未提交则恢复原 OPEN/RESPONDED 与原 deadline，post-comm
 `request_stop()` 的 `_stop_requested` 只表示 graceful post-turn stop：禁止新 prompt/admission，但当前已绑定 lease
 可在 response/普通 RequestError 后完成正常 close。consumer、PromptStartGate 与 begin_normal_close 共用
 `prompt_can_finish` 判定，保留 `_closed`、fatal lease、transport failure、active lease/runtime/turn owner
-校验，不把 graceful stop 当 fatal。token 失效已将 session 置 error 时，running/awaiting_permission→idle
+校验，不把 graceful stop 当 fatal。consumer 的 `admission_open` 只是出队时的快照；即使快照为 true，已绑定
+lease 的第二次 start/finish 判定也必须使用 `prompt_can_finish`，不得回退到受 `_stop_requested` 影响的
+`can_start`，否则快照后到 RPC 前的 stop 会丢弃已接受 turn。无 lease 的新 admission 仍由快照与
+`prompt_can_finish_item` 拒绝，deferred queued 的 `before_start` 凭证校验不变。token 失效已将 session 置
+error 时，running/awaiting_permission→idle
 的 guarded update 不覆盖它；正常 turn_end/failed 恰好一次，不写 unknown，startup reconcile 与 fallback
 transcript 可使用该完成证明。KILLING/FATAL、transport failure 或真正不可结算 close 仍禁止正常 append。
 
@@ -311,6 +315,7 @@ per-turn containment，process/stream death 仍由 M19 立即接管。
 | T22 | 第二次 empty/queued pre-claim、foreign running、append/idle/proof-read 失败及历史完成行；只接受本次 admission/complete proof，startup reconcile 幂等 | `test_studio_chat_admission_proof.py`、`test_studio_chat_terminal_arbitration.py` |
 | T23 | 真实 prompt_loop 首次 baseline 失败→恢复→第二条发送、持续读/drop 写失败与恢复期 cancel；FIFO 不越过，queued 仅一次 drop，delivered 仅 unknown | `test_studio_chat_inbound_baseline.py` |
 | T24 | total=10/grace=5，12s cancel→13s response→16s 慢终态不 kill，17s cancel deadline 清理；重复 response/close/旧 Timer 不影响 successor | `test_studio_chat_response_timer.py` |
+| T25 | admission 快照 true 后、RPC 前 token revoke；direct/bound-queued response/RequestError 仍恰好一次正常终态，无 unknown/重复 RPC，新 admission 拒绝 | `test_studio_chat_graceful_stop.py` |
 
 真实 ACP 回归还证明普通 cancel 不杀健康进程、普通 RequestError 不转 fatal。测试另覆盖 direct
 第二 turn、background 后 queued human 与 empty-retry 的 lease 显式传递，防止恢复旧的隐式 owner
