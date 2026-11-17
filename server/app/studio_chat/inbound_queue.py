@@ -15,11 +15,10 @@ from server.app.studio_chat.inbound_delivery import (
     DROPPED_COMPACTING,
     DROPPED_ERROR,
     _deliver,
-    _note_dropped,
     note_enqueued,
-    publish_committed,
 )
 from server.app.studio_chat.queued_admission import DELIVERED_DETAIL, DROPPED_BUSY, DROPPED_TOKEN
+from server.app.studio_chat.queued_drop import _note_dropped, publish_committed
 
 __all__ = [
     "DELIVERED_DETAIL",

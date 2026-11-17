@@ -13,16 +13,12 @@ from server.app.studio_chat.admission_recovery import (
     latest_message_seq,
     status_claim_proof,
 )
-from server.app.studio_chat.payloads import serialize_message
 from server.app.studio_chat.queued_admission import DROPPED_TOKEN, claim_queued_turn
+from server.app.studio_chat.queued_drop import drop_unstarted, publish_committed
 from server.app.studio_chat.timing import prompt_timeout_for
 from server.app.studio_chat.token_keepalive import _token_alive, invalidate_run_token
 from server.app.studio_chat.turn_state import open_turn
-from server.app.studio_chat.turn_watchdog import (
-    begin_turn_admission,
-    cancel_turn_admission,
-    transport_failed,
-)
+from server.app.studio_chat.turn_watchdog import begin_turn_admission, transport_failed
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -77,12 +73,26 @@ def _deliver(
             if not runtime.exit_started and not failed:
                 runtime.inbound_pending = max(0, runtime.inbound_pending - 1)
             return False
-        after_seq = latest_message_seq(service, session_id)
         runtime.inbound_pending -= 1
         detail: str | None = None
         admission_token = begin_turn_admission(runtime)
         if admission_token is None:
             return False
+        try:
+            after_seq = latest_message_seq(service, session_id)
+        except Exception as exc:
+            # #204 broad-except audit: no claim was attempted. Release FIFO only
+            # with a durable unstarted drop; otherwise let M19 settle it as fatal.
+            logger.warning("queued baseline read failed for %s", session_id, exc_info=True)
+            return drop_unstarted(
+                service,
+                session_id,
+                runtime,
+                message_id,
+                DROPPED_ERROR,
+                admission_token,
+                f"{type(exc).__name__}: {exc}",
+            )
         try:
             if compaction.send_blocked(service.db, session_id, runtime, text):
                 detail = DROPPED_COMPACTING
@@ -114,9 +124,15 @@ def _deliver(
                 admission_token.delivery_seq = int(proof["seq"])
             detail = None if proof is not None else DROPPED_ERROR
         if detail is not None:
-            cancel_turn_admission(admission_token)
-            _note_dropped(service, session_id, message_id, detail, runtime=runtime)
-            return False
+            return drop_unstarted(
+                service,
+                session_id,
+                runtime,
+                message_id,
+                detail,
+                admission_token,
+                f"queued drop persistence failed: {detail}",
+            )
         try:
             open_turn(runtime, text, owner=admission_token, message_id=message_id, prompt=prompt)
         except Exception as exc:
@@ -128,38 +144,3 @@ def _deliver(
             )
             return False
         return admission_token
-
-
-def publish_committed(service: StudioChatService, session_id: str, row: dict[str, Any]) -> None:
-    """Push an already-committed status row + snapshot; best-effort only."""
-    try:
-        service.store.publish(session_id, {"type": "message", "message": serialize_message(row)})
-        service.store.publish_session(session_id)
-    except Exception:
-        # #204 broad-except audit: the row and claim are durable; a failed
-        # publish must not abort the claimed turn's prompt. Traceback retained.
-        logger.warning("queued chat message publish failed for %s", session_id, exc_info=True)
-
-
-def _note_dropped(
-    service: StudioChatService,
-    session_id: str,
-    message_id: str,
-    detail: str,
-    *,
-    runtime: SessionRuntime | None = None,
-) -> None:
-    try:
-        service.store.append_message(
-            session_id,
-            "status",
-            "system",
-            {"event": "queued_dropped", "message_id": message_id, "detail": detail},
-        )
-        service.store.publish_session(session_id)
-    except Exception:
-        # #204 broad-except audit: the drop was decided without an ACP start;
-        # a missing advisory row keeps the UI session-status fallback. Traceback retained.
-        logger.warning("queued chat message notice failed for %s", session_id, exc_info=True)
-    if runtime is not None:
-        runtime.inbound_messages.pop(message_id, None)

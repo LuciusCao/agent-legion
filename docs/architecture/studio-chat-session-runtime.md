@@ -216,6 +216,13 @@ pre-claim rejection，或持久读取证明 session 仍 idle 且没有本次交�
 ABORTED，queued 才可按未投递 drop。证明读取失败、归属不明或 open 镜像失败同样选择保守 KILLING；
 已知人工 message id 先保留为 delivered，再由同代 M19 恰好一次 unknown/settlement 或重启重建补齐。
 
+queued 的 baseline 读取也属于队列所有权协议，在 `begin_turn_admission` 与 pending decrement 之后执行，
+不得以 `after_seq=None` 继续 claim。baseline 读失败表示尚未尝试本次 claim：`queued_drop.drop_unstarted`
+先尝试写既有 `queued_dropped`，只有 durable drop 才 abort lease 并释放 FIFO；drop 写失败则同一 lease
+进入 conservative fatal，由 M19 按 queued 身份恰好一次补 drop。`inbound_pending` 与实际出队/终态一致，
+后续消息不得越过尚未可见结算的旧消息。恢复期 cancel 不把它改成 delivered unknown；已有
+`queued_delivered` 的输入仍走 unknown，不与 baseline 未开始 drop 混用。
+
 prompt response 只把 OPEN 改为 RESPONDED 并清除 total deadline，不直接 CLOSED，也不清除 cancel。
 `begin_normal_close` 在 control_lock 内验证 lease/runtime/owner/fence 后把 OPEN 或 RESPONDED 改为 CLOSED，
 这是正常终态与 Timer/KILLING 的共同线性化点，不在锁内做 DB/I/O。response→cancel 只在该仲裁之前有效；
@@ -292,6 +299,7 @@ per-turn containment，process/stream death 仍由 M19 立即接管。
 | T20 | direct/empty post-commit 证明恢复、background 无 attempt 证明保守 fatal、四路 open 异常；真正未接受才 abort，不自动重放 | `test_studio_chat_turn_lease_recovery.py` |
 | T21 | direct/queued response/RequestError 在 consumer、真实回调入口、append→close 三处与 KILLING 交错；正常 close 先仲裁则正常完成，否则仅 unknown | `test_studio_chat_terminal_arbitration.py` |
 | T22 | 第二次 empty/queued pre-claim、foreign running、append/idle/proof-read 失败及历史完成行；只接受本次 admission/complete proof，startup reconcile 幂等 | `test_studio_chat_admission_proof.py`、`test_studio_chat_terminal_arbitration.py` |
+| T23 | 真实 prompt_loop 首次 baseline 失败→恢复→第二条发送、持续读/drop 写失败与恢复期 cancel；FIFO 不越过，queued 仅一次 drop，delivered 仅 unknown | `test_studio_chat_inbound_baseline.py` |
 
 真实 ACP 回归还证明普通 cancel 不杀健康进程、普通 RequestError 不转 fatal。测试另覆盖 direct
 第二 turn、background 后 queued human 与 empty-retry 的 lease 显式传递，防止恢复旧的隐式 owner

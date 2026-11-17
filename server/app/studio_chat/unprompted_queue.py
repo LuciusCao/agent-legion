@@ -54,9 +54,10 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver, _note_dropped
+from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver
 from server.app.studio_chat.inbound_delivery import hold as hold
 from server.app.studio_chat.kimi_wire import kimi_code_homes, locate_wire
+from server.app.studio_chat.queued_drop import _note_dropped
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 
 if TYPE_CHECKING:
