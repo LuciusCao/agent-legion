@@ -3,9 +3,8 @@ import { useSettingStore } from '../../../stores/settingStore'
 import { useStudioChat } from './useStudioChat'
 import { useStudioContextSync } from './useStudioContextSync'
 import { useStudioDraftSync } from './useStudioDraftSync'
-import { AgentChatPanel } from './AgentChatPanel'
-import { StudioChatSessionBar } from './StudioChatSessionBar'
 import { useStudioChatSessionManage } from './useStudioChatSessionManage'
+import { StudioChatView } from './StudioChatView'
 import shellStyles from './AgentChatPanel.module.css'
 
 type Props = {
@@ -54,35 +53,12 @@ export function StudioChatPanel(props: Props) {
   }
 
   return (
-    <AgentChatPanel
+    <StudioChatView
       chat={chat}
+      manage={manage}
       workspaceId={workspaceId}
-      header={
-        <>
-          <StudioChatSessionBar
-            agents={chat.agents}
-            sessions={chat.sessions}
-            selectedAgentId={selectedAgentId}
-            activeSessionId={chat.activeSessionId}
-            onSelectAgent={setChosenAgentId}
-            onSelectSession={(sessionId) => void chat.selectSession(sessionId)}
-            onNewChat={() =>
-              selectedAgentId && void chat.startSession(selectedAgentId)
-            }
-            newChatDisabled={!selectedAgentId || chat.starting}
-            onRenameSession={manage.rename}
-            onDeleteSession={manage.remove}
-            archivedSessions={manage.archivedSessions}
-            onArchiveSession={manage.archive}
-            onUnarchiveSession={manage.unarchive}
-            retentionDays={manage.retentionDays}
-          />
-        </>
-      }
-      showAgentConfig
-      emptyState="选择 Agent，点「＋ 新对话」开始"
-      noSessionReason="先选择会话或新建对话"
-      closedReason="会话已关闭或中断，点「继续对话」恢复"
+      selectedAgentId={selectedAgentId}
+      onSelectAgent={setChosenAgentId}
       onApplyWorkflowDraft={props.onApplyWorkflowDraft}
       onSelectNode={props.onSelectNode}
     />

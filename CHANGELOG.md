@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- Studio Agent 助手新增「对话 / 后台任务」页签（Refs #1152）：按当前会话与 `(acp_session_id, task_id)` 收纳 Agent/Bash 任务，legacy 缺省 ACP 身份使用独立域，同 id 跨 ACP 恢复不会串终态；展示状态、随当前时间推进的非终态耗时、终态摘要与完整事件历史，支持类型筛选、键盘页签、空态及任务页主动加载更早历史；对话 timeline 仅保留每个任务身份的首次观察与终态通知，终态后的迟到进展只追加任务历史，重复终态的空字段不会抹掉已确认摘要与耗时；其他消息语义、composer 草稿、发送队列、SSE 与后端事件契约不变。
 - Studio turn 时序新增 env-only 配置（Refs #1153 A2）：prompt 明确总时长、cancel grace、自发 turn gate 无进展释放与 close 清理宽限分别默认为 3600/30/900/5 秒，有限正数以外的配置在启动时 fail-fast；`StudioTimingConfig` 在每个 handle 创建时冻结注入，既有 handle 不 retroactively 改配置，无 env 时行为与旧常量一致，不新增配置 UI/routes/instance-settings schema。
 - 自含 agent 节点的 capability 第一阶段可选化（Refs #936，不关闭 #936/#440）：省略或清空后统一规范化为 `''`，仅作可选标签，不回填 node key、不参与路由或 Worker claim 匹配；Studio 新建/类型切换支持空标签且草稿不再回显 published capability，publish→dispatch→claim 真链路保持 node key/label 展示。code 节点与 legacy agent 仍要求非空 capability，旧 job/replay resolver、历史 `versioned_entities` 行、runtime/skill 等自含档案必填约束与 #805 顶层 execution 语义不变；code capability 退役留待独立切片。
 - code 节点 capability 第一实施片（Refs #440/#936，不关闭 Epic）：缺省或显式 `''` 统一为 `''`，null/非字符串继续拒绝，旧非空值不回填 node key、不全局清洗；WorkflowNode/response/manifest/`runtime['capability']` 保留字符串兼容字段，published node_code 仍以 `(workspace_id, workflow_key, node_key)` 为身份、`code_hash` 为完整性，普通 job/rerun 取当前 published，quality replay 与 legacy global 的精确 pin 规则不变。远程 guard 改用 node key+hash，显式 `expected_capability: ''` 支持 capless 精确匹配与骨架草稿，`agent_id`/lease 字符串暂不迁移且无新增 DDL。**升级注意：旧 Host 不能读取新 capless revision，发布前必须先升级 Host，不伪造非空值维持假兼容。**
