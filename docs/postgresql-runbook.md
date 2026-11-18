@@ -58,6 +58,39 @@ entirely on later calls in that process (`db/schema_head_cache.py`); the
 test harness invalidates that memo on schema rebuilds and disables it
 inside `fresh_schema` tests.
 
+## Read-only historical Agent-route audit (#936)
+
+Before any future route-retirement slice, run the following against a derived
+test database or a restored/read replica authorized for local inspection, never
+an ambient production DSN:
+
+```bash
+uv run python -m scripts.agent_route_retirement_audit \
+  --database-url postgresql://127.0.0.1:5432/<derived-db> \
+  --output /tmp/agent-route-retirement-audit.json
+```
+
+The CLI walks every job snapshot, every active revision that still has legacy
+agent nodes, every historical `agent_versions` pin and every queued
+Agent-definition request on one `REPEATABLE READ READ ONLY` snapshot. Its
+JobQueries factory never calls `init_db`, and `default_transaction_read_only=on`
+makes the server reject accidental writes. There is no apply mode, runtime
+delete, automatic migration or DDL.
+
+`equivalent` and `route_less_fallback` are non-blocking only when the unique
+published fallback preserves identity. Only a genuinely absent route row can be
+`route_less_fallback`; an existing non-Agent, empty-target or illegal route is
+`invalid_route` and blocks because enqueue currently fails while deleting the
+row could run. Drift, missing/unpublished/invalid targets, pin mismatches,
+missing/malformed snapshots and empty/ambiguous capabilities also block. Stored
+Agent, pin and queued-request definition hashes must all be canonical SHA-256
+(64 lowercase hex characters) before any equality comparison; equal malformed
+values still block and their original text is not reported. The CLI exits 1 if
+any blocking item exists and otherwise 0. Review the stable reason codes instead
+of treating a clean-looking current catalog as proof that historical executions
+are equivalent. Reports contain identifiers, validated hashes and lifecycle
+metadata only; keep them local and never commit them.
+
 ## Dev-machine role isolation and worktree DB cleanup
 
 `DROP DATABASE` requires the database owner or a superuser. To make the
