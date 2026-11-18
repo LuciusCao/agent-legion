@@ -151,7 +151,7 @@ def resolve_agent_node_profile(
     profile. None for non-agent nodes (#284: only ``type: agent`` dispatches
     through an Agent) and when the capability resolves to zero or several published
     Agents — the latter is a catalog error every caller already rejects or
-    treats as unresolved (publish gate, route derivation). Pass *index*
+    treats as unresolved (publish gate, dispatch/backfill resolution). Pass *index*
     when resolving several nodes against the same catalog.
     """
     if node.node_type != "agent":

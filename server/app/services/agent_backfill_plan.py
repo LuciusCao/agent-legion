@@ -12,7 +12,7 @@ module never re-implements resolution:
 * skill: the node binding wins; otherwise the definition's legacy skill
   sinks to the node (``effective_node_skill``, ref ``latest``).
 
-Draft nodes resolve by capability (what the next publish would route).
+Draft nodes resolve by capability; a later publish does not materialize a route (#936).
 Active-revision nodes resolve by their materialized route target
 (``workspace_node_routes`` — what dispatch actually runs; Agent publish /
 archive never rewrites routes), reading the target's definition even when

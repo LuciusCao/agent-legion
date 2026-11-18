@@ -1,8 +1,8 @@
-"""Dual-track publish gate (#933, #440 P2).
+"""Agent profile publish gates and frozen-route retention (#933/#935/#936).
 
-Self-contained agent nodes (``execution.runtime``) publish in a workspace
-with no Agent definitions and materialize no route; half-filled profiles
-are rejected; since #935 (P3 gate flip) legacy agent nodes are rejected. The scan-gate probe sees the self-contained active revision.
+Product publish requires self-contained agent profiles. Every publish, including
+internal legacy fixtures, writes no route; historical rows survive only while
+their node remains an agent, and the scan-gate probe sees self-contained revisions.
 """
 
 from __future__ import annotations
@@ -62,10 +62,20 @@ def _workspace(queries: JobQueries) -> str:
 def _routes(queries: JobQueries, workspace_id: str) -> list[dict]:
     with queries._connect_read() as conn:
         rows = conn.execute(
-            "select node_key, target_kind from workspace_node_routes where workspace_id=%s",
+            "select node_key, target_kind, target_id from workspace_node_routes"
+            " where workspace_id=%s order by node_key",
             (workspace_id,),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def _seed_route(queries: JobQueries, workspace_id: str, node_key: str, target_id: str) -> None:
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', %s)",
+            (workspace_id, node_key, target_id),
+        )
 
 
 def test_self_contained_node_publishes_without_any_agent_definition(tmp_path: Path) -> None:
@@ -126,11 +136,7 @@ def test_self_contained_revision_materializes_no_route_and_opens_the_scan_gate(
     assert agent_profiles_may_exist(queries) is True
 
 
-def test_self_contained_publish_freezes_existing_routes(tmp_path: Path) -> None:
-    """#935 route 停写: once a workspace publishes a fully self-contained
-    revision the route table is never written again — rows materialized for
-    an earlier legacy revision stay frozen (read-only) for its in-flight jobs
-    instead of being pruned."""
+def test_internal_legacy_publish_never_materializes_a_route(tmp_path: Path) -> None:
     from server.app.agent_catalog import AgentDefinition
     from tests.helpers import replace_agent_catalog
 
@@ -139,23 +145,19 @@ def test_self_contained_publish_freezes_existing_routes(tmp_path: Path) -> None:
     replace_agent_catalog(
         workspace_id, {"draft-agent": AgentDefinition(capability="draft", runtime="pi")}
     )
-    service = WorkflowRevisionService(queries, True)
     legacy = yaml.safe_load(_yaml(""))
     legacy["key"] = workspace_id
-    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(legacy))
-    assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
 
-    raw = yaml.safe_load(_SELF_CONTAINED)
-    raw["key"] = workspace_id
-    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(raw))
+    WorkflowRevisionService(queries, True).publish_workspace_revision(
+        workspace_id, workflow_definition_from_mapping(legacy)
+    )
 
-    assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
+    assert _routes(queries, workspace_id) == []
 
 
-def test_self_contained_publish_prunes_routes_of_nodes_turned_code(tmp_path: Path) -> None:
-    """#935 R1: route freeze stops upserts, not the prune — a node turned
-    ``code`` (capability kept) loses its stale agent row, so neither routing
-    nor job detail can mistake it for an Agent node."""
+def test_mixed_publish_preserves_agent_routes_and_prunes_only_removed_nodes(
+    tmp_path: Path,
+) -> None:
     from server.app.agent_catalog import AgentDefinition
     from tests.helpers import replace_agent_catalog
 
@@ -164,18 +166,40 @@ def test_self_contained_publish_prunes_routes_of_nodes_turned_code(tmp_path: Pat
     replace_agent_catalog(
         workspace_id, {"draft-agent": AgentDefinition(capability="draft", runtime="pi")}
     )
-    service = WorkflowRevisionService(queries, True)
-    legacy = yaml.safe_load(_yaml(""))
-    legacy["key"] = workspace_id
-    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(legacy))
-    assert _routes(queries, workspace_id) == [{"node_key": "draft", "target_kind": "agent"}]
+    for node_key in ("draft", "inline", "removed"):
+        _seed_route(queries, workspace_id, node_key, f"historical-{node_key}")
+    mixed = yaml.safe_load(_yaml(""))
+    mixed["key"] = workspace_id
+    mixed["nodes"]["inline"] = {
+        "type": "agent",
+        "capability": "inline",
+        "execution": {"runtime": "velites"},
+        "outputs": ["inline.json"],
+    }
 
+    WorkflowRevisionService(queries, True).publish_workspace_revision(
+        workspace_id, workflow_definition_from_mapping(mixed)
+    )
+
+    assert _routes(queries, workspace_id) == [
+        {"node_key": "draft", "target_kind": "agent", "target_id": "historical-draft"},
+        {"node_key": "inline", "target_kind": "agent", "target_id": "historical-inline"},
+    ]
+
+
+def test_publish_prunes_routes_of_nodes_turned_code(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace_id = _workspace(queries)
+    _seed_route(queries, workspace_id, "draft", "historical-draft")
     as_code = yaml.safe_load(_yaml(""))
     as_code["key"] = workspace_id
     node = as_code["nodes"]["draft"]
     node["type"] = "code"
     node.pop("skill")
-    service.publish_workspace_revision(workspace_id, workflow_definition_from_mapping(as_code))
+
+    WorkflowRevisionService(queries, True).publish_workspace_revision(
+        workspace_id, workflow_definition_from_mapping(as_code)
+    )
 
     assert _routes(queries, workspace_id) == []
 

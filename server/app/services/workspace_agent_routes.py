@@ -1,11 +1,10 @@
 """Read model for workspace Agent routes.
 
-Routes are materialized projections of the currently published workflow
-revision; this service only reads them for settings-page display. Agent
-capacity is workspace-level (``workspace_agent_capacities``, exposed via the
-workspace configuration payload).
+Routes are historical projections retained for legacy snapshots; this service
+only reads them for settings-page display. Agent capacity is workspace-level
+(``workspace_agent_capacities``, exposed via the workspace configuration payload).
 
-#1079（#440 P3b）：自 P3 起全自含 revision 不再 upsert 路由行，存量行冻结
+#1079（#440 P3b）与 #936：所有 revision 发布均不再 upsert 路由行，存量行冻结
 只读、只服务 v93 内联前的旧快照。设置页展示的是「当前 workflow 的节点走哪个
 Agent」，故只保留 active revision 中仍是 legacy（未自含）agent 节点的路由行；
 已自含的节点、已删除或已非 agent 的节点不再显示冻结映射。

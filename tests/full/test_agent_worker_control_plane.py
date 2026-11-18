@@ -126,30 +126,32 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 
 
 @pytest.mark.full_gate
-def test_startup_materializes_agent_routes(client, job_db) -> None:
-    """Startup wiring: the workspace's published catalog is visible, and an
-    explicitly created workspace's active revision gets its Agent routes
-    materialized at publish — the two states whose loss caused the 'Executor
-    pi is not registered' incident. No workspace is seeded at startup; the
-    fixture workspace is created and published here. Explicit node types
-    (#284) retired the startup reconcile: routes materialize only at
-    publish."""
+def test_startup_reads_historical_agent_routes(client, job_db) -> None:
+    """The published catalog and historical routes remain visible at startup."""
     workspace = job_db.create_workspace("Route Check")
     workspace_id = workspace["id"]
-    # Agent definitions are workspace-scoped (schema v46): this legacy-route
-    # test constructs the historical demo rows explicitly; production binding
-    # and self-contained revisions do not seed them.
     seed_workspace_agent_definitions(workspace_id)
     expected_agents = set(published_agent_definitions(TEST_DATABASE_URL, workspace_id))
     assert expected_agents, "test requires a non-empty published Agent catalog"
 
-    # #935: the demo ships self-contained nodes (no routes); the legacy
-    # variant keeps exercising route materialization for pre-inlining shapes.
     definition = legacy_profile_variant(
         load_builtin_definition("education_video_problems_generation")
     )
     revision_service = WorkflowRevisionService(job_db)
     revision_service.publish_workspace_revision(workspace_id, definition)
+    historical_targets = {
+        "write_script": "example-write-script-v1",
+        "review_script": "example-review-script-v1",
+        "generate_questions": "example-generate-questions-v1",
+        "review_questions": "example-review-questions-v1",
+    }
+    with job_db.connect() as conn:
+        for node_key, target_id in historical_targets.items():
+            conn.execute(
+                "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+                " values (%s, %s, 'agent', %s)",
+                (workspace_id, node_key, target_id),
+            )
 
     with job_db._connect_read() as conn:
         published = {
@@ -167,8 +169,7 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
         ).fetchall()
 
     assert published == expected_agents
-    assert routes, "publish must materialize routes for the active revision"
-    assert {row["target_id"] for row in routes} <= expected_agents
+    assert {row["node_key"]: row["target_id"] for row in routes} == historical_targets
 
 
 @pytest.mark.full_gate

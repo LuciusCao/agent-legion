@@ -6,8 +6,8 @@ routes — so the route target, not today's capability lookup, is what the
 node executes and what the 0.7.17 backfill must copy from. The target's
 definition is read even when archived. Whenever the route target and the
 catalog's capability resolution disagree the node is flagged
-``route_drift``. Drafts keep capability resolution (what the next publish
-would route) and never come through here.
+``route_drift``. Drafts keep capability resolution and never come through here;
+a later publish does not materialize a route (#936).
 """
 
 from __future__ import annotations

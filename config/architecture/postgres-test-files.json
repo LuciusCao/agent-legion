@@ -312,6 +312,7 @@
     "tests/workflows/test_workflow_revision_prune.py",
     "tests/workflows/test_workflow_revision_round_trip.py",
     "tests/workflows/test_workflow_revisions.py",
+    "tests/workflows/test_workflow_revisions_route_retention.py",
     "tests/workflows/test_workflow_worker_concurrency.py"
   ]
 }
