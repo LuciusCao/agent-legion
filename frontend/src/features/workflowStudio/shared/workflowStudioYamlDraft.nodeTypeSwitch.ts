@@ -54,14 +54,12 @@ export function sanitizeNodeForType(
     if (Object.keys(config).length === 0) delete node.config
   }
   if (targetType === 'code') delete node.skill
-  if (targetType === 'agent') node.capability = node.capability ?? ''
+  node.capability = node.capability ?? ''
 }
 
 // 类型切换前置校验：目标类型必需的状态在写入前检查，不满足即抛错并
-// 保留原类型（草稿可自动保存，半应用态会被持久化）。loader 侧对应：
-// - code 必须有非空 capability；approval→code 必须随切换原子补上
-//   （capabilityChannel；结构化 UI 对 approval 隐藏 capability 输入框，
-//   「先补再切」在该形态下不可达，#405）。agent 可省略该可选标签。
+// 保留原类型（草稿可自动保存，半应用态会被持久化）。code/agent 的
+// capability 都是可选标签，缺省在 sanitize 阶段归一为 ''。loader 侧对应：
 // - approval 必须有来自可执行节点的入边（approval_node.py
 //   validate_approval_edges；仅 start 驱动的根节点不满足，start 的合成
 //   边不算数）。判定源 = 节点 after ∪ 草稿 edges 中进入本节点的边的
@@ -76,14 +74,8 @@ export function validateNodeTypeSwitch(
   },
   node: WorkflowYamlNode,
   nodeKey: string,
-  targetType: 'code' | 'agent' | 'approval',
-  capabilityChannel?: string
+  targetType: 'code' | 'agent' | 'approval'
 ): void {
-  if (targetType === 'code' && !node.capability && !capabilityChannel) {
-    throw new WorkflowNodeTypeSwitchError(
-      `切换为 ${targetType} 需要先在「基本设置」填写 capability（当前节点没有）`
-    )
-  }
   if (targetType === 'approval') {
     // `nodes:` 下空体键（`review:` 值为 null，编辑中途常见）：各处读取
     // 都要容忍——start 判定用 n?.type，存在性判定自有键 ∧ 真值双查

@@ -22,9 +22,9 @@ export class WorkflowNodeAppendError extends Error {}
 // 未显式声明时后端注入合成 start 会自动让位改名，无冲突风险）；草稿经
 // parseWorkflowYamlStrictNodes 结构守卫（nodes 数组/字符串或某节点非
 // mapping 的草稿拒绝追加——对象展开会把索引当节点键、覆盖保存时不可逆
-// 破坏草稿）；code 的 capability 缺省 = key，agent 的 capability 是可选
-// 标签（缺省/空白归一为 ''，不回填 key），approval 无 capability；label
-// 缺省 = key。失败抛 WorkflowNodeAppendError，草稿不动。
+// 破坏草稿）；code/agent 的 capability 都是可选标签（缺省/空白归一为 ''，
+// 不回填 key），approval 无 capability；label 缺省 = key。失败抛
+// WorkflowNodeAppendError，草稿不动。
 export function appendWorkflowNode(
   rawYaml: string,
   input: AppendWorkflowNodeInput
@@ -47,13 +47,7 @@ export function appendWorkflowNode(
   if (Object.prototype.hasOwnProperty.call(nodes, key)) {
     throw new WorkflowNodeAppendError(`节点 Key「${key}」已存在`)
   }
-  const capability =
-    input.nodeType === 'agent'
-      ? input.capability?.trim() || ''
-      : input.capability?.trim() || key
-  if (input.nodeType === 'code' && !capability) {
-    throw new WorkflowNodeAppendError('code 节点需要非空 capability')
-  }
+  const capability = input.capability?.trim() || ''
   const node: WorkflowYamlNode = {
     type: input.nodeType,
     label: input.label?.trim() || key,

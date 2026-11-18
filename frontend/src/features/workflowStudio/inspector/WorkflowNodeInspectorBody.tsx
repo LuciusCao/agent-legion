@@ -17,7 +17,7 @@ export function WorkflowNodeInspectorBody(props: Props) {
   const { node } = props.details
   // 头部类型选择器（#392）接线；start 只读展示，不下发回调。切换前置
   // 校验按草稿 YAML 的当前类型判定（details 可能来自已发布基线，草稿里
-  // 类型可能已被切走；#405 approval 切出据此弹窗补 capability）。
+  // 类型可能已被切走；approval 切出不再弹窗，缺省 capability 归一为 ''）。
   const changeNodeType = useNodeTypeSwitch(
     props.definitionYaml,
     node.key,
