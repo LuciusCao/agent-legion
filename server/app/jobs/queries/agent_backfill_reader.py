@@ -1,7 +1,7 @@
-"""Read-only DB adapter for the Agent backfill dry-run report (#934, #440).
+"""Server-read-only JobQueries adapter for local Agent retirement audits.
 
-The dry-run walks every workspace's active revision and Studio draft plus
-the Agent catalog, and must never write. Two structural guards:
+The backfill dry-run and historical route-retirement audit must never write.
+Two structural guards:
 
 * the facade is built without ``JobQueriesBase.__init__`` (mirrors
   ``global_settings_kv_from_dsn``): the normal constructor runs ``init_db``
@@ -17,6 +17,9 @@ from __future__ import annotations
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from server.app.jobs.queries import JobQueries
+from server.app.jobs.queries.agent_route_retirement_audit import (
+    AgentRouteRetirementQueriesMixin,
+)
 
 _READ_ONLY_OPTION = "-c default_transaction_read_only=on"
 
@@ -37,8 +40,8 @@ def read_only_dsn(dsn: str) -> str:
     return urlunsplit(parts._replace(query=query_text))
 
 
-class AgentBackfillReader(JobQueries):
-    """JobQueries plus the materialized Agent-route read the report needs."""
+class AgentBackfillReader(AgentRouteRetirementQueriesMixin, JobQueries):
+    """JobQueries plus the specialized reads used by local retirement audits."""
 
     def agent_route_targets(self, workspace_id: str) -> dict[str, str]:
         """node_key → Agent route target id (``workspace_node_routes``) of one workspace."""

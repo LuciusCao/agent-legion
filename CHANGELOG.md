@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Added
 
+- 历史 Agent route 退役只读预检（Refs #936/#440 M27-E，不关闭 Epic）：新增 `scripts/agent_route_retirement_audit.py`，经 server-enforced read-only DSN 与 JobQueries 一致快照覆盖全部仍可读 job snapshot、active unresolved revision、`agent_versions` pin 和 queued Agent-definition request，区分 equivalent 与 route-less fallback，并将 drift、missing/unpublished/invalid target、pin mismatch、缺失/畸形 snapshot、空或歧义 capability 全部 fail-closed；有阻断项时 CLI 退出 1，不运行 `init_db`、不写 SQL、不删运行数据、不做 DDL，报告仅含本地标识/hash/状态/分类码且不得提交。
 - Studio Agent 助手新增「对话 / 后台任务」页签（Refs #1152）：按当前会话与 `(acp_session_id, task_id)` 收纳 Agent/Bash 任务，legacy 缺省 ACP 身份使用独立域，同 id 跨 ACP 恢复不会串终态；展示状态、随当前时间推进的非终态耗时、终态摘要与完整事件历史，支持类型筛选、键盘页签、空态及任务页主动加载更早历史；对话 timeline 仅保留每个任务身份的首次观察与终态通知，终态后的迟到进展只追加任务历史，重复终态的空字段不会抹掉已确认摘要与耗时；其他消息语义、composer 草稿、发送队列、SSE 与后端事件契约不变。
 - Studio turn 时序新增 env-only 配置（Refs #1153 A2）：prompt 明确总时长、cancel grace、自发 turn gate 无进展释放与 close 清理宽限分别默认为 3600/30/900/5 秒，有限正数以外的配置在启动时 fail-fast；`StudioTimingConfig` 在每个 handle 创建时冻结注入，既有 handle 不 retroactively 改配置，无 env 时行为与旧常量一致，不新增配置 UI/routes/instance-settings schema。
 - 自含 agent 节点的 capability 第一阶段可选化（Refs #936，不关闭 #936/#440）：省略或清空后统一规范化为 `''`，仅作可选标签，不回填 node key、不参与路由或 Worker claim 匹配；Studio 新建/类型切换支持空标签且草稿不再回显 published capability，publish→dispatch→claim 真链路保持 node key/label 展示。code 节点与 legacy agent 仍要求非空 capability，旧 job/replay resolver、历史 `versioned_entities` 行、runtime/skill 等自含档案必填约束与 #805 顶层 execution 语义不变；code capability 退役留待独立切片。
