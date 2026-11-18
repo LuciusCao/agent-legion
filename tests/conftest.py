@@ -34,8 +34,8 @@ from server.app.settings import load_settings
 
 # Test Agent catalog: Agent definitions are workspace-scoped (schema v46), so
 # there is no global seed here — workspaces do not exist at schema-reset time.
-# Tests seed the built-in demo agents into their own workspace via
-# tests/helpers.seed_workspace_agent_definitions, and revisions via
+# Only legacy resolver/replay/read tests seed historical demo agents, via
+# tests/helpers/legacy_agent_definitions.py; revisions are published via
 # tests/helpers.publish_builtin_revision / publish_legacy_intake_revision
 # (schema v62: workspace creation no longer seeds the demo template —
 # ensure_active_revision runs only through `make import-demo` /

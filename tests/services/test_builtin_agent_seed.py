@@ -16,11 +16,8 @@ from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.workflow_node_skill import node_skill_publish_error
-from tests.helpers import (
-    publish_agent_definition,
-    save_agent_definition_draft,
-    seed_workspace_agent_definitions,
-)
+from tests.helpers import publish_agent_definition, save_agent_definition_draft
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 
 
 @pytest.fixture

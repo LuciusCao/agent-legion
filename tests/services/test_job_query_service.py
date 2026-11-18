@@ -13,11 +13,8 @@ from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
 from server.app.storage_paths import make_data_relative, resolve_job_dir
-from tests.helpers import (
-    load_builtin_definition,
-    publish_builtin_revision,
-    seed_workspace_agent_definitions,
-)
+from tests.helpers import load_builtin_definition, publish_builtin_revision
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 from tests.services.job_query_testlib import create_question_job
 
 

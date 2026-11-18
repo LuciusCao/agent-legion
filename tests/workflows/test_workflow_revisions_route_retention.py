@@ -11,11 +11,8 @@ from server.app.workflows.definition import (
     WorkflowDefinition,
     workflow_definition_from_mapping,
 )
-from tests.helpers import (
-    load_builtin_definition,
-    replace_agent_catalog,
-    seed_workspace_agent_definitions,
-)
+from tests.helpers import load_builtin_definition, replace_agent_catalog
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 from tests.helpers.node_profile import legacy_profile_variant
 from tests.postgres_support import TEST_DATABASE_URL
 

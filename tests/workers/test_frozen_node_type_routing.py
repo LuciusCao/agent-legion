@@ -30,11 +30,8 @@ from server.app.services.workspace_execution_configuration import (
 from server.app.workflow_worker.routing import NodeRoute, resolve_node_route
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.revision_format import serialize_definition
-from tests.helpers import (
-    load_builtin_definition,
-    replace_agent_catalog,
-    seed_workspace_agent_definitions,
-)
+from tests.helpers import load_builtin_definition, replace_agent_catalog
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 from tests.helpers.node_profile import legacy_profile_variant
 
 NODE = "write_script"
@@ -45,6 +42,12 @@ AGENT = "example-write-script-v1"
 def workspace_id(job_db) -> str:
     workspace = job_db.create_workspace("frozen-type-ws", workspace_id="frozen_type_ws")
     seed_workspace_agent_definitions(workspace["id"])
+    return str(workspace["id"])
+
+
+@pytest.fixture
+def self_contained_workspace_id(job_db) -> str:
+    workspace = job_db.create_workspace("self-contained-ws", workspace_id="self_contained_ws")
     return str(workspace["id"])
 
 
@@ -180,8 +183,9 @@ def test_agent_turned_code_keeps_the_old_job_on_its_agent(
 
 
 def test_self_contained_snapshot_routes_to_its_own_profile(
-    job_db, workspace_id, query_service
+    job_db, self_contained_workspace_id, query_service
 ) -> None:
+    workspace_id = self_contained_workspace_id
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, _legacy())
     _seed_route(job_db, workspace_id)
     snapshot = load_builtin_definition("education_video_problems_generation")

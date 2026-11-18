@@ -1,7 +1,7 @@
 import pytest
 
 from server.app.services.agent_catalog_projection import AgentCatalogService
-from tests.helpers import seed_workspace_agent_definitions
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 
 
 @pytest.fixture

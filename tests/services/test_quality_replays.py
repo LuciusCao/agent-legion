@@ -17,7 +17,7 @@ from server.app.services.quality_replays import QualityReplayService
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
-from tests.helpers import seed_workspace_agent_definitions
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.fresh_schema

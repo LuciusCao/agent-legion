@@ -5,7 +5,7 @@ def _create_workspace(client) -> str:
     )
     assert response.status_code == 200, response.text
     # v62: creation no longer seeds the factory Agents.
-    from tests.helpers import seed_workspace_agent_definitions
+    from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 
     seed_workspace_agent_definitions(response.json()["workspace"]["id"])
     return str(response.json()["workspace"]["id"])
