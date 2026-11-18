@@ -33,6 +33,7 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ### Removed
 
+- **Breaking (UI)（Refs #936/#440，不关闭 Epic）**：移除 Workspace 设置页的「历史 Agent 定义」区块、导航入口及已无消费者的 list/provenance wrapper、query key 和引用计数 helper；设置页其他区域与 admin/member 角色权限不变，后端全部历史 Agent 行、list/detail/versions 三个人类 GET、scoped GET、MCP read、`/agent-provenance`、revision provenance、旧 job/replay 兼容读取及 Studio 只读 catalog 均保留。
 - **Breaking (behavior)（Refs #936/#440，不关闭 Epic）**：所有 workflow revision 发布（含绕过产品门禁的内部/test legacy publish）均停止新增或改写 `workspace_node_routes`；仍声明 agent 的节点保留冻结 target，只有已删除或改 code 的节点继续 prune，route-less legacy 节点沿用现有唯一 capability fallback，冻结 route 与当前候选不一致时仍按 route 或 fail-closed，历史只读 Agent、pin/replay、routes 表/索引/读取 API 与全部读者不变，无 DDL。
 - **Breaking（Refs #936，#440 P4 人类写面收尾，不关闭 #936/#440）**：删除 `POST /api/agent-definitions`、`PUT .../{agent_id}/draft`、`POST .../{agent_id}/publish|rollback|copy` 与 `DELETE .../{agent_id}` 六个人类写端点，连同 `AgentService` 写方法、创建/发布 prune 服务、deprecation marker 及写请求/响应模型；不保留内部写兼容层。`GET` list/detail/versions、历史 `versioned_entities` 行、旧 job/replay resolver、MCP/Studio 只读能力与通用 `VersionedEntityStore` / node_code / preview_panel 生命周期保持不变；旧写请求不可达且零写库，前端 `AgentRuntime` 改从保留的 `AgentDefinitionResponse.runtime` 生成读契约派生。capability、routes DDL 与历史目录视觉 UI 留待后续切片。
 

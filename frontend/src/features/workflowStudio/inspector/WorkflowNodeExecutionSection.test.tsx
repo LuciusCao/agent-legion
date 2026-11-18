@@ -6,16 +6,11 @@ import { useSettingStore } from '../../../stores/settingStore'
 import type { WorkflowNodeRecord } from '../../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
-// #1079（#440 P3b）：节点详情不再解析 capability → Agent 定义，Agent 目录 /
-// 定义 API 一律不应被调用（mock 成抛错，误调即测试失败）。
+// #1079（#440 P3b）：节点详情不再解析 capability → Agent 定义，Agent 目录
+// API 不应被调用（mock 成抛错，误调即测试失败）。
 vi.mock('../../../api/agentCatalogApi', () => ({
   getAgentCatalog: vi.fn(() => {
     throw new Error('agent catalog must not be fetched by the section')
-  }),
-}))
-vi.mock('../../../api/agentDefinitions', () => ({
-  fetchAgentDefinitions: vi.fn(() => {
-    throw new Error('agent definitions must not be fetched by the section')
   }),
 }))
 
