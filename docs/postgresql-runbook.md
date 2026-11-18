@@ -78,13 +78,18 @@ makes the server reject accidental writes. There is no apply mode, runtime
 delete, automatic migration or DDL.
 
 `equivalent` and `route_less_fallback` are non-blocking only when the unique
-published fallback preserves identity. Drift, missing/unpublished/invalid
-targets, pin mismatches, missing/malformed snapshots and empty/ambiguous
-capabilities block; the CLI exits 1 if any blocking item exists and otherwise
-0. Review the stable reason codes instead of treating a clean-looking current
-catalog as proof that historical executions are equivalent. Reports contain
-identifiers, hashes and lifecycle metadata only; keep them local and never
-commit them.
+published fallback preserves identity. Only a genuinely absent route row can be
+`route_less_fallback`; an existing non-Agent, empty-target or illegal route is
+`invalid_route` and blocks because enqueue currently fails while deleting the
+row could run. Drift, missing/unpublished/invalid targets, pin mismatches,
+missing/malformed snapshots and empty/ambiguous capabilities also block. Stored
+Agent, pin and queued-request definition hashes must all be canonical SHA-256
+(64 lowercase hex characters) before any equality comparison; equal malformed
+values still block and their original text is not reported. The CLI exits 1 if
+any blocking item exists and otherwise 0. Review the stable reason codes instead
+of treating a clean-looking current catalog as proof that historical executions
+are equivalent. Reports contain identifiers, validated hashes and lifecycle
+metadata only; keep them local and never commit them.
 
 ## Dev-machine role isolation and worktree DB cleanup
 

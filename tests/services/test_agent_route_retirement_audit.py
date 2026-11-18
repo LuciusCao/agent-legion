@@ -71,12 +71,12 @@ def _job(
     )
 
 
-def _route(db: JobQueries, node_key: str, target_id: str) -> None:
+def _route(db: JobQueries, node_key: str, target_id: str, *, target_kind: str = "agent") -> None:
     with db.connect() as conn:
         conn.execute(
             "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
-            " values (%s, %s, 'agent', %s)",
-            (_WS, node_key, target_id),
+            " values (%s, %s, %s, %s)",
+            (_WS, node_key, target_kind, target_id),
         )
 
 
@@ -154,6 +154,57 @@ def test_equivalent_route_less_and_active_unresolved_are_safe(queries: JobQuerie
     assert report["coverage"]["active_revisions"] == 1
     assert {item["source"] for item in report["items"]} == {"job_snapshot", "active_revision"}
     assert all(item["fallback_target"] == "writer" for item in report["items"])
+    assert {
+        (item["source"], item["node_key"]): item["route_present"] for item in report["items"]
+    } == {
+        ("job_snapshot", "routed"): True,
+        ("job_snapshot", "free"): False,
+        ("active_revision", "free"): False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("target_kind", "target_id"), [("handler_executor", "legacy"), ("agent", "")]
+)
+def test_existing_unusable_route_blocks_every_source_and_cli(
+    queries: JobQueries, tmp_path: Path, target_kind: str, target_id: str
+) -> None:
+    replace_agent_catalog(_WS, {"writer": _agent()})
+    pin = {"agent_id": "writer", "version": 1, "definition_hash": _agent().definition_hash()}
+    run = _run(queries, "invalid-route", {"generate": pin})
+    job = _job(queries, "invalid-route", {"generate": _legacy("generate")}, run_id=str(run["id"]))
+    _route(queries, "generate", target_id, target_kind=target_kind)
+    _request(
+        queries,
+        "req-invalid-route",
+        str(job["id"]),
+        "generate",
+        "writer",
+        pin["definition_hash"],
+        version=1,
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workflow_revisions(id, workspace_id, version, status, definition_json,"
+            " definition_hash) values ('rev-invalid-route', %s, 1, 'active', %s, 'rev-hash')",
+            (_WS, _snapshot({"generate": _legacy("generate")})),
+        )
+
+    report = _audit()
+
+    assert len(report["items"]) == 4
+    assert {item["source"] for item in report["items"]} == {
+        "job_snapshot",
+        "active_revision",
+        "agent_version_pin",
+        "queued_request",
+    }
+    assert all(item["category"] == "invalid_route" for item in report["items"])
+    assert all(item["blocking"] and item["route_present"] for item in report["items"])
+    output = tmp_path / "invalid-route.json"
+    assert route_audit_main(["--database-url", TEST_DATABASE_URL, "--output", str(output)]) == 1
+    cli_report = json.loads(output.read_text(encoding="utf-8"))
+    assert cli_report["summary"]["by_category"]["invalid_route"] == 4
 
 
 def test_identity_changes_and_unreadable_snapshots_all_block(queries: JobQueries) -> None:
@@ -266,9 +317,9 @@ def test_pin_hash_mutation_blocks_job_pin_and_queued_request(queries: JobQueries
     assert all(item["category"] == "pin_mismatch" for item in report["items"])
     reasons = {item["source"]: item["reason"] for item in report["items"]}
     assert reasons == {
-        "job_snapshot": "definition_hash_mismatch",
-        "agent_version_pin": "definition_hash_mismatch",
-        "queued_request": "request_pin_hash_mismatch",
+        "job_snapshot": "invalid_definition_hash",
+        "agent_version_pin": "invalid_definition_hash",
+        "queued_request": "invalid_definition_hash",
     }
     assert "secret-pin-hash" not in json.dumps(report)
 
@@ -368,6 +419,153 @@ def _definition_row(agent_id: str, definition: AgentDefinition) -> dict[str, Any
         "definition_json": json.dumps(definition.model_dump(mode="json")),
         "definition_hash": definition.definition_hash(),
     }
+
+
+def _hash_fault_data(
+    hash_value: Any, *, with_pin: bool, invalid_definition: bool = False
+) -> dict[str, list[dict[str, Any]]]:
+    definition_row = _definition_row("writer", _agent())
+    definition_row["definition_hash"] = hash_value
+    if invalid_definition:
+        definition_row["definition_json"] = json.dumps(
+            {"capability": "generate", "runtime": "invalid", "secret": "definition-secret"}
+        )
+    pin = {"agent_id": "writer", "version": 1, "definition_hash": hash_value}
+    run_id = "run-hash" if with_pin else ""
+    return {
+        "jobs": [
+            {
+                "id": "job-hash",
+                "workspace_id": _WS,
+                "run_id": run_id,
+                "status": "queued",
+                "workflow_revision_id": "rev-old",
+                "workflow_definition_snapshot_json": _snapshot({"generate": _legacy("generate")}),
+            }
+        ],
+        "active_revisions": [],
+        "runs": [
+            {
+                "id": run_id,
+                "workspace_id": _WS,
+                "status": "created",
+                "frozen_pins_json": json.dumps({"agent_versions": {"generate": pin}}),
+            }
+        ]
+        if with_pin
+        else [],
+        "routes": [],
+        "agent_versions": [definition_row],
+        "queued_requests": [
+            {
+                "execution_id": "req-hash",
+                "workspace_id": _WS,
+                "job_id": "job-hash",
+                "node_key": "generate",
+                "kind": "agent",
+                "profile_source": "agent_definition",
+                "agent_id": "writer",
+                "agent_definition_hash": hash_value,
+                "pinned_agent_version": 1 if with_pin else None,
+            }
+        ],
+    }
+
+
+def test_fault_injected_illegal_route_kind_blocks() -> None:
+    data = _hash_fault_data(_agent().definition_hash(), with_pin=False)
+    data["queued_requests"] = []
+    data["routes"] = [
+        {
+            "workspace_id": _WS,
+            "node_key": "generate",
+            "target_kind": "not-a-real-kind",
+            "target_id": "writer",
+        }
+    ]
+
+    report = build_agent_route_retirement_audit(_InjectedReader(data))  # type: ignore[arg-type]
+
+    item = _only(report, "job_snapshot")
+    assert (item["category"], item["reason"], item["blocking"]) == (
+        "invalid_route",
+        "route_kind_not_agent",
+        True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("hash_value", "invalid_definition"),
+    [
+        ("NOT-A-HASH-SECRET", True),
+        ("A" * 64, False),
+        ("", False),
+        (None, False),
+        ({"hash": "secret-object"}, False),
+        (8675309, False),
+    ],
+)
+def test_equal_malformed_stored_pin_and_request_hashes_all_block(
+    hash_value: Any, invalid_definition: bool
+) -> None:
+    report = build_agent_route_retirement_audit(
+        _InjectedReader(
+            _hash_fault_data(hash_value, with_pin=True, invalid_definition=invalid_definition)
+        )  # type: ignore[arg-type]
+    )
+
+    assert report["route_retirement_blocked"] is True
+    assert len(report["items"]) == 3
+    assert all(item["category"] == "pin_mismatch" for item in report["items"])
+    reasons = {item["source"]: item["reason"] for item in report["items"]}
+    assert reasons == {
+        "job_snapshot": "invalid_definition_hash",
+        "agent_version_pin": "invalid_definition_hash",
+        "queued_request": "request_definition_hash_invalid",
+    }
+    encoded = json.dumps(report)
+    if isinstance(hash_value, str) and hash_value:
+        assert hash_value not in encoded
+    elif isinstance(hash_value, int):
+        assert str(hash_value) not in encoded
+    assert "definition-secret" not in encoded
+    assert "secret-object" not in encoded
+    assert "<invalid>" in encoded
+
+
+def test_malformed_stored_and_unpinned_request_hash_block_without_a_pin() -> None:
+    report = build_agent_route_retirement_audit(
+        _InjectedReader(  # type: ignore[arg-type]
+            _hash_fault_data("STORED-HASH-SECRET", with_pin=False, invalid_definition=True)
+        )
+    )
+
+    assert report["route_retirement_blocked"] is True
+    reasons = {item["source"]: item["reason"] for item in report["items"]}
+    assert reasons == {
+        "job_snapshot": "stored_definition_hash_invalid",
+        "queued_request": "request_definition_hash_invalid",
+    }
+    assert "STORED-HASH-SECRET" not in json.dumps(report)
+    assert "definition-secret" not in json.dumps(report)
+
+
+@pytest.mark.parametrize("with_pin", [False, True])
+def test_only_queued_request_hash_is_malformed_still_blocks(with_pin: bool) -> None:
+    data = _hash_fault_data(_agent().definition_hash(), with_pin=with_pin)
+    data["queued_requests"][0]["agent_definition_hash"] = "REQUEST-HASH-SECRET"
+
+    report = build_agent_route_retirement_audit(_InjectedReader(data))  # type: ignore[arg-type]
+
+    assert report["route_retirement_blocked"] is True
+    assert report["summary"]["blocking_items"] == 1
+    request = _only(report, "queued_request")
+    assert (request["category"], request["reason"], request["blocking"]) == (
+        "pin_mismatch",
+        "request_definition_hash_invalid",
+        True,
+    )
+    assert "REQUEST-HASH-SECRET" not in json.dumps(report)
 
 
 def test_fault_injected_ambiguous_capability_blocks_route_less_fallback() -> None:

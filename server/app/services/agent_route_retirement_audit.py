@@ -36,6 +36,7 @@ SAFE_CATEGORIES = frozenset({"equivalent", "route_less_fallback"})
 CATEGORIES = (
     "equivalent",
     "route_less_fallback",
+    "invalid_route",
     "drift",
     "missing_target",
     "unpublished_target",
@@ -49,12 +50,21 @@ _NO_PIN = object()
 _INVALID_PIN = object()
 
 
+def _is_canonical_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdef" for char in value)
+    )
+
+
 @dataclass(frozen=True)
 class _Definition:
     agent_id: str
     version: int
     status: str
     stored_hash: str
+    hash_valid: bool
     capability: str
     value: AgentDefinition | None
 
@@ -80,6 +90,7 @@ class _Catalog:
                 version=int(row["version"]),
                 status=str(row["status"]),
                 stored_hash=str(row["definition_hash"]),
+                hash_valid=_is_canonical_sha256(row["definition_hash"]),
                 capability=capability,
                 value=value,
             )
@@ -135,15 +146,12 @@ def _pin_projection(pin: Any) -> dict[str, Any] | None:
         return None
     version = pin.get("version")
     definition_hash = pin.get("definition_hash")
-    hash_is_safe = (
-        isinstance(definition_hash, str)
-        and len(definition_hash) == 64
-        and all(char in "0123456789abcdef" for char in definition_hash)
-    )
     return {
         "agent_id": pin.get("agent_id") if isinstance(pin.get("agent_id"), str) else "",
         "version": version if isinstance(version, int) and not isinstance(version, bool) else None,
-        "definition_hash": definition_hash if hash_is_safe else "<invalid>",
+        "definition_hash": definition_hash
+        if _is_canonical_sha256(definition_hash)
+        else "<invalid>",
     }
 
 
@@ -162,11 +170,13 @@ def _validate_pin(
         return "missing_agent_id", None, projected
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         return "invalid_version", None, projected
-    if not isinstance(definition_hash, str) or not definition_hash:
-        return "missing_definition_hash", None, projected
+    if not _is_canonical_sha256(definition_hash):
+        return "invalid_definition_hash", None, projected
     target = catalog.exact(agent_id, version)
     if target is None:
         return "missing_version", None, projected
+    if not target.hash_valid:
+        return "stored_definition_hash_invalid", target, projected
     if target.stored_hash != definition_hash:
         return "definition_hash_mismatch", target, projected
     if target.value is None:
@@ -184,13 +194,14 @@ def _classify(
     candidates = catalog.candidates(capability)
     candidate_ids = [row.agent_id for row in candidates]
     fallback = candidates[0] if len(candidates) == 1 else None
-    route_kind = str(route.get("target_kind") or "") if route is not None else ""
-    route_id = (
-        str(route.get("target_id") or "") if route is not None and route_kind == "agent" else ""
-    )
+    raw_kind = route.get("target_kind") if route is not None else ""
+    route_kind = raw_kind if isinstance(raw_kind, str) else "<invalid>"
+    raw_target = route.get("target_id") if route is not None else ""
+    route_id = raw_target if route_kind == "agent" and isinstance(raw_target, str) else ""
     target = catalog.published(route_id) if route_id else None
     fields: dict[str, Any] = {
         "capability": capability,
+        "route_present": route is not None,
         "route_kind": route_kind or None,
         "route_target": route_id or None,
         "route_target_status": catalog.latest_status(route_id) if route_id else None,
@@ -200,13 +211,19 @@ def _classify(
     if pin is not _NO_PIN:
         fields["pin"] = _pin_projection(pin)
 
-    if not capability:
+    if route is not None and route_kind != "agent":
+        category, reason = "invalid_route", "route_kind_not_agent"
+    elif route is not None and not route_id:
+        category, reason = "invalid_route", "route_target_missing"
+    elif not capability:
         category, reason = "capability_unresolved", "empty_capability"
     elif route_id:
         if not catalog.versions.get(route_id):
             category, reason = "missing_target", "route_target_missing"
         elif target is None:
             category, reason = "unpublished_target", "route_target_unpublished"
+        elif not target.hash_valid:
+            category, reason = "pin_mismatch", "stored_definition_hash_invalid"
         elif target.value is None:
             category, reason = "unpublished_target", "route_target_invalid"
         elif target.capability != capability:
@@ -219,6 +236,8 @@ def _classify(
         category, reason = "capability_unresolved", "ambiguous_capability"
     elif fallback is None:
         category, reason = "capability_unresolved", "no_published_fallback"
+    elif not fallback.hash_valid:
+        category, reason = "pin_mismatch", "stored_definition_hash_invalid"
     elif fallback.value is None:
         category, reason = "unpublished_target", "fallback_definition_invalid"
     else:
@@ -319,6 +338,9 @@ def _request_error(
 ) -> str | None:
     agent_id = str(request["agent_id"])
     pinned_version = request["pinned_agent_version"]
+    request_hash = request["agent_definition_hash"]
+    if not _is_canonical_sha256(request_hash):
+        return "request_definition_hash_invalid"
     if item["category"] in SAFE_CATEGORIES:
         expected = str(item["route_target"] or item["fallback_target"] or "")
         if agent_id != expected:
@@ -326,21 +348,23 @@ def _request_error(
     if pin is _NO_PIN:
         if pinned_version is not None:
             return "unexpected_request_pin"
-    elif isinstance(pin, Mapping):
-        expected_pin = _pin_projection(pin)
-        if expected_pin is not None and expected_pin["version"] is not None:
-            if pinned_version != expected_pin["version"]:
-                return "request_version_mismatch"
-            if agent_id != expected_pin["agent_id"]:
-                return "request_pin_agent_mismatch"
-            if str(request["agent_definition_hash"]) != expected_pin["definition_hash"]:
-                return "request_pin_hash_mismatch"
+    elif isinstance(pin, Mapping) and _validate_pin(catalog, pin)[0] is None:
+        if pinned_version != pin["version"]:
+            return "request_version_mismatch"
+        if agent_id != pin["agent_id"]:
+            return "request_pin_agent_mismatch"
+        if request_hash != pin["definition_hash"]:
+            return "request_pin_hash_mismatch"
     target = (
         catalog.exact(agent_id, int(pinned_version))
         if pinned_version is not None
         else catalog.published(agent_id)
     )
-    if target is None or target.stored_hash != str(request["agent_definition_hash"]):
+    if target is None:
+        return "request_definition_hash_mismatch"
+    if not target.hash_valid:
+        return "stored_definition_hash_invalid"
+    if target.stored_hash != request_hash:
         return "request_definition_hash_mismatch"
     return None
 
@@ -377,7 +401,6 @@ def build_agent_route_retirement_audit(reader: AgentBackfillReader) -> dict[str,
         return run.pins.get(node_key, _NO_PIN)
 
     def legacy_nodes(
-        source: str,
         definition: WorkflowDefinition,
         ref: dict[str, Any],
         job: Mapping[str, Any] | None,
@@ -403,7 +426,7 @@ def build_agent_route_retirement_audit(reader: AgentBackfillReader) -> dict[str,
         if error is not None:
             items.append(_snapshot_result(ref, error, pin_for(job, "")))
         elif definition is not None:
-            legacy_nodes("job_snapshot", definition, ref, job)
+            legacy_nodes(definition, ref, job)
 
     for revision in data["active_revisions"]:
         ref = {
@@ -417,7 +440,7 @@ def build_agent_route_retirement_audit(reader: AgentBackfillReader) -> dict[str,
         if error is not None:
             items.append(_snapshot_result(ref, error))
         elif definition is not None:
-            legacy_nodes("active_revision", definition, ref, None)
+            legacy_nodes(definition, ref, None)
 
     for run_id in sorted(run_pins):
         run = run_pins[run_id]
