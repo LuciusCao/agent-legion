@@ -282,6 +282,54 @@ describe('StudioChatBackgroundTasks', () => {
     expect(screen.getByRole('button', { name: /持续运行/ })).toBe(row)
   })
 
+  it('stops the active clock after terminal and does not restart it for late running receipts', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(110_000)
+    const running = taskMessage('m1', 1, 'agent-1', {
+      description: '持续运行',
+      started_at: 100,
+      elapsed_seconds: 10,
+    })
+    const finished = taskMessage('m2', 2, 'agent-1', {
+      event: 'background_task_finished',
+      status: 'completed',
+      description: '持续运行',
+      summary: '已确认摘要',
+      elapsed_seconds: 42,
+    })
+    const lateRunning = taskMessage('m3', 3, 'agent-1', {
+      description: '持续运行',
+      started_at: 200,
+      elapsed_seconds: 30,
+    })
+    const panel = (events: ChatMessage[]) => (
+      <StudioChatBackgroundTasks
+        id="tasks"
+        labelledBy="tasks-tab"
+        tasks={deriveStudioBackgroundTaskViews(events).tasks}
+        hidden={false}
+      />
+    )
+    const { rerender } = render(panel([running]))
+    expect(vi.getTimerCount()).toBe(1)
+
+    rerender(panel([running, finished]))
+    let row = screen.getByRole('button', { name: /持续运行/ })
+    expect(vi.getTimerCount()).toBe(0)
+    expect(within(row).getByText('已完成')).toBeVisible()
+    expect(within(row).getByText('已确认摘要')).toBeVisible()
+    expect(within(row).getByText('耗时 42秒')).toBeVisible()
+
+    rerender(panel([running, finished, lateRunning]))
+    row = screen.getByRole('button', { name: /持续运行/ })
+    expect(vi.getTimerCount()).toBe(0)
+    expect(within(row).getByText('已完成')).toBeVisible()
+    expect(within(row).getByText('已确认摘要')).toBeVisible()
+    expect(within(row).getByText('耗时 42秒')).toBeVisible()
+    act(() => vi.advanceTimersByTime(5000))
+    expect(within(row).getByText('耗时 42秒')).toBeVisible()
+  })
+
   it('keeps the composer, queue, and SSE alive across tabs without auto-switching on new tasks', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord('s1', { status: 'running' }),

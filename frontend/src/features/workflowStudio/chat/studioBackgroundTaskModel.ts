@@ -116,19 +116,36 @@ export function deriveStudioBackgroundTaskViews(messages: ChatMessage[]): {
       detail: asText(content.detail),
       createdAt: message.created_at,
     }
+    if (previous?.terminal && !terminal) {
+      byId.set(taskId, {
+        ...previous,
+        history: [...previous.history, historyItem],
+      })
+      continue
+    }
     const task: StudioBackgroundTask = {
       taskId,
       kind: taskKind(content.kind) ?? previous?.kind ?? 'unknown',
       description: description || previous?.description || taskId,
       status:
-        status || (terminal ? 'unknown' : (previous?.status ?? 'unknown')),
+        status ||
+        (previous?.terminal
+          ? previous.status
+          : terminal
+            ? 'unknown'
+            : (previous?.status ?? 'unknown')),
       detail: asText(content.detail) || previous?.detail || '',
       elapsedSeconds:
         reportedElapsed ??
-        (terminal ? null : (previous?.elapsedSeconds ?? null)),
+        (terminal && !previous?.terminal
+          ? null
+          : (previous?.elapsedSeconds ?? null)),
       startedAtMs: explicitStart ?? previous?.startedAtMs ?? inferredStart,
       terminal,
-      summary: terminal ? asText(content.summary) : '',
+      summary: terminal
+        ? asText(content.summary) ||
+          (previous?.terminal ? previous.summary : '')
+        : '',
       history: [...(previous?.history ?? []), historyItem],
     }
     byId.set(taskId, task)

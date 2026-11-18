@@ -100,20 +100,88 @@ describe('deriveStudioBackgroundTaskViews', () => {
     expect(views.timelineMessages[3]).toBe(finished)
   })
 
-  it('keeps a terminal-first observation once and retains repeated finished receipts', () => {
-    const first = taskEvent('m1', 'agent-1', 'background_task_finished')
-    const repeated = taskEvent('m2', 'agent-1', 'background_task_finished', {
-      summary: '最终摘要',
-      elapsed_seconds: 20,
+  it('locks the full terminal snapshot when a late non-terminal receipt arrives', () => {
+    const running = taskEvent('m1', 'agent-1', 'background_task_status', {
+      description: '运行描述',
+      detail: '运行详情',
     })
-    const running = taskEvent('m3', 'agent-1', 'background_task_status')
-    const views = deriveStudioBackgroundTaskViews([first, repeated, running])
-    expect(views.timelineMessages.map((item) => item.id)).toEqual(['m1', 'm2'])
-    expect(views.tasks[0].history.map((item) => item.messageId)).toEqual([
+    const finished = taskEvent('m2', 'agent-1', 'background_task_finished', {
+      status: 'failed',
+      description: '终态描述',
+      detail: '终态详情',
+      summary: '失败摘要',
+      elapsed_seconds: 42,
+    })
+    const lateRunning = taskEvent('m3', 'agent-1', 'background_task_status', {
+      kind: 'bash',
+      status: 'running',
+      description: '迟到描述',
+      detail: '迟到详情',
+      started_at: 200,
+      elapsed_seconds: 30,
+    })
+    const views = deriveStudioBackgroundTaskViews([
+      running,
+      finished,
+      lateRunning,
+    ])
+    const task = views.tasks[0]
+    expect(task).toMatchObject({
+      terminal: true,
+      status: 'failed',
+      summary: '失败摘要',
+      elapsedSeconds: 42,
+      kind: 'agent',
+      description: '终态描述',
+      detail: '终态详情',
+      startedAtMs: 100_000,
+    })
+    expect(backgroundTaskElapsedAt(task, 1_000_000_000)).toBe(42)
+    expect(task.history.map((item) => item.messageId)).toEqual([
       'm1',
       'm2',
       'm3',
     ])
+    expect(task.history[2]).toMatchObject({
+      status: 'running',
+      detail: '迟到详情',
+    })
+    expect(views.timelineMessages.map((item) => item.id)).toEqual(['m1', 'm2'])
+  })
+
+  it('does not erase confirmed terminal evidence with incomplete repeated receipts', () => {
+    const first = taskEvent('m1', 'agent-1', 'background_task_finished', {
+      status: 'completed',
+      description: '已确认描述',
+      detail: '已确认详情',
+      summary: '已确认摘要',
+      elapsed_seconds: 42,
+    })
+    const repeated = taskEvent('m2', 'agent-1', 'background_task_finished', {
+      kind: undefined,
+      status: '',
+      description: '',
+      detail: '',
+      started_at: undefined,
+      elapsed_seconds: undefined,
+      summary: '',
+    })
+    const views = deriveStudioBackgroundTaskViews([first, repeated])
+    expect(views.tasks[0]).toMatchObject({
+      terminal: true,
+      status: 'completed',
+      summary: '已确认摘要',
+      elapsedSeconds: 42,
+      kind: 'agent',
+      description: '已确认描述',
+      detail: '已确认详情',
+      startedAtMs: 100_000,
+    })
+    expect(views.tasks[0].history.map((item) => item.messageId)).toEqual([
+      'm1',
+      'm2',
+    ])
+    expect(views.timelineMessages.map((item) => item.id)).toEqual(['m1', 'm2'])
   })
 
   it('degrades malformed and legacy messages without collecting unrelated task_id fields', () => {
