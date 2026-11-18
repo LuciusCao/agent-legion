@@ -46,7 +46,7 @@ const draftYaml = [
 ].join('\n')
 
 // 中游审批门（#405）：sanitize 切入 approval 已剥 capability，结构化 UI
-// 对 approval 又隐藏能力 Key 输入——切回 code/agent 只能经弹窗补。
+// 对 approval 隐藏能力 Key 输入；切回 code/agent 时缺省写 ''，不弹窗补值。
 const approvalGateYaml = [
   'key: demo',
   'nodes:',
@@ -355,7 +355,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       { wrapper }
     )
 
-    // code/agent 互切本就有 capability，弹窗不该出现（直通路径不变）。
+    // code/agent 互切不依赖 capability 非空，均不弹窗（直通路径不变）。
     fireEvent.change(await screen.findByLabelText('节点类型'), {
       target: { value: 'agent' },
     })
