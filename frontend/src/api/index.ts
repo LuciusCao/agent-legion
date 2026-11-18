@@ -17,8 +17,6 @@ export {
   fetchWorkspaceStats,
   updateWorkspace,
 } from './workspaceApi'
-// prettier-ignore
-export { fetchAgentDefinitions, fetchAgentProvenance } from './agentDefinitions'
 export { fetchAgentRuntimes } from './agentRuntimes'
 // prettier-ignore
 export { fetchSkillDirectories, fetchSkillTags, validateSkillPath } from './skills'

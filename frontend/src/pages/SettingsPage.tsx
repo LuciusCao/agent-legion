@@ -20,7 +20,6 @@ import { WorkspaceWorkersSection } from '../components/settings/WorkspaceWorkers
 import { WorkerConsoleGuide } from '../components/settings/WorkerConsoleGuide'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import { codePoolNodes } from '../components/codePoolNodes'
-import { WorkspaceAgentsSection } from '../components/settings/WorkspaceAgentsSection'
 import styles from './SettingsPage.module.css'
 
 export function SettingsPage() {
@@ -65,11 +64,6 @@ export function SettingsPage() {
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
-      // Agent 定义端点 admin-only（studio_secured），非 admin 不给入口（#677）；
-      // #1079（#440 D1）起为只读历史。
-      ...(isAdmin
-        ? [{ id: 'workspace-agents', label: '历史 Agent 定义' }]
-        : []),
       ...(isAdmin ? [{ id: 'api-access', label: '外部对接' }] : []),
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes
@@ -165,7 +159,6 @@ export function SettingsPage() {
               <WorkspaceWorkersSection workspaceId={workspaceId ?? ''} />
             )}
           </section>
-          {isAdmin && <WorkspaceAgentsSection workspaceId={workspaceId} />}
           {/* #870：API Token 与接入信息独立成「外部对接」一级 section——
               外部系统接入与 agent/worker 管理是两件事。Token 签发/吊销
               是 admin 动作（后端 require_admin）。 */}

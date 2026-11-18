@@ -3,7 +3,6 @@ import { createElement, type ReactNode } from 'react'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAgentCatalog } from '../../../api/agentCatalogApi'
-import { fetchAgentDefinitions } from '../../../api/agentDefinitions'
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { createTestQueryClient } from '../../../testing/testQueryClient'
 import type { AgentDefinition } from '../../../types/agentCatalogTypes'
@@ -11,13 +10,7 @@ import { useAgentCatalog } from './useAgentCatalog'
 
 vi.mock('../../../api/agentCatalogApi', () => ({ getAgentCatalog: vi.fn() }))
 
-// #1079：断言 hook 不再消费 agent-definitions（mock 只用于 not-called）。
-vi.mock('../../../api/agentDefinitions', () => ({
-  fetchAgentDefinitions: vi.fn(),
-}))
-
 const mockGetCatalog = vi.mocked(getAgentCatalog)
-const mockFetchDefinitions = vi.mocked(fetchAgentDefinitions)
 
 const agent: AgentDefinition = {
   id: 'agent-v1',
@@ -84,17 +77,5 @@ describe('useAgentCatalog', () => {
     })
 
     expect(mockGetCatalog).toHaveBeenCalledTimes(2)
-  })
-
-  // #1079（#440 P3b）：目录 hook 只读 published 目录——不再拉取
-  // agent-definitions（draft 回落解析与编辑器门控已删除）。
-  it('does not fetch agent definitions', async () => {
-    mockGetCatalog.mockResolvedValue({ agents: [agent] })
-    const { result } = renderHook(() => useAgentCatalog('ws1'), {
-      wrapper: wrapper(createTestQueryClient()),
-    })
-
-    await waitFor(() => expect(result.current.agents).toHaveLength(1))
-    expect(mockFetchDefinitions).not.toHaveBeenCalled()
   })
 })

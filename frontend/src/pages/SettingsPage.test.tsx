@@ -64,8 +64,6 @@ vi.mock('../api', () => ({
   createRegisterToken: vi.fn(),
   deleteRegisterToken: vi.fn(),
   deleteAgentWorker: vi.fn(),
-  fetchAgentDefinitions: vi.fn().mockResolvedValue({ agents: [] }),
-  fetchAgentProvenance: vi.fn().mockResolvedValue({ nodes: [] }),
   listWorkspaceApiTokens: vi.fn().mockResolvedValue({
     tokens: [],
     rate_limit: { requests_per_minute: 60, burst: 20 },
@@ -231,21 +229,23 @@ describe('SettingsPage', () => {
     expect(navButtons[1]).not.toHaveAttribute('aria-current')
   })
 
-  it('shows the historical Agent definitions section to admins only (#677, #1079)', async () => {
+  it('omits the retired historical Agent definitions section for admins (#936)', async () => {
     useAuthStore.setState({
       user: { id: 'u1', username: 'admin', role: 'admin' },
     } as unknown as Parameters<typeof useAuthStore.setState>[0])
     try {
       renderPage()
-      expect(await screen.findByText('暂无 Agent 定义。')).toBeInTheDocument()
+      await act(async () => {})
       const nav = screen.getByRole('navigation')
       expect(
-        within(nav)
-          .getAllByRole('button')
-          .map((b) => b.textContent)
-      ).toContain('历史 Agent 定义')
+        within(nav).queryByRole('button', { name: '历史 Agent 定义' })
+      ).not.toBeInTheDocument()
       expect(
-        screen.getByRole('heading', { level: 2, name: '历史 Agent 定义' })
+        screen.queryByRole('heading', { level: 2, name: '历史 Agent 定义' })
+      ).not.toBeInTheDocument()
+      expect(document.getElementById('workspace-agents')).toBeNull()
+      expect(
+        screen.getByRole('heading', { level: 2, name: 'Agent 与 Worker' })
       ).toBeInTheDocument()
     } finally {
       act(() => useAuthStore.setState({ user: null }))
@@ -603,7 +603,6 @@ describe('SettingsPage', () => {
       ).toEqual([
         '基础信息',
         'Agent 与 Worker',
-        '历史 Agent 定义',
         '外部对接',
         '成员管理',
         '危险操作',

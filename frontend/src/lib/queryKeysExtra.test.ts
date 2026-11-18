@@ -60,8 +60,6 @@ describe('extraQueryKeys', () => {
       ),
       workflowStudioData: extraQueryKeys.workflowStudioData('ws1'),
       workflowStudioDraft: extraQueryKeys.workflowStudioDraft('ws1'),
-      agentDefinitions: extraQueryKeys.agentDefinitions('ws1'),
-      agentProvenance: extraQueryKeys.agentProvenance('ws1'),
       studioPublishRequest: extraQueryKeys.studioPublishRequest('ws1'),
       workspaceSharedMaterials: extraQueryKeys.workspaceSharedMaterials('ws1'),
     }
@@ -111,8 +109,6 @@ describe('extraQueryKeys', () => {
       ],
       workflowStudioData: ['workflowStudioData', 'ws1'],
       workflowStudioDraft: ['workflowStudioDraft', 'ws1'],
-      agentDefinitions: ['agentDefinitions', 'ws1'],
-      agentProvenance: ['agentProvenance', 'ws1'],
       studioPublishRequest: ['studioPublishRequest', 'ws1'],
       workspaceSharedMaterials: ['workspaceSharedMaterials', 'ws1'],
     })

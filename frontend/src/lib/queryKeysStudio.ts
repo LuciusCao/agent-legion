@@ -30,8 +30,6 @@ export const studioQueryKeys = {
   // Studio 编辑器的服务端持久化草稿（GET/PUT workflow-draft）。
   workflowStudioDraft: (workspaceId: string) =>
     ['workflowStudioDraft', workspaceId] as const,
-  agentDefinitions: (workspaceId: string) => k('agentDefinitions', workspaceId),
-  agentProvenance: (workspaceId: string) => k('agentProvenance', workspaceId),
   // Agent 发起的 workflow 发布请求（#416）：轮询 pending 弹确认对话框。
   studioPublishRequest: (ws: string) => k('studioPublishRequest', ws),
   // workspace 设置页「Skill 共享材料」只读视图（#643）。
