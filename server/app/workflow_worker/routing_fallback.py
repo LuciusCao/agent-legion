@@ -1,13 +1,11 @@
-"""Legacy agent route fallback for jobs frozen before a profile switch (#933).
+"""Legacy agent route fallback when no frozen route row exists (#933/#936).
 
-Split from ``routing`` (file budget). When the active revision turns a node
-self-contained, revision publish stops materializing its
-``workspace_node_routes`` row — but in-flight jobs whose frozen snapshot
-still has the legacy (definition-sourced) node must keep dispatching
-through their Agent definition, never fall into the code pool (PR #1039
-codex R3). The fallback resolves the node's capability against the
-workspace's published catalog, exactly like revision publish derives the
-route; enqueue re-validates the definition hash (``_validate_agent_route``
+Split from ``routing`` (file budget). Revision publish never materializes a
+``workspace_node_routes`` row, while an in-flight job whose frozen snapshot
+still has a legacy (definition-sourced) node must keep dispatching through its
+Agent definition, never fall into the code pool (PR #1039 codex R3). The
+fallback resolves the node's capability against the workspace's published
+catalog; enqueue re-validates the definition hash (``_validate_agent_route``
 accepts a missing route row, but never a row pointing elsewhere).
 """
 

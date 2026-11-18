@@ -111,7 +111,7 @@ def _resolved_agent_nodes(
 ) -> dict[str, AgentNodeProfile]:
     """node_key → agent 节点的执行档案（#932 门面，与 dispatch 同款解析）。
 
-    legacy 来源 = capability → 唯一 published Agent（同 ``derive_agent_routes``）；
+    legacy 来源 = capability → 唯一 published Agent（同 dispatch 的 route-less fallback）；
     0 个或多个 published（数据态漂移）、catalog 不可用都不解析（调用方
     按不可证明处理）。自含节点（#933 ``source='node'``）不读 catalog，
     catalog 不可用时仍按节点档案解析。

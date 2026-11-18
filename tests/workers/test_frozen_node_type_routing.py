@@ -1,10 +1,10 @@
 """Dispatch routing and job detail follow the job's frozen node type (#1091).
 
 An in-flight job executes its frozen snapshot: a later revision that turns
-``write_script`` code → legacy agent (materializing a ``workspace_node_routes``
-row) must not pull the old job's code node onto an Agent, and a revision
-that turns it agent → code (pruning the row) must not drop the old job's
-legacy agent node into the code pool. Job detail / MCP's executor projection
+``write_script`` code → legacy agent creates no route (the new snapshot uses
+the capability fallback) and must not pull the old job's code node onto an
+Agent; a revision that turns it agent → code prunes a historical route without
+dropping the old job's legacy agent node into the code pool. Job detail / MCP's executor projection
 uses the same frozen-type decision, so both surfaces agree per (job, node).
 
 #1128 extends the consistency to the failure edge: when the frozen route row
@@ -94,6 +94,15 @@ def _route_row(job_db, workspace_id: str) -> dict | None:
         ).fetchone()
 
 
+def _seed_route(job_db, workspace_id: str) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, %s, 'agent', %s)",
+            (workspace_id, NODE, AGENT),
+        )
+
+
 def _dispatch(worker, workspace_id: str, definition: WorkflowDefinition) -> tuple[str, str]:
     route = _dispatch_route(worker, workspace_id, definition)
     return route.kind, route.target_id
@@ -126,11 +135,9 @@ def test_code_turned_agent_keeps_the_old_job_on_the_code_pool(
 ) -> None:
     old_snapshot = _with_code_node(_legacy())
     old_job = _job(job_db, workspace_id, old_snapshot, "Q-old")
-    # The next revision turns the node into a legacy agent node: publish
-    # materializes its route row (only legacy agent nodes still do).
     new_snapshot = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, new_snapshot)
-    assert _route_row(job_db, workspace_id) == {"target_kind": "agent", "target_id": AGENT}
+    assert _route_row(job_db, workspace_id) is None
     new_job = _job(job_db, workspace_id, new_snapshot, "Q-new")
     worker = _worker(job_db)
 
@@ -140,6 +147,7 @@ def test_code_turned_agent_keeps_the_old_job_on_the_code_pool(
     assert _dispatch(worker, workspace_id, old_snapshot) == old_route
 
     assert old_route == ("executor", "code")
+    # The new legacy snapshot uses the existing unique-capability fallback.
     assert new_route == ("agent", AGENT)
     _assert_consistent(old_route, _detail(query_service, old_job))
     _assert_consistent(new_route, _detail(query_service, new_job))
@@ -150,17 +158,14 @@ def test_agent_turned_code_keeps_the_old_job_on_its_agent(
     job_db, workspace_id, query_service, route_pruned: bool
 ) -> None:
     old_snapshot = _legacy()
-    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, old_snapshot)
+    service = WorkflowRevisionService(job_db)
+    service.publish_workspace_revision(workspace_id, old_snapshot)
+    _seed_route(job_db, workspace_id)
     old_job = _job(job_db, workspace_id, old_snapshot, "Q-old")
-    if route_pruned:
-        # The code revision prunes the row of the node it turned code
-        # (prune_frozen_agent_routes); the old snapshot still says agent.
-        with job_db.connect() as conn:
-            conn.execute(
-                "delete from workspace_node_routes where workspace_id=%s and node_key=%s",
-                (workspace_id, NODE),
-            )
     new_snapshot = _with_code_node(_legacy())
+    if route_pruned:
+        service.publish_workspace_revision(workspace_id, new_snapshot)
+        assert _route_row(job_db, workspace_id) is None
     new_job = _job(job_db, workspace_id, new_snapshot, "Q-new")
     worker = _worker(job_db)
 
@@ -178,6 +183,7 @@ def test_self_contained_snapshot_routes_to_its_own_profile(
     job_db, workspace_id, query_service
 ) -> None:
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, _legacy())
+    _seed_route(job_db, workspace_id)
     snapshot = load_builtin_definition("education_video_problems_generation")
     assert snapshot.nodes[NODE].execution.runtime, "the demo ships self-contained nodes"
     job = _job(job_db, workspace_id, snapshot, "Q-inline")
@@ -204,6 +210,7 @@ def test_archived_agent_breaks_dispatch_and_detail_consistently(
     """Legacy 快照在途 job 执行中途目标 Agent 被归档（冻结 route 行仍在）。"""
     snapshot = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    _seed_route(job_db, workspace_id)
     job = _job(job_db, workspace_id, snapshot, "Q-archived")
     replace_agent_catalog(workspace_id, {})
 
@@ -211,10 +218,33 @@ def test_archived_agent_breaks_dispatch_and_detail_consistently(
     _assert_route_error_consistent(route, _detail(query_service, job))
 
 
+def test_frozen_route_fail_closed_when_fallback_targets_another_agent(
+    job_db, workspace_id, query_service
+) -> None:
+    snapshot = _legacy()
+    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    _seed_route(job_db, workspace_id)
+    job = _job(job_db, workspace_id, snapshot, "Q-route-priority")
+    replace_agent_catalog(
+        workspace_id,
+        {
+            "replacement": AgentDefinition(
+                capability=snapshot.nodes[NODE].capability, runtime="velites"
+            )
+        },
+    )
+
+    route = _dispatch_route(_worker(job_db), workspace_id, snapshot)
+
+    assert f"Agent {AGENT!r} has no published definition" in route.error_message
+    _assert_route_error_consistent(route, _detail(query_service, job))
+
+
 def test_capability_drift_invalidates_the_frozen_route(job_db, workspace_id, query_service) -> None:
     """冻结 route 行指向的 Agent 被重发布为其他 capability。"""
     snapshot = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    _seed_route(job_db, workspace_id)
     job = _job(job_db, workspace_id, snapshot, "Q-drift")
     replace_agent_catalog(
         workspace_id, {AGENT: AgentDefinition(capability="other_capability", runtime="velites")}
@@ -232,6 +262,7 @@ def test_pruned_route_with_no_matching_agent_surfaces_fallback_error(
     """route 行已剪除且 capability 解析不到唯一 published Agent（fallback 失败）。"""
     snapshot = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    _seed_route(job_db, workspace_id)
     job = _job(job_db, workspace_id, snapshot, "Q-fallback")
     with job_db.connect() as conn:
         conn.execute(
@@ -248,6 +279,7 @@ def test_cached_route_revalidates_capability_drift(job_db, workspace_id, query_s
     """#1266：30s TTL 内的缓存命中也必须重新裁决——capability 漂移即失效重解析。"""
     snapshot = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    _seed_route(job_db, workspace_id)
     job = _job(job_db, workspace_id, snapshot, "Q-cache-drift")
     worker = _worker(job_db)
     assert _dispatch(worker, workspace_id, snapshot) == ("agent", AGENT)
@@ -265,6 +297,7 @@ def test_cached_route_revalidates_archival(job_db, workspace_id, query_service) 
     """#1266：缓存命中路径同样拦截 TTL 内发生的 Agent 归档。"""
     snapshot = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot)
+    _seed_route(job_db, workspace_id)
     job = _job(job_db, workspace_id, snapshot, "Q-cache-archive")
     worker = _worker(job_db)
     assert _dispatch(worker, workspace_id, snapshot) == ("agent", AGENT)
@@ -283,6 +316,7 @@ def test_route_cache_does_not_share_entries_across_capabilities(
     路由——B 的 job 会被 fail_node_config 永久标败。"""
     snapshot_b = _legacy()
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, snapshot_b)
+    _seed_route(job_db, workspace_id)
     job_b = _job(job_db, workspace_id, snapshot_b, "Q-cap-b")
     node_a = replace(snapshot_b.nodes[NODE], capability="renamed_capability")
     snapshot_a = replace(snapshot_b, nodes={**snapshot_b.nodes, NODE: node_a})

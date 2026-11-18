@@ -1,16 +1,10 @@
-"""Agent-route projection writes for published workflow revisions (#287).
+"""Historical projection pruning for published workflow revisions (#287, #936).
 
-Why a separate module: ``workspace_node_routes`` /
-``workspace_node_capacities`` are *materialized projections* of the active
-revision, not revision rows themselves — their write path (upsert + stale-row
-prune) is a distinct concern from ``workflow_revisions`` row persistence.
-Publication and the startup reconcile both funnel through these helpers, so
-the projection SQL lives in one place instead of being inlined twice by the
-revision write path.
-
-Every helper takes an open connection and never commits on its own: the
-projection must land atomically with the revision insert that publishes it
-(single transaction in ``WorkflowRevisionQueriesMixin.create_workflow_revision``).
+``workspace_node_routes`` rows are frozen historical targets, not rewritten
+from the new revision. Publication only prunes rows of deleted/retyped nodes
+and clears the obsolete per-node Agent capacity projection. Every helper takes
+an open connection and never commits on its own: pruning lands atomically with
+the revision insert in ``WorkflowRevisionQueriesMixin.create_workflow_revision``.
 """
 
 from __future__ import annotations
@@ -23,105 +17,19 @@ from server.app.jobs.queries.upgrade_impl_identity import (
 )
 
 
-def _upsert_agent_route(
-    conn: DatabaseConnection,
-    workspace_id: str,
-    workflow_key: str,
-    node_key: str,
-    agent_id: str,
+def prune_frozen_agent_routes(
+    conn: DatabaseConnection, workspace_id: str, keep_nodes: frozenset[str]
 ) -> None:
-    conn.execute(
-        """
-        insert into workspace_node_routes(
-          workspace_id, node_key, target_kind, target_id
-        ) values (%s, %s, 'agent', %s)
-        on conflict(workspace_id, node_key) do update set
-          target_kind='agent', target_id=excluded.target_id
-        """,
-        (workspace_id, node_key, agent_id),
-    )
+    """Prune stale historical routes and obsolete per-node capacity rows.
 
-
-def _delete_stale_projection_rows(
-    conn: DatabaseConnection,
-    workspace_id: str,
-    workflow_key: str,
-    keep_route_nodes: set[str],
-    keep_capacity_nodes: set[str],
-) -> None:
-    """Remove route/capacity rows absent from the new projection.
-
-    ``workspace_node_routes``/``workspace_node_capacities`` are materialized
-    projections of the current published revision, so rows for nodes that lost
-    their Agent routing (or were removed) must not survive a republish. Only
-    ``target_kind='agent'`` routes are pruned; handler routes are owned by a
-    different write path.
+    Every revision publish keeps the existing route target of nodes still
+    declared ``type: agent``; only rows of removed or retyped nodes are
+    deleted. Handler routes belong to a different write path. Agent capacity
+    is workspace-level now, so its legacy per-node projection is still cleared.
     """
     # #211 Phase 3 (read-layer binding): prune predicates key on workspace_id
     # alone — workflow_key equals it on every row (v62 binding, aligned by
     # v68), so the column filter was redundant.
-    if keep_route_nodes:
-        placeholders = ", ".join("%s" for _ in keep_route_nodes)
-        conn.execute(
-            "delete from workspace_node_routes"
-            " where workspace_id=%s and target_kind='agent'"
-            f" and node_key not in ({placeholders})",
-            (workspace_id, *sorted(keep_route_nodes)),
-        )
-    else:
-        conn.execute(
-            "delete from workspace_node_routes where workspace_id=%s and target_kind='agent'",
-            (workspace_id,),
-        )
-    if keep_capacity_nodes:
-        placeholders = ", ".join("%s" for _ in keep_capacity_nodes)
-        conn.execute(
-            "delete from workspace_node_capacities"
-            " where workspace_id=%s"
-            f" and node_key not in ({placeholders})",
-            (workspace_id, *sorted(keep_capacity_nodes)),
-        )
-    else:
-        conn.execute(
-            "delete from workspace_node_capacities where workspace_id=%s",
-            (workspace_id,),
-        )
-
-
-def write_agent_route_projection(
-    conn: DatabaseConnection,
-    *,
-    workspace_id: str,
-    workflow_key: str,
-    agent_routes: dict[str, str],
-) -> None:
-    """Replace the workspace's agent-route projection (upsert + prune).
-
-    Runs inside the caller's transaction. No ``workspace_node_capacities``
-    writes: Agent capacity is workspace-level now; the prune clears legacy
-    per-node rows.
-    """
-    for node_key, agent_id in agent_routes.items():
-        _upsert_agent_route(conn, workspace_id, workflow_key, node_key, agent_id)
-    _delete_stale_projection_rows(
-        conn,
-        workspace_id,
-        workflow_key,
-        keep_route_nodes=set(agent_routes),
-        keep_capacity_nodes=set(),
-    )
-
-
-def prune_frozen_agent_routes(
-    conn: DatabaseConnection, workspace_id: str, keep_nodes: frozenset[str]
-) -> None:
-    """Route freeze (#935): drop agent rows whose node is no longer an agent node.
-
-    A fully self-contained revision never upserts routes; rows of nodes it
-    still declares ``type: agent`` stay frozen for in-flight legacy
-    snapshots, but rows of nodes it removed or turned ``code`` are deleted —
-    otherwise a stale row could route a code node to an Agent (R1).
-    """
     if keep_nodes:
         placeholders = ", ".join("%s" for _ in keep_nodes)
         conn.execute(
@@ -134,6 +42,10 @@ def prune_frozen_agent_routes(
             "delete from workspace_node_routes where workspace_id=%s and target_kind='agent'",
             (workspace_id,),
         )
+    conn.execute(
+        "delete from workspace_node_capacities where workspace_id=%s",
+        (workspace_id,),
+    )
 
 
 def create_workflow_revision_with_projection(
@@ -146,16 +58,15 @@ def create_workflow_revision_with_projection(
     status: str,
     definition_json: str,
     definition_hash: str,
-    agent_routes: dict[str, str] | None = None,
     frozen_route_nodes: frozenset[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Insert one revision row and, for publishes, rewrite the projection.
+    """Insert one revision row and atomically prune stale historical projections.
 
-    Archive-then-insert keeps a workspace's active revision singular; the
-    projection rewrite rides the same transaction so a revision is never
-    visible with another revision's routes. Returns the inserted row (or
-    None when the row vanished between insert and re-read, which the caller
-    turns into an error).
+    Archive-then-insert keeps a workspace's active revision singular. Existing
+    Agent route targets are never inserted or updated; only their retype/delete
+    prune rides the revision transaction. Returns the inserted row (or None
+    when the row vanished between insert and re-read, which the caller turns
+    into an error).
     """
     if status == "active":
         # #759 P2-A：发布进入 implementation-publication 锁域（与
@@ -192,13 +103,6 @@ def create_workflow_revision_with_projection(
             status,
         ),
     )
-    if agent_routes is not None:
-        write_agent_route_projection(
-            conn,
-            workspace_id=workspace_id,
-            workflow_key=workflow_key,
-            agent_routes=agent_routes,
-        )
-    elif frozen_route_nodes is not None:
+    if frozen_route_nodes is not None:
         prune_frozen_agent_routes(conn, workspace_id, frozen_route_nodes)
     return conn.execute("select * from workflow_revisions where id=%s", (revision_id,)).fetchone()

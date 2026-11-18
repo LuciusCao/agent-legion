@@ -1,12 +1,11 @@
 """Workflow revision publication service (publish / runtime-save / seed).
 
 Why this module is small (#287): the stateless publish pipeline (pins
-freeze/embed, version allocation, route derivation) moved to
-workflow_revision_pipeline.py, with the route derivation shared from
+freeze/embed, version allocation, historical route retention) moved to
+workflow_revision_pipeline.py, with the retention set shared from
 workflow_revision_routes.py. What remains here is the facade:
 construction, demo seeding, and delegation, so callers keep one entry
-point. The startup route reconcile retired with explicit node types
-(#284): routes change only at revision publication.
+point. Publication never rewrites historical Agent route targets (#936).
 """
 
 from __future__ import annotations

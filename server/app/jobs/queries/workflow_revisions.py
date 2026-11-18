@@ -1,12 +1,9 @@
 """Workflow revision writes on the JobQueries facade.
 
-Why this module stays lean (#287): the ``workspace_node_routes`` /
-``workspace_node_capacities`` projection writes moved to
-``workflow_revision_projection.py``, and the revision snapshot *reads* to
-``workflow_revision_reads.py`` — publication is the only writer, so the
-write path here is the transaction around archive-then-insert plus the
-projection rewrite. ``WorkflowRevisionQueriesMixin`` inherits the read
-mixin so the composed JobQueries surface is unchanged.
+The transaction around archive-then-insert lives here; historical projection
+pruning is in ``workflow_revision_projection.py`` and revision snapshot reads
+in ``workflow_revision_reads.py``. ``WorkflowRevisionQueriesMixin`` keeps those
+reads and the revision write transaction behind the JobQueries facade.
 """
 
 from __future__ import annotations
@@ -34,7 +31,6 @@ class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
         status: str,
         definition_json: str,
         definition_hash: str,
-        agent_routes: dict[str, str] | None = None,
         on_commit: Callable[[DatabaseConnection], None] | None = None,
         frozen_route_nodes: frozenset[str] | None = None,
     ) -> dict[str, Any]:
@@ -45,10 +41,9 @@ class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
         publish back (codex 终轮 P1-3). Planning is the caller's pre-read.
         """
         # One transaction: archive the previous active revision, insert the
-        # new one, rewrite the agent-route projection, and run the caller's
-        # in-transaction hook — the projection (and the prune) must be atomic
-        # with the insert that publishes it (#287; see
-        # workflow_revision_projection for the helper contracts).
+        # new one, prune stale historical projections, and run the caller's
+        # in-transaction hook (#287; see workflow_revision_projection for the
+        # helper contracts).
         with self.connect() as conn:
             row = create_workflow_revision_with_projection(
                 conn,
@@ -59,7 +54,6 @@ class WorkflowRevisionQueriesMixin(WorkflowRevisionReadQueriesMixin):
                 status=status,
                 definition_json=definition_json,
                 definition_hash=definition_hash,
-                agent_routes=agent_routes,
                 frozen_route_nodes=frozen_route_nodes,
             )
             if on_commit is not None:

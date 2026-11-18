@@ -41,9 +41,6 @@ from tests.postgres_support import TEST_DATABASE_URL
 def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1")
-    # Agent definitions are workspace-scoped (schema v46): seed the demo
-    # templates into this workspace so its routes resolve. #935: the demo
-    # ships self-contained nodes; the legacy variant still materializes routes.
     seed_workspace_agent_definitions(workspace["id"])
     definition = legacy_profile_variant(
         load_builtin_definition("education_video_problems_generation")
@@ -70,9 +67,8 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
             " where workspace_id=%s and node_key='write_script'",
             (workspace["id"],),
         ).fetchone()
-    assert route is not None
-    assert dict(route) == {"target_kind": "agent", "target_id": "example-write-script-v1"}
-    # Agent capacity is workspace-level now; publish no longer writes per-node rows.
+    # Even an internal legacy publish with a unique catalog match writes no route.
+    assert route is None
     assert capacity is None
 
 
@@ -241,64 +237,51 @@ def _route_and_capacity_rows(queries: JobQueries, workspace_id: str) -> dict:
     }
 
 
-def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -> None:
+def test_republish_prunes_only_deleted_or_code_agent_routes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1")
     seed_workspace_agent_definitions(workspace["id"])
-    service = WorkflowRevisionService(queries)
-    service.publish_workspace_revision(
-        workspace["id"], _agent_nodes_definition(review_as_local=False)
-    )
-    demo_definition = load_builtin_definition("education_video_problems_generation")
-    service.publish_workspace_revision(workspace["id"], demo_definition)
-    # Legacy projection: a stale per-node capacity row must be pruned by the
-    # next publish even though publish no longer writes such rows.
     with queries.connect() as conn:
+        for node_key in ("write_script", "review_script", "removed_node"):
+            conn.execute(
+                "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+                " values (%s, %s, 'agent', %s)",
+                (workspace["id"], node_key, f"historical-{node_key}"),
+            )
         conn.execute(
             "insert into workspace_node_capacities(workspace_id, node_key, max_concurrency)"
             " values (%s, 'write_script', 20)",
             (workspace["id"],),
         )
 
-    service.publish_workspace_revision(
+    WorkflowRevisionService(queries).publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=True)
     )
 
-    # #211 Phase 3 (M1): the projection is per-WORKSPACE now (v62 binding —
-    # one workspace, one workflow). The last publish (review_as_local=True)
-    # owns the projection: write_script stays Agent-routed, review_script is
-    # a code node (no route), and every earlier row — the demo workflow's and
-    # the first publish's — was pruned by that same publish.
     flow_rows = _route_and_capacity_rows(queries, workspace["id"])
-    assert set(flow_rows["routes"]) == {"write_script"}
-    assert flow_rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
+    assert flow_rows["routes"] == {"write_script": ("agent", "historical-write_script")}
     assert flow_rows["capacities"] == {}
 
 
-def test_archived_agent_does_not_rewrite_routes_until_next_publish(tmp_path: Path) -> None:
-    """Explicit types (#284): Agent publish/archive never rewrites routes —
-    they only change when a new revision is published (the startup reconcile
-    was retired with the explicit-type cutover)."""
+def test_archived_agent_never_rewrites_or_prunes_frozen_routes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1")
     seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
-    service.publish_workspace_revision(
-        workspace["id"], _agent_nodes_definition(review_as_local=False)
-    )
+    definition = _agent_nodes_definition(review_as_local=False)
+    service.publish_workspace_revision(workspace["id"], definition)
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values (%s, 'write_script', 'agent', 'example-write-script-v1')",
+            (workspace["id"],),
+        )
 
-    # Archive every published Agent: the materialized rows stay untouched.
     replace_agent_catalog(workspace["id"], {})
+    service.publish_workspace_revision(workspace["id"], definition)
+
     rows = _route_and_capacity_rows(queries, workspace["id"])
     assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
-
-    # The next publish re-derives routes from the (now empty) catalog and
-    # prunes the stale agent rows.
-    service.publish_workspace_revision(
-        workspace["id"], _agent_nodes_definition(review_as_local=False)
-    )
-    rows = _route_and_capacity_rows(queries, workspace["id"])
-    assert rows["routes"] == {}
 
 
 def test_publish_rejects_legacy_agent_node_whatever_the_catalog(

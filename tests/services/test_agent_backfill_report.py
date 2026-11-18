@@ -116,6 +116,17 @@ def fixture_db(tmp_path: Path) -> JobQueries:
     WorkflowRevisionService(queries).publish_workspace_revision(
         "ws_bf", workflow_definition_from_yaml_string(_ACTIVE_YAML)
     )
+    with queries.connect() as conn:
+        for node_key, target_id in (
+            ("draft_a", "writer"),
+            ("draft_b", "writer"),
+            ("review", "reviewer"),
+        ):
+            conn.execute(
+                "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+                " values ('ws_bf', %s, 'agent', %s)",
+                (node_key, target_id),
+            )
     queries.upsert_workspace_workflow_draft("ws_bf", _DRAFT_YAML)
     queries.upsert_workspace_workflow_draft("ws_broken", "nodes: [unclosed")
     reset_published_agent_cache()
@@ -230,16 +241,18 @@ nodes:
 
 
 def test_active_revision_resolves_by_route_and_reports_drift(tmp_path: Path) -> None:
-    """Publish routes ``gen`` → ``gen-v1``; archiving it and publishing the same
-    capability as ``gen-v2`` leaves the route on v1 (Agent publish/archive never
-    rewrites routes). Active: backfill from the route target + route_drift;
-    draft: capability resolution (v2), no drift."""
+    """A frozen gen→gen-v1 route wins over today's unique gen-v2 candidate."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     queries.create_workspace("Drift", workspace_id="ws_drift")
     replace_agent_catalog("ws_drift", {"gen-v1": _agent("generate", runtime="pi")})
     WorkflowRevisionService(queries).publish_workspace_revision(
         "ws_drift", workflow_definition_from_yaml_string(_DRIFT_YAML)
     )
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, node_key, target_kind, target_id)"
+            " values ('ws_drift', 'gen', 'agent', 'gen-v1')"
+        )
     replace_agent_catalog("ws_drift", {"gen-v2": _agent("generate")})
     queries.upsert_workspace_workflow_draft("ws_drift", _DRIFT_YAML)
 
