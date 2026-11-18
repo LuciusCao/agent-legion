@@ -113,21 +113,25 @@ describe('patchWorkflowNodeType', () => {
     })
   })
 
-  it('refuses approval→code without a capability (no half-applied state)', () => {
-    // code 仍要求非空 capability；前置校验必须拦下，避免自动保存不可发布
-    // 的半应用态。手写「approval + capability」仍是合法直通路径。
-    expect(() => patchWorkflowNodeType(midDagYaml, 'gate', 'code')).toThrow(
-      WorkflowNodeTypeSwitchError
-    )
+  it('switches approval→code with an empty capability and preserves a legacy label', () => {
+    const out = patchWorkflowNodeType(midDagYaml, 'gate', 'code')
+    const node = parseNodes(out).nodes?.gate
+    expect(node?.type).toBe('code')
+    expect(node?.capability).toBe('')
+    expect(out).toContain("capability: ''")
+    expect(node).not.toHaveProperty('config')
+
+    // 手写「approval + capability」的旧非空兼容标签不因切型被改名或清空。
     const withCapability = midDagYaml.replace(
       '    type: approval',
       '    type: approval\n    capability: gate_cap'
     )
-    const out = patchWorkflowNodeType(withCapability, 'gate', 'code')
-    const node = parseNodes(out).nodes?.gate
-    expect(node?.type).toBe('code')
-    expect(node?.capability).toBe('gate_cap')
-    expect(node).not.toHaveProperty('config')
+    const legacy = parseNodes(
+      patchWorkflowNodeType(withCapability, 'gate', 'code')
+    ).nodes?.gate
+    expect(legacy?.type).toBe('code')
+    expect(legacy?.capability).toBe('gate_cap')
+    expect(legacy).not.toHaveProperty('config')
   })
 
   it('switches approval→agent with an explicitly empty optional capability', () => {
@@ -142,10 +146,7 @@ describe('patchWorkflowNodeType', () => {
     expect(node).not.toHaveProperty('config')
   })
 
-  it('switches approval→code/agent atomically via the capability channel (#405)', () => {
-    // 结构化 UI 对 approval 隐藏能力 Key 输入，「先在基本设置补再切」
-    // 不可达；切换弹窗收集的 capability 随本次 patch 原子写入——type
-    // 与 capability 一次提交，无中间非法态。
+  it('accepts an explicit capability channel without making it required', () => {
     const out = patchWorkflowNodeType(midDagYaml, 'gate', 'code', 'gate_cap')
     const node = parseNodes(out).nodes?.gate
     expect(node?.type).toBe('code')
@@ -164,10 +165,8 @@ describe('patchWorkflowNodeType', () => {
     // #935 兜底：approval→agent 经通道后节点仍须自含 execution.runtime
     // （无 workflow 顶层默认时写 velites），保持原位在 sanitize 之后。
     expect(agentNode?.execution).toEqual({ runtime: 'velites' })
-    // 空白通道等同未提供（弹窗留空不应绕过前置校验）。
-    expect(() =>
-      patchWorkflowNodeType(midDagYaml, 'gate', 'code', '   ')
-    ).toThrow(WorkflowNodeTypeSwitchError)
+    const blank = patchWorkflowNodeType(midDagYaml, 'gate', 'code', '   ')
+    expect(parseNodes(blank).nodes?.gate?.capability).toBe('')
   })
 
   it('refuses →approval without an executable upstream (validate_approval_edges mirror)', () => {

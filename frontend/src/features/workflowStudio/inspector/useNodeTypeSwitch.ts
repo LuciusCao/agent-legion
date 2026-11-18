@@ -5,19 +5,14 @@ import {
   WorkflowNodeTypeSwitchError,
   type SwitchableNodeType,
 } from '../shared/workflowStudioYamlDraft.nodeType'
-import {
-  confirmDestructiveSwitch,
-  promptForSwitchCapability,
-} from './nodeTypeSelector'
+import { confirmDestructiveSwitch } from './nodeTypeSelector'
 import { parseWorkflowNode } from '../shared/workflowStudioYamlDraft.parse'
 
 // 头部类型选择器（#392）的写侧接线：先做目标类型前置校验
-// （capability/入边，校验都不过就不必问破坏性确认），确认通过后改写
-// 草稿 YAML 并按目标类型清洗字段。校验失败 toast 提示并保留原类型；
-// 不可恢复错误降级提示手动改 YAML。
-// #405：approval 按契约无 capability、结构化 UI 又隐藏该输入，切回
-// code 的 capability 缺失必须经弹窗随本次切换原子补上（一次提交，无
-// 中间非法态）；agent 允许空标签，直接切换并归一为 ''。
+// （入边，校验不过就不必问破坏性确认），确认通过后改写草稿 YAML 并按
+// 目标类型清洗字段。校验失败 toast 提示并保留原类型；不可恢复错误降级
+// 提示手动改 YAML。code/agent 都允许空 capability；approval 切出时不再
+// 弹窗补值，缺省由 patch 归一为 ''，草稿里的旧非空兼容标签继续保留。
 export function useNodeTypeSwitch(
   definitionYaml: string,
   nodeKey: string,
@@ -27,23 +22,16 @@ export function useNodeTypeSwitch(
   const showToast = useUiStore((s) => s.showToast)
   return useCallback(
     (nodeTypeTarget: SwitchableNodeType) => {
-      // approval→code 先弹补能力通道（弹窗先于校验，取消/留空即放弃，
-      // 草稿保持原类型）；agent 与其余类型直通。手写 approval+capability
-      // 的节点也直通，避免 cancel 拦下此前合法的切换。
-      const needsCapabilityChannel =
-        nodeTypeTarget === 'code' &&
-        nodeType === 'approval' &&
-        !parseWorkflowNode(definitionYaml, nodeKey)?.capability
-      const promptResult = needsCapabilityChannel
-        ? promptForSwitchCapability(nodeTypeTarget)
-        : undefined
-      if (promptResult === null) return false
+      const capabilityChannel =
+        nodeTypeTarget === 'code' && nodeType === 'approval'
+          ? parseWorkflowNode(definitionYaml, nodeKey)?.capability
+          : undefined
       try {
         const nextYaml = patchWorkflowNodeType(
           definitionYaml,
           nodeKey,
           nodeTypeTarget,
-          promptResult ?? undefined
+          capabilityChannel
         )
         if (!confirmDestructiveSwitch(nodeTypeTarget)) return false
         setDefinitionYaml(nextYaml)

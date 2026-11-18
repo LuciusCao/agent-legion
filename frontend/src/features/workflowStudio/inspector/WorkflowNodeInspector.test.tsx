@@ -239,14 +239,12 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     )
   })
 
-  it('switches approval→code atomically via the capability prompt (#405)', async () => {
+  it('switches approval→code to a capless node without prompting (#440)', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const promptSpy = vi
       .spyOn(window, 'prompt')
-      .mockReturnValue('gate_cap' as unknown as string)
+      .mockReturnValue('unexpected' as unknown as string)
     const setDefinitionYaml = vi.fn()
-    // 结构化 UI 对 approval 隐藏能力 Key 输入（loader 禁 capability）；
-    // 切回 code 必须经弹窗补 capability，一次提交原子落草稿。
     render(
       <WorkflowNodeInspector
         workflow={null}
@@ -262,9 +260,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       target: { value: 'code' },
     })
 
-    expect(promptSpy).toHaveBeenCalledWith(
-      expect.stringContaining('capability')
-    )
+    expect(promptSpy).not.toHaveBeenCalled()
     expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
     const nextYaml = setDefinitionYaml.mock.calls[0][0] as string
     const node = (
@@ -272,9 +268,8 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
         nodes?: Record<string, Record<string, unknown>>
       }
     ).nodes?.gate
-    // type 与 capability 同一次提交写入（无中间非法态）。
     expect(node?.type).toBe('code')
-    expect(node?.capability).toBe('gate_cap')
+    expect(node?.capability).toBe('')
     // 审批专属 config 键随切换剥除。
     expect(node).not.toHaveProperty('config')
   })
@@ -312,10 +307,11 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     expect(node).not.toHaveProperty('config')
   })
 
-  it('keeps the draft untouched when the capability prompt is dismissed (#405)', async () => {
+  it('does not treat a dismissed legacy capability prompt as cancellation', async () => {
     const promptSpy = vi
       .spyOn(window, 'prompt')
       .mockReturnValue(null as unknown as string)
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const setDefinitionYaml = vi.fn()
     render(
       <WorkflowNodeInspector
@@ -332,10 +328,16 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       target: { value: 'code' },
     })
 
-    // 取消（或留空）即放弃本次切换：草稿不动、不触发破坏性确认。
-    expect(promptSpy).toHaveBeenCalled()
-    expect(setDefinitionYaml).not.toHaveBeenCalled()
-    expect(vi.spyOn(window, 'confirm')).not.toHaveBeenCalled()
+    expect(promptSpy).not.toHaveBeenCalled()
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(setDefinitionYaml).toHaveBeenCalledTimes(1)
+    const node = (
+      yaml.load(setDefinitionYaml.mock.calls[0][0]) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.gate
+    expect(node?.type).toBe('code')
+    expect(node?.capability).toBe('')
   })
 
   it('skips the capability prompt when switching between executable types', async () => {

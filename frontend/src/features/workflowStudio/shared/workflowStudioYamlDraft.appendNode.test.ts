@@ -24,17 +24,36 @@ function parseNodes(raw: string): RawYaml {
 }
 
 describe('appendWorkflowNode', () => {
-  it('appends a code node with capability/label defaulting to key', () => {
+  it('appends a capless code node with only the label defaulting to key', () => {
     const out = appendWorkflowNode(baseYaml, { nodeType: 'code', key: 'draft' })
     const node = parseNodes(out).nodes?.draft
     expect(node).toEqual({
       type: 'code',
       label: 'draft',
-      capability: 'draft',
+      capability: '',
       after: [],
     })
+    expect(out).toContain("capability: ''")
     // 既有节点不动。
     expect(parseNodes(out).nodes?.intake?.capability).toBe('intake')
+  })
+
+  it('preserves an explicit code capability and normalizes blank input to empty', () => {
+    const explicit = appendWorkflowNode(baseYaml, {
+      nodeType: 'code',
+      key: 'legacy',
+      capability: '  legacy_capability  ',
+    })
+    expect(parseNodes(explicit).nodes?.legacy?.capability).toBe(
+      'legacy_capability'
+    )
+
+    const blank = appendWorkflowNode(baseYaml, {
+      nodeType: 'code',
+      key: 'blank',
+      capability: '   ',
+    })
+    expect(parseNodes(blank).nodes?.blank?.capability).toBe('')
   })
 
   it('appends an approval node without capability', () => {

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import yaml from 'js-yaml'
 import { useUiStore } from '../../../stores/uiStore'
@@ -59,7 +60,7 @@ describe('AddWorkflowNodeDialog', () => {
     expect(node).toEqual({ type: 'approval', label: 'gate', after: [] })
   })
 
-  it('defaults capability and label to the node key for code nodes', () => {
+  it('defaults code capability to empty and only label to the node key', () => {
     const onAppended = vi.fn()
     renderDialog({ onAppended })
 
@@ -76,9 +77,29 @@ describe('AddWorkflowNodeDialog', () => {
     expect(node).toEqual({
       type: 'code',
       label: 'draft',
-      capability: 'draft',
+      capability: '',
       after: [],
     })
+  })
+
+  it('preserves an explicit non-empty code capability', () => {
+    const onAppended = vi.fn()
+    renderDialog({ onAppended })
+
+    fireEvent.change(screen.getByLabelText('节点 Key'), {
+      target: { value: 'legacy' },
+    })
+    fireEvent.change(screen.getByLabelText('能力 Key'), {
+      target: { value: 'legacy_capability' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '添加' }))
+
+    const node = (
+      yaml.load(onAppended.mock.calls[0][0]) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.legacy
+    expect(node?.capability).toBe('legacy_capability')
   })
 
   it('appends an agent with an empty optional capability and display label', () => {
@@ -89,7 +110,7 @@ describe('AddWorkflowNodeDialog', () => {
       target: { value: 'agent' },
     })
     expect(
-      screen.getByText('能力 Key（code 缺省 = 节点 Key；agent 可选标签）')
+      screen.getByText('能力 Key（code / agent 均为可选标签）')
     ).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('节点 Key'), {
       target: { value: 'draft_agent' },
@@ -104,6 +125,39 @@ describe('AddWorkflowNodeDialog', () => {
     expect(node?.capability).toBe('')
     expect(node?.label).toBe('draft_agent')
     expect(node?.execution).toEqual({ runtime: 'velites' })
+  })
+
+  it('submits a capless code node from the keyboard', async () => {
+    const user = userEvent.setup()
+    const onAppended = vi.fn()
+    renderDialog({ onAppended })
+
+    await user.type(screen.getByLabelText('节点 Key'), 'keyboard')
+    const addButton = screen.getByRole('button', { name: '添加' })
+    await user.tab()
+    await user.tab()
+    await user.tab()
+    await user.tab()
+    expect(addButton).toHaveFocus()
+    await user.keyboard('{Enter}')
+
+    expect(onAppended).toHaveBeenCalledTimes(1)
+    const node = (
+      yaml.load(onAppended.mock.calls[0][0]) as {
+        nodes?: Record<string, Record<string, unknown>>
+      }
+    ).nodes?.keyboard
+    expect(node?.capability).toBe('')
+  })
+
+  it('keeps the small full-width dialog layout used on narrow screens', () => {
+    renderDialog()
+
+    expect(screen.getByRole('dialog')).toHaveClass(
+      'MuiDialog-paperFullWidth',
+      'MuiDialog-paperWidthSm'
+    )
+    expect(screen.getByLabelText('能力 Key')).toBeVisible()
   })
 
   it('toasts the reason and keeps the draft untouched on duplicate key', async () => {
