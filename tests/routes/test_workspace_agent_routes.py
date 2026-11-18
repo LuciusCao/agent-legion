@@ -7,7 +7,8 @@ from server.app.db.migrations.agent_profile_backfill import migrate_agent_profil
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.jobs.queries import JobQueries
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.helpers import load_builtin_definition, seed_workspace_agent_definitions
+from tests.helpers import load_builtin_definition
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 from tests.helpers.node_profile import legacy_profile_variant
 from tests.postgres_support import TEST_DATABASE_URL
 

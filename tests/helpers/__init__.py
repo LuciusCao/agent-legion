@@ -152,9 +152,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     from server.app import main as app_main
     from tests.postgres_support import TEST_DATABASE_URL
 
-    # The app boots against the isolated test schema; Agent definitions are
-    # workspace-scoped (schema v46), seeded per workspace by the tests that
-    # need them (tests/helpers.seed_workspace_agent_definitions).
+    # The app boots against the isolated test schema; legacy Agent definitions
+    # are workspace-scoped (schema v46), seeded only by tests of old resolvers
+    # and read APIs via tests/helpers/legacy_agent_definitions.py.
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
     ) -> Settings:
@@ -253,29 +253,6 @@ def publish_agent_definition(
     )
     reset_published_agent_cache()
     return published
-
-
-def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
-    """Seed absent legacy demo rows for tests that exercise old resolvers.
-
-    Self-contained workflow tests do not need this fixture. Existing versions,
-    including archived ones, are left untouched.
-    """
-    from server.app.agent_catalog.builtin import BUILTIN_AGENT_DEFINITIONS
-    from server.app.services.versioned_entities import VersionedEntityStore
-    from tests.postgres_support import TEST_DATABASE_URL
-
-    store = VersionedEntityStore(TEST_DATABASE_URL, "agent")
-    seeded: list[str] = []
-    for agent_id, definition in BUILTIN_AGENT_DEFINITIONS.items():
-        if store.list_versions(agent_id, workspace_id):
-            continue
-        saved = save_agent_definition_draft(
-            TEST_DATABASE_URL, workspace_id, agent_id, definition, created_by="system"
-        )
-        publish_agent_definition(TEST_DATABASE_URL, workspace_id, agent_id, saved.definition_hash)
-        seeded.append(agent_id)
-    return seeded
 
 
 def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str, Any]) -> None:

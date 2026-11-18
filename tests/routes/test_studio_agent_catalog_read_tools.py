@@ -16,11 +16,8 @@ import pytest
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.auth import scoped_tokens
-from tests.helpers import (
-    publish_agent_definition,
-    save_agent_definition_draft,
-    seed_workspace_agent_definitions,
-)
+from tests.helpers import publish_agent_definition, save_agent_definition_draft
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 
 _WORKFLOW_KEY = "education_video_problems_generation"
 

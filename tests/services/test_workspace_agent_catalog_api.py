@@ -8,7 +8,7 @@ def test_list_agent_catalog_endpoint(client):
     assert created.status_code == 200, created.text
     workspace_id = created.json()["workspace"]["id"]
     # v62: creation no longer seeds the factory Agents.
-    from tests.helpers import seed_workspace_agent_definitions
+    from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 
     seed_workspace_agent_definitions(workspace_id)
     response = client.get("/api/agent-catalog", params={"workspace_id": workspace_id})

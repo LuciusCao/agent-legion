@@ -16,17 +16,14 @@ from server.app.agent_control.registry import AgentWorkerRegistry
 from server.app.main import create_app
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from tests.helpers import (
-    load_builtin_definition,
-    replace_agent_catalog,
-    seed_workspace_agent_definitions,
-)
+from tests.helpers import load_builtin_definition, replace_agent_catalog
 from tests.helpers.agent_worker_api import (
     assert_capacity_matrix as _assert_capacity_matrix,
 )
 from tests.helpers.agent_worker_api import (
     seed_request as _seed_request,
 )
+from tests.helpers.legacy_agent_definitions import seed_workspace_agent_definitions
 from tests.helpers.node_profile import legacy_profile_variant
 from tests.helpers.postgres_schema import (
     assert_schema_initialization_is_idempotent as _assert_schema_idempotent,
