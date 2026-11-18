@@ -24,6 +24,24 @@ vi.mock('../../../api/workflowDraftCompare', () => ({
 
 const mockApi = vi.mocked(chatApi)
 
+function installLocalStorageStub() {
+  const store = new Map<string, string>()
+  const stub: Storage = {
+    get length() {
+      return store.size
+    },
+    clear: () => store.clear(),
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => void store.delete(key),
+    setItem: (key, value) => store.set(key, String(value)),
+  }
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: stub,
+  })
+}
+
 function sessionRecord(
   id = 's1',
   overrides?: Partial<StudioChatSessionRecord>
@@ -102,6 +120,7 @@ describe('StudioChatBackgroundTasks', () => {
   const originalEventSource = globalThis.EventSource
 
   beforeEach(() => {
+    installLocalStorageStub()
     EventSourceMock.reset()
     globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
     vi.clearAllMocks()
