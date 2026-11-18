@@ -150,7 +150,8 @@ def test_dsn_database_name_covers_legal_dsn_forms() -> None:
 def test_seed_from_prod_guard_rejects_encoded_shared_name() -> None:
     """seed_from_prod shares the libpq-semantics DSN check: the URL-encoded
     shared name must not pass its prod-target guard."""
-    from scripts.seed_from_prod import SeedError, guard_target_dsn
+    from scripts.seed_from_prod_db import SeedError
+    from scripts.seed_from_prod_guard import guard_target_dsn
 
     with pytest.raises(SeedError, match="生产库同名"):
         guard_target_dsn("postgresql://127.0.0.1:5432/agent%5Flegion")

@@ -58,6 +58,71 @@ entirely on later calls in that process (`db/schema_head_cache.py`); the
 test harness invalidates that memo on schema rebuilds and disables it
 inside `fresh_schema` tests.
 
+## Seeding a derived dev instance from local prod
+
+`scripts/seed_from_prod.py` reads the local prod Docker PostgreSQL container and
+writes only the current worktree's derived resources. Run the read-only preview
+first, then apply the same command without `--dry-run`:
+
+```bash
+uv run python scripts/seed_from_prod.py --dry-run
+uv run python scripts/seed_from_prod.py
+```
+
+For the Docker prod stack, `deploy/.env` normally has the container-only S3
+endpoint. Override it with the host loopback endpoint when needed (never print
+or paste credential values into the command or logs):
+
+```bash
+SEED_PROD_S3_ENDPOINT=http://127.0.0.1:8333 \
+  uv run python scripts/seed_from_prod.py --dry-run
+```
+
+The source is fixed to the prod database/bucket. The target database and bucket
+must exactly match the current worktree's derived names (a tower child reuses
+its parent's names), and database/S3 endpoints must be loopback. Every libpq
+`host` / `hostaddr` candidate (including query overrides, comma-separated
+fallbacks, and environment fallbacks) must be loopback. Any non-empty
+`service` / `PGSERVICE` is rejected instead of reading a service file; use an
+explicit loopback DSN. psql error output is
+redacted because it can echo the DSN. The two S3 endpoints must identify the
+same local instance because the copy uses S3
+`CopyObject`; no bytes are downloaded and re-uploaded. A missing target bucket,
+different bucket, remote endpoint, or endpoint mismatch aborts before Layer 1
+writes. Credentials are read separately from prod `deploy/.env` and the dev
+root `.env`; the target identity needs source read permission for
+`CopyObject`.
+
+The mapping and replacement policy are deliberately explicit:
+
+- Layer 1 replaces the definition tables in full. Workspace ids are unchanged.
+- Layer 2 selects the newest `--jobs-per-workflow` jobs per workspace and all
+  `materials` rows. `job_artifacts` is restricted to those sampled jobs. Job,
+  workspace, material, and artifact ids and every `storage_key` remain
+  unchanged; only the bucket changes. Material `object_etag` is rebound from
+  the destination HEAD after a copy.
+- Existing target Layer 1/2 rows are replaced, not merged. Local job dirs and
+  legacy CAS blobs retain their compatibility copy behavior and may be rerun;
+  job dirs are only caches and `jobs.sqlite` is excluded. The legacy CAS is not
+  a new artifact channel and its missing blobs do not create S3 manifest rows.
+- Destination objects with the same key and size are HEAD-skipped. A same-key
+  different-size object is a conflict and its manifest row is omitted unless
+  `--overwrite-objects` is explicitly supplied. Missing sources, source size
+  mismatches, HEAD/copy errors, and failed post-copy validation are reported
+  per row and omitted from the load.
+- All successful Layer 2 rows load in one transaction only after object
+  preparation. A load failure rolls back the whole Layer 2 load; already copied
+  objects remain and are HEAD-skipped on retry. Partial object failures leave a
+  valid successful subset, produce exit code 1, and are safe to repair and
+  rerun. Fatal guard/command errors use exit code 2. Dry-run performs source
+  exports and HEAD reads but does not initialize a schema, write DB rows, copy
+  files, or copy objects.
+
+`--skip-files` suppresses only local job-dir/CAS copies. `--skip-objects`
+explicitly selects the old behavior: neither `materials` / `job_artifacts` rows
+nor their S3 objects are loaded. `--object-batch-size` bounds object-row
+processing batches; source CSV export and target COPY remain streaming.
+
 ## Dev-machine role isolation and worktree DB cleanup
 
 `DROP DATABASE` requires the database owner or a superuser. To make the
