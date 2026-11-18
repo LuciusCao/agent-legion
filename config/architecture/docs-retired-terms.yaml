@@ -119,7 +119,8 @@ terms:
   - pattern: 'Agent 管理'
     retired_in: '#935（#440 P3 Agent 定义退役：门禁翻转、写面 deprecated）'
     note: Agent 定义不再充当节点执行档案，执行配置写在 agent 节点上（执行档案，
-      EXEC-AGENT-PROFILE-001）；设置页目录在 P3b 改为只读「历史 Agent 定义」
+      EXEC-AGENT-PROFILE-001）；设置页目录在 P3b 改为只读，#936 D1 已删除该区块；
+      历史只读 API 与旧 job/replay resolver 保留
   - pattern: '(必须恰好解析到一个|resolve to exactly one) published Agent'
     retired_in: '#935（#440 P3 门禁翻转）'
     note: 发布门禁要求 agent 节点自含 execution.runtime，不再按 capability 解析
@@ -196,5 +197,10 @@ terms:
   - pattern: 'pending_cancel'
     retired_in: '#1153（A2 r4 TurnLease 整体协议替换）'
     note: cancel 直接 arm active TurnLease，不在 open_turn 后补偿消费 pending tuple
+  - pattern: '设置页[^。\n]{0,24}(?:提供|展示|列出|只剩|改为|新增|保留|仍有)[^。\n]{0,16}历史 Agent 定义'
+    retired_in: '#936（D1：设置页历史 Agent 定义区块删除）'
+    note: 仅退役设置页的历史 Agent 定义区块及其现行展示表述；/api/agent-definitions
+      list/get/versions GET、scoped GET、MCP read、agent-provenance、revision
+      provenance、历史实体与旧 job/replay resolver 均保留
 
 exemptions: []
