@@ -12,6 +12,7 @@ export type StudioBackgroundTaskHistoryItem = {
 }
 
 export type StudioBackgroundTask = {
+  taskKey: string
   taskId: string
   kind: StudioBackgroundTaskKind
   description: string
@@ -77,10 +78,12 @@ function backgroundEvent(message: ChatMessage) {
     return null
   const taskId = asText(content?.task_id).trim()
   if (!content || !taskId) return null
+  const acpSessionId = asText(content.acp_session_id).trim() || null
   return {
     content,
     event,
     taskId,
+    taskKey: JSON.stringify([acpSessionId, taskId]),
     terminal: event === 'background_task_finished',
   }
 }
@@ -89,7 +92,7 @@ export function deriveStudioBackgroundTaskViews(messages: ChatMessage[]): {
   tasks: StudioBackgroundTask[]
   timelineMessages: ChatMessage[]
 } {
-  const byId = new Map<string, StudioBackgroundTask>()
+  const byKey = new Map<string, StudioBackgroundTask>()
   const timelineMessages: ChatMessage[] = []
   for (const message of messages) {
     const current = backgroundEvent(message)
@@ -97,8 +100,8 @@ export function deriveStudioBackgroundTaskViews(messages: ChatMessage[]): {
       timelineMessages.push(message)
       continue
     }
-    const { content, event, taskId, terminal } = current
-    const previous = byId.get(taskId)
+    const { content, event, taskId, taskKey, terminal } = current
+    const previous = byKey.get(taskKey)
     if (!previous || terminal) timelineMessages.push(message)
     const reportedElapsed = elapsedSeconds(content.elapsed_seconds)
     const explicitStart = startedAtMs(content.started_at)
@@ -117,13 +120,14 @@ export function deriveStudioBackgroundTaskViews(messages: ChatMessage[]): {
       createdAt: message.created_at,
     }
     if (previous?.terminal && !terminal) {
-      byId.set(taskId, {
+      byKey.set(taskKey, {
         ...previous,
         history: [...previous.history, historyItem],
       })
       continue
     }
     const task: StudioBackgroundTask = {
+      taskKey,
       taskId,
       kind: taskKind(content.kind) ?? previous?.kind ?? 'unknown',
       description: description || previous?.description || taskId,
@@ -148,9 +152,9 @@ export function deriveStudioBackgroundTaskViews(messages: ChatMessage[]): {
         : '',
       history: [...(previous?.history ?? []), historyItem],
     }
-    byId.set(taskId, task)
+    byKey.set(taskKey, task)
   }
-  return { tasks: [...byId.values()], timelineMessages }
+  return { tasks: [...byKey.values()], timelineMessages }
 }
 
 export function backgroundTaskElapsedAt(

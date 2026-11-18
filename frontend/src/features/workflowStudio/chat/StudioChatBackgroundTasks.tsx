@@ -13,6 +13,7 @@ import {
   type StudioBackgroundTask,
   type StudioBackgroundTaskKind,
 } from './studioBackgroundTaskModel'
+import { StudioChatHistoryLoad } from './StudioChatHistoryLoad'
 import styles from './StudioChatView.module.css'
 
 type TaskFilter = 'all' | Exclude<StudioBackgroundTaskKind, 'unknown'>
@@ -129,11 +130,17 @@ export function StudioChatBackgroundTasks({
   labelledBy,
   tasks,
   hidden,
+  sessionId = null,
+  hasMoreHistory = false,
+  onLoadOlderHistory,
 }: {
   id: string
   labelledBy: string
   tasks: StudioBackgroundTask[]
   hidden: boolean
+  sessionId?: string | null
+  hasMoreHistory?: boolean
+  onLoadOlderHistory?: () => Promise<boolean>
 }) {
   const [filter, setFilter] = useState<TaskFilter>('all')
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
@@ -168,25 +175,32 @@ export function StudioChatBackgroundTasks({
           <option value="bash">Bash</option>
         </select>
       </div>
+      <StudioChatHistoryLoad
+        sessionId={sessionId}
+        hasMoreHistory={hasMoreHistory}
+        onLoadOlderHistory={onLoadOlderHistory}
+      />
       <div className={styles.taskList} aria-label="后台任务列表">
         {visibleTasks.length === 0 ? (
           <div className={styles.tasksEmpty}>
             {tasks.length === 0
-              ? '当前会话还没有后台任务'
+              ? hasMoreHistory && onLoadOlderHistory
+                ? '当前窗口还没有后台任务，可加载更早历史'
+                : '当前会话还没有后台任务'
               : '没有符合筛选条件的后台任务'}
           </div>
         ) : (
           visibleTasks.map((task) => (
             <TaskCard
-              key={task.taskId}
+              key={task.taskKey}
               task={task}
               now={now}
-              expanded={expanded.has(task.taskId)}
+              expanded={expanded.has(task.taskKey)}
               onToggle={() =>
                 setExpanded((current) => {
                   const next = new Set(current)
-                  if (next.has(task.taskId)) next.delete(task.taskId)
-                  else next.add(task.taskId)
+                  if (next.has(task.taskKey)) next.delete(task.taskKey)
+                  else next.add(task.taskKey)
                   return next
                 })
               }

@@ -184,6 +184,132 @@ describe('deriveStudioBackgroundTaskViews', () => {
     expect(views.timelineMessages.map((item) => item.id)).toEqual(['m1', 'm2'])
   })
 
+  it('separates reused task ids by ACP session across timeline, terminal state, and history', () => {
+    const oldRunning = taskEvent('m1', 'shared', 'background_task_status', {
+      acp_session_id: 'acp-old',
+      description: '旧 ACP 运行',
+    })
+    const oldFinished = taskEvent('m2', 'shared', 'background_task_finished', {
+      acp_session_id: 'acp-old',
+      description: '旧 ACP 终态',
+      summary: '旧 ACP 摘要',
+      elapsed_seconds: 20,
+    })
+    const newRunning = taskEvent('m3', 'shared', 'background_task_status', {
+      acp_session_id: 'acp-new',
+      description: '新 ACP 运行',
+      elapsed_seconds: 5,
+    })
+    const beforeNewTerminal = deriveStudioBackgroundTaskViews([
+      oldRunning,
+      oldFinished,
+      newRunning,
+    ])
+    expect(beforeNewTerminal.tasks).toHaveLength(2)
+    expect(beforeNewTerminal.tasks[0]).toMatchObject({
+      terminal: true,
+      status: 'completed',
+      summary: '旧 ACP 摘要',
+      elapsedSeconds: 20,
+    })
+    expect(beforeNewTerminal.tasks[1]).toMatchObject({
+      terminal: false,
+      status: 'running',
+      summary: '',
+      elapsedSeconds: 5,
+    })
+    expect(beforeNewTerminal.tasks[0].taskKey).not.toBe(
+      beforeNewTerminal.tasks[1].taskKey
+    )
+    expect(beforeNewTerminal.timelineMessages.map((item) => item.id)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+    ])
+    expect(
+      beforeNewTerminal.tasks[1].history.map((item) => item.messageId)
+    ).toEqual(['m3'])
+
+    const newFinished = taskEvent('m4', 'shared', 'background_task_finished', {
+      acp_session_id: 'acp-new',
+      description: '新 ACP 终态',
+      summary: '新 ACP 摘要',
+      elapsed_seconds: 12,
+    })
+    const completed = deriveStudioBackgroundTaskViews([
+      oldRunning,
+      oldFinished,
+      newRunning,
+      newFinished,
+    ])
+    expect(completed.tasks.map((task) => task.summary)).toEqual([
+      '旧 ACP 摘要',
+      '新 ACP 摘要',
+    ])
+    expect(completed.tasks.map((task) => task.elapsedSeconds)).toEqual([20, 12])
+    expect(completed.tasks.every((task) => task.terminal)).toBe(true)
+    expect(completed.timelineMessages.map((item) => item.id)).toEqual([
+      'm1',
+      'm2',
+      'm3',
+      'm4',
+    ])
+    expect(completed.tasks[0].history.map((item) => item.messageId)).toEqual([
+      'm1',
+      'm2',
+    ])
+    expect(completed.tasks[1].history.map((item) => item.messageId)).toEqual([
+      'm3',
+      'm4',
+    ])
+  })
+
+  it('keeps legacy events without ACP identity in a separate unknown-safe namespace', () => {
+    const legacyFinished = taskEvent(
+      'm1',
+      'shared',
+      'background_task_finished',
+      {
+        description: 'legacy 终态',
+        summary: 'legacy 摘要',
+        elapsed_seconds: 30,
+      }
+    )
+    const knownRunning = taskEvent('m2', 'shared', 'background_task_status', {
+      acp_session_id: 'acp-new',
+      description: '新 ACP 运行',
+      elapsed_seconds: 5,
+    })
+    const legacyLate = taskEvent('m3', 'shared', 'background_task_status', {
+      description: 'legacy 迟到进展',
+      elapsed_seconds: 40,
+    })
+    const views = deriveStudioBackgroundTaskViews([
+      legacyFinished,
+      knownRunning,
+      legacyLate,
+    ])
+    expect(views.tasks).toHaveLength(2)
+    expect(views.tasks[0]).toMatchObject({
+      terminal: true,
+      status: 'completed',
+      summary: 'legacy 摘要',
+      elapsedSeconds: 30,
+    })
+    expect(views.tasks[0].history.map((item) => item.messageId)).toEqual([
+      'm1',
+      'm3',
+    ])
+    expect(views.tasks[1]).toMatchObject({
+      terminal: false,
+      status: 'running',
+      elapsedSeconds: 5,
+    })
+    expect(views.tasks[1].history.map((item) => item.messageId)).toEqual(['m2'])
+    expect(views.tasks[0].taskKey).not.toBe(views.tasks[1].taskKey)
+    expect(views.timelineMessages.map((item) => item.id)).toEqual(['m1', 'm2'])
+  })
+
   it('degrades malformed and legacy messages without collecting unrelated task_id fields', () => {
     const blank = taskEvent('m1', ' ', 'background_task_status')
     const unrelated = message('m2', {

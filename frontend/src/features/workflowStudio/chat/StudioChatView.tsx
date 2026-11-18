@@ -90,6 +90,9 @@ export function StudioChatView({
         labelledBy={`${baseId}-tasks-tab`}
         tasks={background.tasks}
         hidden={view !== 'tasks'}
+        sessionId={chat.activeSessionId}
+        hasMoreHistory={chat.hasMoreHistory && chat.messages.length > 0}
+        onLoadOlderHistory={chat.loadOlderHistory}
       />
     </div>
   )

@@ -436,6 +436,7 @@
     "frontend/src/features/workflowStudio/chat/StudioChatContextRing.tsx": 74,
     "frontend/src/features/workflowStudio/chat/StudioChatDock.tsx": 54,
     "frontend/src/features/workflowStudio/chat/StudioChatDraftCards.tsx": 67,
+    "frontend/src/features/workflowStudio/chat/StudioChatHistoryLoad.tsx": 52,
     "frontend/src/features/workflowStudio/chat/StudioChatMessageItem.tsx": 147,
     "frontend/src/features/workflowStudio/chat/StudioChatMessageList.tsx": 106,
     "frontend/src/features/workflowStudio/chat/StudioChatPanel.module.css": 260,
