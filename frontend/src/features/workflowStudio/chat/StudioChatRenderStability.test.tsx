@@ -86,7 +86,7 @@ function sessionRecord(
 function chatMessage(
   id: string,
   seq: number,
-  kind: 'text' | 'tool_call' | 'permission',
+  kind: 'text' | 'tool_call' | 'permission' | 'status',
   role: 'user' | 'agent' | 'system',
   content: Record<string, unknown>
 ) {
@@ -189,5 +189,48 @@ describe('StudioChat 渲染稳定性（#1120）', () => {
     expect(counters.tool.get('t3')).toBe(before.tool)
     expect(counters.permission.get('r1')).toBe(before.permission)
     expect(counters.text.get('m2')!).toBeGreaterThan(before.agentText)
+  })
+
+  it('后台任务中间通知不重渲染既有对话行', async () => {
+    render(
+      <TestQueryProvider>
+        <StudioChatPanel onApplyWorkflowDraft={vi.fn()} />
+      </TestQueryProvider>
+    )
+    await screen.findByText('问题')
+    await screen.findAllByText('Bash')
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    const before = {
+      userText: counters.text.get('m1') ?? 0,
+      agentText: counters.text.get('m2') ?? 0,
+      tool: counters.tool.get('t3') ?? 0,
+      permission: counters.permission.get('r1') ?? 0,
+    }
+    const source = EventSourceMock.instances[0]
+    for (const [index, status] of ['created', 'running', 'quiet'].entries()) {
+      act(() => {
+        source.emitMessage({
+          type: 'message',
+          message: chatMessage(`bg${index}`, 5 + index, 'status', 'system', {
+            event: 'background_task_status',
+            task_id: 'agent-1',
+            kind: 'agent',
+            status,
+            description: '后台复核',
+            elapsed_seconds: index * 10,
+            detail: `进展 ${status}`,
+          }),
+        })
+      })
+    }
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: '后台任务' })).toHaveTextContent(
+        '1'
+      )
+    )
+    expect(counters.text.get('m1')).toBe(before.userText)
+    expect(counters.text.get('m2')).toBe(before.agentText)
+    expect(counters.tool.get('t3')).toBe(before.tool)
+    expect(counters.permission.get('r1')).toBe(before.permission)
   })
 })
