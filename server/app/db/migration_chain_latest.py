@@ -10,6 +10,7 @@ from server.app.db.migrations.approval_batch import migrate_approval_batch
 from server.app.db.migrations.job_batch_operations import (
     migrate_job_batch_operations_archive,
 )
+from server.app.db.migrations.job_node_needs_capacity import migrate_job_node_needs_capacity
 from server.app.db.migrations.workflow_runtime_config_versions import (
     migrate_workflow_runtime_config_versions,
 )
@@ -37,4 +38,6 @@ LATEST_MIGRATIONS: list[SchemaMigration] = [
     # v104 (#1363): approval decision payload + batch audit context, and the
     # approve/reject job-batch operation kinds.
     SchemaMigration(104, "approval_batch", migrate_approval_batch),
+    # v105 (#402): static job-node capacity metadata + approval-park index.
+    SchemaMigration(105, "job_node_needs_capacity", migrate_job_node_needs_capacity),
 ]

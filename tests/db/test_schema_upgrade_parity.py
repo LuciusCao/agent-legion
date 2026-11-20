@@ -43,16 +43,14 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v104, approval_batch) must leave behind so
-# the undo step rewinds a current-shape database to exactly v103.
+# Effects the newest migration (v105, job_node_needs_capacity) must leave
+# behind so the undo step rewinds a current-shape database to exactly v104.
 _NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("approval_decisions", "payload_json", "text"),
-    ("approval_decisions", "batch_id", "text"),
-    ("approval_decisions", "batch_selection", "text"),
+    ("job_nodes", "needs_capacity", "boolean"),
 )
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_approval_decisions_batch",)
-_NEWEST_MIGRATION_NAME = "approval_batch"
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_job_nodes_approval_park_candidates",)
+_NEWEST_MIGRATION_NAME = "job_node_needs_capacity"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 # Restore the v101 kind vocabulary after removing approve/reject.

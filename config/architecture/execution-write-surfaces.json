@@ -81,6 +81,10 @@
       ],
       "note": "queued-request sweeper：同 sweeper_definitions 两段式"
     },
+    "server/app/db/migrations/job_node_needs_capacity.py": {
+      "via": [],
+      "note": "schema v105 静态元数据回填（DDL 层一次性数据订正，非运行时执行态写面）"
+    },
     "server/app/db/migrations/runs_sql.py": {
       "via": [],
       "note": "schema 迁移回填 SQL（DDL 层一次性数据订正，非运行时写面）"
