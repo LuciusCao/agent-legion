@@ -37,11 +37,23 @@ state being the more accurate one). Files inside:
   rescue and bound as the delivery path (``stderr_tail_for_run``).
 - ``events-emergency.jsonl`` — the pump's diverted stream, redacted per
   line at write time (JSON events keep their structure via
-  ``redact_json``, non-JSON lines via span redaction); one unrenderable
+  ``redact_json``, non-JSON lines via span redaction). A redacted
+  ``worker_attempt_start`` boundary carries the stream's lease, so result
+  recovery cannot borrow an earlier attempt's completion proof; one unrenderable
   line is dropped in isolation, never the batch, and oversized lines stay
   ONE physical line AND parseable JSON (rendering lives in the sister
   module ``worker/state_evidence_lines.py``: #1168 F4 — a JSON line over
   the cap is re-serialized with capped string values, never middle-cut).
+- ``recovered/`` — fresh per-preparation staging directories for the emergency
+  stream (#1350). Only the current lease's latest agent attempt, with passing
+  output validation and a normal final end, can replace a run directory cleaned
+  before scanning. A fresh directory prevents a previous lease or agent attempt's
+  stderr anchor from leaking into recovery; direct-upload fallback retains its
+  own selected directory, while restart recovery re-extracts from the original
+  emergency stream. Outbound bytes go through the usual redaction and compression
+  pass; staging never proves completion by itself. A cleanup race after the
+  primary scan instead drops the run-dir member without pretending a partial
+  emergency stream is whole.
 - ``listing.txt`` — what still existed under the execution dir at dump
   time; every entry is span-redacted before persisting (#1168 F3: an
   agent that put a secret literal in a FILENAME must not leak it into
@@ -90,7 +102,7 @@ from typing import TYPE_CHECKING, Any
 from shared.pi_events import scan_and_compress_pi_events
 from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker._atomic import atomic_write
-from worker.state_evidence_lines import render_line
+from worker.state_evidence_sink import EmergencyEventsSink
 from worker.upload.secret_registry import secret_snapshot
 from worker.upload.stderr_evidence import stderr_tail_for_run
 
@@ -107,11 +119,6 @@ EMERGENCY_EVENTS_FILENAME = "events-emergency.jsonl"
 INCIDENT_RECORD_FILENAME = "incident.json"
 LISTING_FILENAME = "listing.txt"
 _MAX_LISTING_ENTRIES = 2000
-# One sink's total in-process growth is bounded so a pathological agent
-# cannot fill the state volume through the emergency path (the delivery-side
-# bound is the pump's stream filter; the per-LINE cap lives in the sister
-# module worker/state_evidence_lines.py with the rendering it bounds).
-_MAX_DUMP_TOTAL_BYTES = 64 * 1024 * 1024
 # errno family that means "the working tree is gone" (as opposed to e.g.
 # PermissionError, where the tree exists but is unreadable).
 _MISSING_TREE_ERRNOS = frozenset({errno.ENOENT, errno.ENOTDIR})
@@ -358,72 +365,17 @@ def _dump_incident_record(
     )
 
 
-class EmergencyEventsSink:
-    """Append-only, per-line-redacted sink for one stream's diverted events
-    (#1147 pump write failure).
-
-    Per-batch open-append-close (binary): crash-safe, no handle shared
-    across pool tasks. One line's render/redact/ENCODE failure is dropped
-    in isolation — never the batch (review P3-2: the encode used to sit
-    outside the per-line guard, so a lone-surrogate line killed its whole
-    batch; delivery's per-line semantics apply here too). Both one line
-    (after redaction) and the sink's total in-process growth are capped,
-    so the emergency path cannot fill the state volume. All failures are
-    swallowed after logging — the sink is an observation face, never a
-    control-flow input."""
-
-    def __init__(self, path: Path, redactor: SecretRedactor) -> None:
-        self.path = path
-        self._redactor = redactor
-        self._written = 0
-        self._capped = False
-
-    def write_lines(self, lines: list[bytes]) -> None:
-        if self._capped or not lines:
-            return
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("ab") as dst:
-                for line in lines:
-                    try:
-                        payload = render_line(line, self._redactor).encode("utf-8")
-                    except Exception:
-                        # #204 broad-except audit: 单行渲染/脱敏/编码任一逃逸
-                        # （span 函数抛出，或 lone surrogate 的
-                        # UnicodeEncodeError；机制同 shared/pi_events.
-                        # _write_kept_event 的 fail-closed）——整行丢弃，绝不
-                        # 把 raw 行写进 state 目录，也绝不因一行炸掉整批应急
-                        # 转储（delivery 侧同款单行失败语义）。结果空间：转储
-                        # 缺该行。日志保全：print。
-                        print("emergency dump dropped an unrenderable line", flush=True)
-                        continue
-                    if self._written + len(payload) > _MAX_DUMP_TOTAL_BYTES:
-                        self._capped = True
-                        print(
-                            f"emergency events dump capped at {_MAX_DUMP_TOTAL_BYTES}"
-                            f" bytes: {self.path}",
-                            flush=True,
-                        )
-                        return
-                    dst.write(payload)
-                    self._written += len(payload)
-        except Exception as exc:
-            # #204 broad-except audit: 应急转储写失败（state 目录不可写、
-            # 磁盘满）是纯观测面降级——吞掉只记日志，事件面损失与既有
-            # 行为（注销流）一致但不更糟；转储失败不得让 parse-pool 任务
-            # 异常逃逸（那会注销流并丢掉后续全部事件）。日志保全：print。
-            print(f"emergency events dump write failed for {self.path}: {exc!r}", flush=True)
-
-
 def emergency_sink(
-    execution_id: str, node_key: str, fallback: str = ""
+    execution_id: str, node_key: str, fallback: str = "", lease_id: str = ""
 ) -> EmergencyEventsSink | None:
     """Open the emergency dump for one stream, or None when the evidence
     root is unconfigured — the caller then keeps its legacy degradation."""
     target = incident_dir(execution_id, node_key, fallback=fallback)
     if target is None:
         return None
-    return EmergencyEventsSink(target / EMERGENCY_EVENTS_FILENAME, secret_snapshot())
+    return EmergencyEventsSink(
+        target / EMERGENCY_EVENTS_FILENAME, secret_snapshot(), lease_id=lease_id
+    )
 
 
 def write_stream_batch(stream: Any, lines: list[bytes]) -> None:
@@ -440,7 +392,8 @@ def write_stream_batch(stream: Any, lines: list[bytes]) -> None:
     unregister, events lost) keeps its exact old semantics.
 
     ``stream`` is the reactor's ``_Stream``; it is passed as ``Any`` (duck
-    typed: ``path`` / ``execution_id`` / ``node_key`` / ``evidence``) to
+    typed: ``path`` / ``execution_id`` / ``node_key`` / ``lease_id`` /
+    ``evidence``) to
     keep this module free of an import back into ``worker.execution``.
     Called only by the stream's single-writer pool task, so the
     ``evidence`` engagement needs no extra lock."""
@@ -454,7 +407,12 @@ def write_stream_batch(stream: Any, lines: list[bytes]) -> None:
                 output.write(line)
                 output.write(b"\n")
     except OSError as exc:
-        sink = emergency_sink(stream.execution_id, stream.node_key, fallback=stream.path)
+        sink = emergency_sink(
+            stream.execution_id,
+            stream.node_key,
+            fallback=stream.path,
+            lease_id=stream.lease_id,
+        )
         if sink is None:
             raise
         stream.evidence = sink

@@ -66,25 +66,15 @@ from typing import TYPE_CHECKING, Any
 
 from shared.code_contract import RESULT_METADATA_MEMBER
 from worker import state_evidence
-from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS
+from worker.upload import result_metadata as _result_metadata
 
 if TYPE_CHECKING:
     from worker.upload.task import UploadTask
 
+failed_metadata = _result_metadata.failed_metadata
 # error_message 裁剪的递减 cap 序列（#1169）：从 2 KiB 对半降到 0，每档重建
 # 归档实测 gzip 体积；判定字段（status/exit_code/清单）恒保留。
 _CEILING_MESSAGE_CAPS = (2048, 1024, 512, 256, 128, 64, 0)
-
-
-def failed_metadata(task: UploadTask, error_message: str) -> dict[str, Any]:
-    """failed 上报的统一载荷（prepare 失败 / CAS 4xx 终态 / report 降级共用）。"""
-    return {
-        "status": "failed",
-        "exit_code": 1,
-        "error_message": error_message[:MAX_ERROR_MESSAGE_CHARS],
-        "command": list(task.command),
-        "output_artifacts": {},
-    }
 
 
 def write_empty_archive(archive: Path) -> None:
@@ -204,3 +194,31 @@ def _fit_ceiling(metadata: dict[str, Any], max_bytes: int) -> dict[str, Any]:
         flush=True,
     )
     return slim
+
+
+def write_agent_archive(
+    task: UploadTask,
+    archive: Path,
+    job_dir: Path,
+    run_dir: Path,
+    evidence_dir: Path,
+    outputs: list[str],
+    primary_scanned: bool,
+) -> None:
+    """Archive outputs without rewriting an already-scanned verdict (#1350)."""
+    direct = task.is_direct_upload(outputs)
+    try:
+        _result_metadata.write_agent_body(archive, job_dir, evidence_dir, outputs, direct, run_dir)
+        return
+    except OSError as exc:
+        if (
+            not primary_scanned
+            or evidence_dir != run_dir
+            or not state_evidence.tree_missing_inside(exc, run_dir)
+        ):
+            raise
+        print(
+            f"run evidence vanished for {task.execution_id}; preserving the scanned verdict",
+            flush=True,
+        )
+    _result_metadata.write_agent_body(archive, job_dir, None, outputs, direct, run_dir)
