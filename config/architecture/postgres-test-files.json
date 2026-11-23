@@ -161,6 +161,7 @@
     "tests/scripts/test_bind_legacy_material_etags.py",
     "tests/scripts/test_clean_dangling_job_artifacts.py",
     "tests/scripts/test_seed_demo.py",
+    "tests/scripts/test_seed_from_prod_db.py",
     "tests/services/test_agent_artifact_inject.py",
     "tests/services/test_agent_artifacts.py",
     "tests/services/test_agent_backfill_report.py",
