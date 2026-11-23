@@ -33,7 +33,7 @@ from worker.executor_reap import reap_completed
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import HOST_UNAVAILABLE_ERRORS, Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
-from worker.host.transfer_lease import sync_transfer_heartbeat
+from worker.host.transfer_lease import restore_uploads_with_lease_clamp, sync_transfer_heartbeat
 from worker.hot_controls import DynamicControls, reload_controls
 from worker.lease_snapshot import open_lease_channel
 from worker.load_shedding import LoadShedder
@@ -146,7 +146,7 @@ def main() -> int:
     uploads.set_heartbeat_registry(heartbeat_registry)
     # Restore unreported results BEFORE cleaning: their execution dirs carry
     # an upload_pending.json marker and are preserved by clean_work_root.
-    if restored := uploads.restore(work_root):
+    if restored := restore_uploads_with_lease_clamp(client, uploads, work_root):
         print(f"restored {restored} pending result upload(s) from {work_root}", flush=True)
     clean_work_root(work_root)
     # Only abandoned raw staging is age-reaped; pending restored attempts keep

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from worker.execution.heartbeat_batch import clamp_batch_interval
+from worker.execution.ownership import restored_lease_ttls
 from worker.transfer_lease_controls import transfer_timeout_cap, validate_transfer_timeout
 
 
@@ -24,6 +26,19 @@ def apply_lease_ttl(client: Any, lease_ttl_seconds: float) -> None:
     client.configured_transfer_timeout = configured
     client.transfer_timeout = effective
     _log_clamp(client, configured, float(lease_ttl_seconds), effective)
+
+
+def restore_uploads_with_lease_clamp(client: Any, uploads: Any, work_root: Path) -> int:
+    """Validate every restored TTL before any pending report can restart."""
+    lease_ttls = restored_lease_ttls(work_root)
+    try:
+        for ttl in lease_ttls:
+            transfer_timeout_cap(ttl, client.heartbeat_interval)
+        if lease_ttls:
+            apply_lease_ttl(client, min(float(ttl) for ttl in lease_ttls))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid restored lease_ttl_seconds") from exc
+    return int(uploads.restore(work_root))
 
 
 def update_heartbeat_interval(client: Any, interval: float) -> None:

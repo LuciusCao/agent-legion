@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 EVENTS_COPY_FILENAME = "events.jsonl"
 RAW_EVENTS_FILENAME = "events.jsonl.raw"
+
+
+def _safe_segment(value: str, fallback: str) -> str:
+    """Neutralize one incident-name segment from the wire."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", value).strip("._")
+    return (cleaned or fallback)[:64]
 
 
 def discard_event_copies(target: Path, *, include_processed: bool) -> list[str]:
@@ -33,3 +40,17 @@ def with_copy_cleanup_errors(state: str, errors: list[str]) -> str:
     if not errors:
         return state
     return f"{state}; evidence copy cleanup failed: {'; '.join(errors)}"
+
+
+def validate_scanned_events(events: Path, original: int, completed: bool) -> None:
+    """Fail closed on raw survivors unless a scanned events tree vanished."""
+    try:
+        raw_survived = original == 0 and events.is_file() and events.stat().st_size > 0
+    except OSError as exc:
+        from worker.state_evidence import tree_missing_inside
+
+        if not completed or not tree_missing_inside(exc, events.parent):
+            raise
+        raw_survived = False
+    if raw_survived:
+        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")

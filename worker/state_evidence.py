@@ -97,7 +97,6 @@ from __future__ import annotations
 
 import errno
 import json
-import re
 import shutil
 import time
 from collections.abc import Callable
@@ -107,6 +106,8 @@ from typing import TYPE_CHECKING, Any
 from shared.pi_events import scan_and_compress_pi_events
 from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker._atomic import atomic_write
+from worker.state_evidence_copies import _safe_segment
+from worker.state_evidence_copies import validate_scanned_events as validate_scanned_events
 from worker.state_evidence_sink import EmergencyEventsSink
 from worker.upload.secret_registry import secret_snapshot
 from worker.upload.stderr_evidence import stderr_tail_for_run
@@ -150,13 +151,6 @@ def reset_evidence_root() -> None:
 def evidence_root() -> Path | None:
     """The configured dump root, or None when dumping is disabled."""
     return _evidence_root
-
-
-def _safe_segment(value: str, fallback: str) -> str:
-    """One incident-name segment: execution ids and node keys come from the
-    wire, so path separators and traversal fodder are neutralized."""
-    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", value).strip("._")
-    return (cleaned or fallback)[:64]
 
 
 def incident_dir(execution_id: str, node_key: str, fallback: str = "") -> Path | None:
@@ -220,18 +214,6 @@ def scan_primary_events(
         )
     )
     return model_error, original, tail, completed or original > 0
-
-
-def validate_scanned_events(events: Path, original: int, completed: bool) -> None:
-    """Fail closed on raw survivors unless a scanned events tree vanished."""
-    try:
-        raw_survived = original == 0 and events.is_file() and events.stat().st_size > 0
-    except OSError as exc:
-        if not completed or not tree_missing_inside(exc, events.parent):
-            raise
-        raw_survived = False
-    if raw_survived:
-        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
 
 
 def dump_prep_evidence(task: UploadTask, exc: BaseException) -> Path | None:

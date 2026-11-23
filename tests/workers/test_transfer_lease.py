@@ -5,15 +5,18 @@ from pathlib import Path
 
 import pytest
 
+from worker.execution.ownership import write_owner_marker
 from worker.host.client import Client
 from worker.host.errors import HostResponseError
 from worker.host.transfer_lease import (
     apply_lease_ttl,
+    restore_uploads_with_lease_clamp,
     sync_transfer_heartbeat,
     update_heartbeat_interval,
 )
-from worker.transfer_controls import load_transfer_controls
+from worker.transfer_controls import TransferControls, load_transfer_controls
 from worker.transfer_lease_controls import transfer_timeout_cap, validate_transfer_timeout
+from worker.upload.constants import PENDING_FILENAME
 
 pytestmark = pytest.mark.no_db
 
@@ -31,6 +34,27 @@ def _claim(execution_id: str, ttl: object = None) -> dict:
 
 def _answer(claims: list[dict]):
     return 200, json.dumps({"claims": claims}).encode()
+
+
+def _pending_upload(work_root: Path, execution_id: str, ttl: object = None) -> None:
+    execution_dir = work_root / execution_id
+    execution_dir.mkdir(parents=True)
+    (execution_dir / PENDING_FILENAME).write_text("{}", encoding="utf-8")
+    claim: dict[str, object] = {"execution_id": execution_id, "lease_id": f"lease-{execution_id}"}
+    if ttl is not None:
+        claim["lease_ttl_seconds"] = ttl
+    write_owner_marker(execution_dir, claim)
+
+
+class _RestoreRecorder:
+    def __init__(self, client: Client, restored: int = 1) -> None:
+        self.client = client
+        self.restored = restored
+        self.timeouts: list[float] = []
+
+    def restore(self, _work_root: Path) -> int:
+        self.timeouts.append(self.client.transfer_timeout)
+        return self.restored
 
 
 def test_claim_ttl_clamps_the_timeout_used_by_the_real_report_call(tmp_path: Path) -> None:
@@ -152,3 +176,43 @@ def test_larger_ttl_does_not_relax_in_flight_claims(capsys: pytest.CaptureFixtur
     output = capsys.readouterr().out
     assert "constrained to 45s" in output
     assert "current claim cap 165s" in output
+
+
+def test_restore_applies_minimum_pending_ttl_before_uploads_restart(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-long", 90)
+    _pending_upload(work_root, "exec-short", 30)
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client, restored=2)
+
+    assert restore_uploads_with_lease_clamp(client, uploads, work_root) == 2
+
+    assert uploads.timeouts == [45]
+    assert client.transfer_lease_ttl == 30
+
+
+@pytest.mark.parametrize(("relay", "expected"), [(False, 45), (True, 15)])
+def test_restore_clamp_uses_bare_or_relay_heartbeat(
+    tmp_path: Path, relay: bool, expected: float
+) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-1", 30)
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    sync_transfer_heartbeat(client, TransferControls(heartbeat_interval_seconds=45), relay=relay)
+    uploads = _RestoreRecorder(client)
+
+    assert restore_uploads_with_lease_clamp(client, uploads, work_root) == 1
+
+    assert uploads.timeouts == [expected]
+
+
+def test_restore_without_ttl_keeps_legacy_mixed_fleet_timeout(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-legacy")
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client)
+
+    assert restore_uploads_with_lease_clamp(client, uploads, work_root) == 1
+
+    assert uploads.timeouts == [120]
+    assert client.transfer_lease_ttl is None

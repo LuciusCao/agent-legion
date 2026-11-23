@@ -96,9 +96,25 @@ def write_owner_marker(execution_dir: Path, claim: dict[str, Any]) -> None:
             "version": 1,
             "execution_id": str(claim.get("execution_id") or ""),
             "lease_id": str(claim.get("lease_id") or ""),
+            "lease_ttl_seconds": claim.get("lease_ttl_seconds"),
         }
     )
     atomic_write(execution_dir / OWNER_FILENAME, payload)
+
+
+def restored_lease_ttls(work_root: Path) -> list[Any]:
+    """Read claim TTL snapshots for pending uploads; absent = pre-#1170 marker."""
+    ttls = []
+    for owner in work_root.glob(f"*/{OWNER_FILENAME}"):
+        if not (owner.parent / PENDING_FILENAME).is_file():
+            continue
+        try:
+            payload = json.loads(owner.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("lease_ttl_seconds") is not None:
+            ttls.append(payload["lease_ttl_seconds"])
+    return ttls
 
 
 def discard_owned_dir(execution_dir: Path, lease_id: str) -> bool:
