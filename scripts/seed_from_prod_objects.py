@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 import urllib.parse
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -18,6 +19,7 @@ from typing import Any, Protocol
 
 from server.app.storage import ObjectHead, S3Settings
 
+csv.field_size_limit(sys.maxsize)
 PROD_BUCKET = "agent-legion"
 DERIVED_BUCKET_PREFIX = "agent-legion-"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}

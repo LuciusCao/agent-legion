@@ -11,12 +11,12 @@ be the exact derived resources of this worktree (tower children use their
 parent), on loopback endpoints; shared/prod and other worktrees fail closed.
 
 Layers:
-  1. Definition data: full-table copy (pg_dump --data-only | pg_restore).
+  1. Definition data: full-table plain SQL export, projected onto target columns.
   2. Sample jobs: newest N jobs per workspace, copied with their child
      rows (COPY CSV), plus their on-disk job dirs and legacy CAS blobs.
      All materials are selected; job_artifacts follows the sampled jobs.
      Verified S3 objects are copied from the fixed prod bucket to this
-     worktree's derived bucket before one Layer 2 transaction loads rows.
+     worktree's derived bucket before one transaction loads both DB layers.
   3. Secrets are NOT copied; a reminder is printed at the end (develop uses
      its own vault_master_key, so prod ciphertext would be undecryptable).
 
@@ -54,6 +54,7 @@ from scripts.seed_from_prod_objects import (  # noqa: E402
     target_s3_settings,
 )
 
+csv.field_size_limit(sys.maxsize)
 SeedError = seed_db.SeedError
 DEFAULT_COMPOSE_DIR = "../prod/deploy"
 COMPOSE_FILES = ("compose.host.yaml", "compose.local.yaml")
@@ -253,14 +254,16 @@ def target_columns(psql: str, dsn: str, table: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def seed_layer1(compose_dir: Path, dsn: str, pg_bin: Path, tmpdir: Path, dry_run: bool) -> None:
+def seed_layer1(
+    compose_dir: Path, dsn: str, pg_bin: Path, tmpdir: Path, dry_run: bool
+) -> seed_db.Layer1Dump | None:
     psql = str(pg_bin / "psql") if str(pg_bin) else "psql"
 
     if dry_run:
         for table in LAYER1_TABLES:
             count = source_query(compose_dir, f'SELECT count(*) FROM public."{table}"').strip()
             log(f"[dry-run] 第 1 层 {table}: 源 {count} 行")
-        return
+        return None
 
     dump_path = tmpdir / "layer1.sql"
     dump_cmd = (
@@ -285,14 +288,10 @@ def seed_layer1(compose_dir: Path, dsn: str, pg_bin: Path, tmpdir: Path, dry_run
     with dump_path.open("wb") as fh:
         run(dump_cmd, stdout=fh)
 
-    tables = ", ".join(f'public."{t}"' for t in LAYER1_TABLES)
-    log("第 1 层：目标侧 TRUNCATE 定义表（CASCADE）")
-    target_psql(psql, dsn, f"TRUNCATE {tables} CASCADE")
-    log("第 1 层：psql 灌入目标库（session_replication_role=replica 绕过 FK 顺序）")
     # Source may lag the target by a schema version: project each COPY block
     # onto the columns the target still has (#211 M3 dropped a workspaces column).
     columns_by_table = {table: target_columns(psql, dsn, table) for table in LAYER1_TABLES}
-    seed_db.restore_plain_sql(psql, dsn, dump_path, columns_by_table)
+    return seed_db.Layer1Dump(dump_path, LAYER1_TABLES, columns_by_table)
 
 
 def _csv_row_count(path: Path) -> int:
@@ -313,6 +312,7 @@ def seed_layer2_db(
     limit: int,
     dry_run: bool,
     *,
+    layer1: seed_db.Layer1Dump | None,
     sample_jobs: list[dict[str, str]],
     object_storage: S3CrossBucketStorage | None,
     overwrite_objects: bool,
@@ -369,7 +369,7 @@ def seed_layer2_db(
     if dry_run:
         return loaded, reports
 
-    log("第 2 层：对象已备妥，在单事务内 TRUNCATE 并灌入全部所选行")
+    log("第 1/2 层：源导出与对象已备妥，在单事务内替换全部所选行")
     seed_db.load_csv_transaction(
         psql,
         dsn,
@@ -377,6 +377,7 @@ def seed_layer2_db(
         columns_by_table,
         [table for table, _where in LAYER2_QUERIES],
         LAYER2_TRUNCATE,
+        layer1=layer1,
     )
     for table, _where in LAYER2_QUERIES:
         count = int(target_psql(psql, dsn, f'SELECT count(*) FROM public."{table}"').strip())
@@ -518,7 +519,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     with tempfile.TemporaryDirectory(prefix="seed-from-prod-") as tmp:
         tmpdir = Path(tmp)
-        seed_layer1(compose_dir, dsn, pg_bin, tmpdir, args.dry_run)
+        layer1 = seed_layer1(compose_dir, dsn, pg_bin, tmpdir, args.dry_run)
         log(f"第 2 层：每个 workspace 最新 {args.jobs_per_workflow} 个 job；materials 全量")
         sample_jobs = fetch_sample_jobs(compose_dir, args.jobs_per_workflow)
         log(f"样本 job 数: {len(sample_jobs)}")
@@ -529,6 +530,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             tmpdir,
             args.jobs_per_workflow,
             args.dry_run,
+            layer1=layer1,
             sample_jobs=sample_jobs,
             object_storage=object_storage,
             overwrite_objects=args.overwrite_objects,

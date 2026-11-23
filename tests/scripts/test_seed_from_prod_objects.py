@@ -136,6 +136,25 @@ def test_mixed_material_and_artifact_keep_ids_keys_and_rebind_etag(tmp_path: Pat
     assert material_report.ok and artifact_report.ok
 
 
+def test_object_csv_accepts_large_database_text(tmp_path: Path):
+    key = "ws/large"
+    large_text = "x" * (256 * 1024)
+    columns = [*MATERIAL_COLUMNS, "extracted_text"]
+    row = {**material("m1", key), "extracted_text": large_text}
+    report = copy_rows_with_objects(
+        "materials",
+        write_csv(tmp_path / "large.csv", columns, [row]),
+        tmp_path / "large.ready.csv",
+        columns,
+        FakeCrossBucketStorage({key: (3, "prod")}),
+        job_workspaces={},
+        dry_run=False,
+        overwrite=False,
+    )
+    assert report.rows_ready == 1
+    assert read_csv(tmp_path / "large.ready.csv")[0]["extracted_text"] == large_text
+
+
 def test_batches_are_bounded_and_cover_tail(tmp_path: Path):
     rows = iter([material(str(index), f"ws/key-{index}") for index in range(5)])
     assert [len(batch) for batch in _batches(rows, 2)] == [2, 2, 1]

@@ -142,13 +142,16 @@ The mapping and replacement policy are deliberately explicit:
   `--overwrite-objects` is explicitly supplied. Missing sources, source size
   mismatches, HEAD/copy errors, and failed post-copy validation are reported
   per row and omitted from the load.
-- All successful Layer 2 rows load in one transaction only after object
-  preparation. A load failure rolls back the whole Layer 2 load; already copied
-  objects remain and are HEAD-skipped on retry. Partial object failures leave a
-  valid successful subset, produce exit code 1, and are safe to repair and
-  rerun. Fatal guard/command errors use exit code 2. Dry-run performs source
-  exports and HEAD reads but does not initialize a schema, write DB rows, copy
-  files, or copy objects.
+- Layer 1 export and target-column discovery, every Layer 2 CSV, and object
+  preparation all finish before any target table is truncated. Layer 1 column
+  projection and both layer loads then run in one transaction: either failure
+  restores the complete pre-seed
+  database state, so a Layer 2 error cannot leave new definitions with jobs
+  already cascade-cleared. Already copied objects remain and are HEAD-skipped
+  on retry. Partial object failures leave a valid successful subset, produce
+  exit code 1, and are safe to repair and rerun. Fatal guard/command errors use
+  exit code 2. Dry-run performs source exports and HEAD reads but does not
+  initialize a schema, write DB rows, copy files, or copy objects.
 
 `--skip-files` suppresses only local job-dir/CAS copies. `--skip-objects`
 explicitly selects the old behavior: neither `materials` / `job_artifacts` rows

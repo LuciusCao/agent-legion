@@ -154,7 +154,7 @@ class TestCopySql:
         sql = build_copy_in_sql("jobs", ["id", "workspace_id"])
         assert sql == (
             'COPY public."jobs" ("id", "workspace_id") FROM STDIN '
-            "WITH (FORMAT csv, HEADER true, NULL '\\N')"
+            "WITH (FORMAT csv, HEADER true, NULL '\\N');"
         )
 
 
