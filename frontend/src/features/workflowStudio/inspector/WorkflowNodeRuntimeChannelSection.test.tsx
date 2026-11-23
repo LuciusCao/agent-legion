@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -93,7 +94,7 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     vi.clearAllMocks()
   })
 
-  it('renders the runtime fields with channel badge and save bar', () => {
+  it('renders the runtime fields with channel badge and compact save action', () => {
     renderSection()
 
     expect(screen.getByText('运行配置')).toBeInTheDocument()
@@ -104,13 +105,20 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     expect(screen.getByLabelText('Prompt')).toBeInTheDocument()
     expect(screen.getByLabelText('Tools 覆盖')).toBeInTheDocument()
     expect(screen.getByLabelText('Requires labels')).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /保存运行配置/ })
-    ).toBeInTheDocument()
+    const saveButton = screen.getByRole('button', { name: '保存运行配置' })
+    expect(saveButton).toBeInTheDocument()
+    expect(saveButton.tagName).toBe('BUTTON')
+    expect(saveButton).toHaveClass('MuiButton-contained', 'MuiButton-sizeSmall')
+    expect(saveButton).not.toHaveClass('MuiButton-fullWidth')
+    expect(saveButton).toHaveStyle({
+      borderRadius: '8px',
+      marginLeft: 'auto',
+      whiteSpace: 'nowrap',
+    })
     expect(screen.getByRole('button', { name: '版本历史' })).toBeInTheDocument()
   })
 
-  it('uses the same compact outlined save action as the other inspector save controls', () => {
+  it('enables the compact contained save action with runtime changes', () => {
     const studio = makeStudio({
       runtimeChangedKeys: ['nodes.generate_key_info.model'],
     })
@@ -118,10 +126,10 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
 
     const saveButton = screen.getByRole('button', { name: '保存运行配置' })
     expect(saveButton).toBeEnabled()
-    expect(saveButton).toHaveClass('MuiButton-outlined', 'MuiButton-sizeSmall')
+    expect(saveButton).toHaveClass('MuiButton-contained', 'MuiButton-sizeSmall')
     expect(saveButton.className).toContain('saveButton')
     expect(saveButton).not.toHaveClass(
-      'MuiButton-contained',
+      'MuiButton-outlined',
       'MuiButton-fullWidth'
     )
   })
@@ -129,7 +137,20 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
   it('disables the save button when nothing changed', () => {
     renderSection()
 
-    expect(screen.getByRole('button', { name: /保存运行配置/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存运行配置' })).toBeDisabled()
+  })
+
+  it('keeps the save button disabled and shows the transient label while saving', () => {
+    const studio = makeStudio({
+      runtimeChangedKeys: ['nodes.generate_key_info.model'],
+      runtimeSaving: true,
+    })
+    renderSection({}, studio)
+
+    expect(screen.getByRole('button', { name: '保存中…' })).toBeDisabled()
+    expect(
+      screen.queryByRole('button', { name: '保存运行配置' })
+    ).not.toBeInTheDocument()
   })
 
   it('saves through the runtime channel on click', () => {
@@ -138,9 +159,25 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     })
     renderSection({}, studio)
 
-    fireEvent.click(screen.getByRole('button', { name: /保存运行配置/ }))
+    fireEvent.click(screen.getByRole('button', { name: '保存运行配置' }))
 
     expect(studio.saveRuntimeConfig).toHaveBeenCalledWith()
+  })
+
+  it('keeps native Enter and Space keyboard activation', async () => {
+    const user = userEvent.setup()
+    const studio = makeStudio({
+      runtimeChangedKeys: ['nodes.generate_key_info.model'],
+    })
+    renderSection({}, studio)
+
+    const saveButton = screen.getByRole('button', { name: '保存运行配置' })
+    act(() => saveButton.focus())
+    expect(saveButton).toHaveFocus()
+    await user.keyboard('{Enter}')
+    await user.keyboard(' ')
+
+    expect(studio.saveRuntimeConfig).toHaveBeenCalledTimes(2)
   })
 
   it('marks fields differing from the active baseline as 已修改 · 待保存', () => {
@@ -169,7 +206,7 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
       screen.getByText(/查看历史版本时不可修改运行配置/)
     ).toBeInTheDocument()
     expect(screen.getByLabelText('Model')).toBeDisabled()
-    expect(screen.getByRole('button', { name: /保存运行配置/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存运行配置' })).toBeDisabled()
   })
 
   it('只读视图不挂「已修改 · 待保存」状态点（展示的是被查看版本）', () => {
