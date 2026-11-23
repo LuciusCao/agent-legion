@@ -1,8 +1,11 @@
-"""Workflow 顶层 execution 默认（schema v64）：校验与向节点的合并。
+"""Legacy workflow-level execution defaults, materialized into node profiles.
 
-workspace 级 Agent 默认（default_agent_*）退役后，顶层 ``execution`` 块是
-workflow 作用域的默认来源：loader 在定义加载时把它合并进每个非 start
-节点的 execution（节点值优先），dispatch 读到的节点值即有效值。
+Persisted revisions and intake-frozen job snapshots may still contain the
+top-level block. Stored loading fills empty fields on Agent nodes and
+non-runtime fields on pre-explicit-type aliases, preserving node overrides and
+legacy nodes whose runtime was never declared. Explicit non-Agent nodes are
+left untouched. Authoring mapping/YAML and built-in raw definitions reject the
+key outright.
 """
 
 from __future__ import annotations
@@ -18,14 +21,16 @@ from server.app.workflows.schema import (
 from server.app.workflows.workflow_node_profile import validate_agent_runtime
 
 
-def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
-    """Optional top-level ``execution`` defaults (provider/model/thinking/runtime).
+def reject_workflow_execution(raw: dict[str, Any]) -> None:
+    """Reject the retired top-level block on every authoring input shape."""
+    if "execution" in raw:
+        raise WorkflowDefinitionError(
+            "Workflow field 'execution' was removed; declare execution on each Agent node"
+        )
 
-    Same validation as the node-level block, minus ``prompt``/``prompt_mode``
-    (#513) — a default prompt or prompt mode makes no sense across nodes.
-    Snapshots (asdict round-trips) carry empty keys, which is tolerated;
-    non-empty ones are rejected.
-    """
+
+def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
+    """Read legacy defaults before materializing them into node profiles."""
     raw_execution = raw.get("execution")
     if raw_execution is None:
         return WorkflowNodeExecution()
@@ -37,7 +42,6 @@ def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
         if not isinstance(value, str):
             raise WorkflowDefinitionError(f"Workflow execution.{field_name} must be a string")
         values[field_name] = value
-    # #933 D5: the top-level runtime is the default for every agent node.
     validate_agent_runtime(values["runtime"], "Workflow execution.runtime")
     if raw_execution.get("prompt"):
         raise WorkflowDefinitionError("Workflow execution.prompt is not allowed (node-level only)")
@@ -48,19 +52,11 @@ def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
     return WorkflowNodeExecution(**values)
 
 
-def merge_execution_defaults(node: WorkflowNode, defaults: WorkflowNodeExecution) -> WorkflowNode:
-    """Fill a node's empty execution fields from the workflow-level defaults.
-
-    Start and approval nodes are exempt (they never execute) — baking values
-    into an approval node would persist into the revision snapshot (asdict)
-    and fail its own must-not-declare-execution rule on the next load.
-    Snapshots published before this exemption are healed on read by
-    ``strip_snapshot_placeholders`` (approval ``execution`` dropped outright).
-    Code-routed nodes simply never read the execution block, so merging into
-    every other node keeps the loader routing-agnostic — the merge happens
-    at definition load time where Agent bindings are not yet known.
-    """
-    if node.node_type in ("start", "approval"):
+def merge_execution_defaults(
+    node: WorkflowNode, defaults: WorkflowNodeExecution, *, legacy_untyped: bool = False
+) -> WorkflowNode:
+    """Fill Agent fields, plus non-runtime fields on pre-explicit-type nodes."""
+    if node.node_type != "agent" and not legacy_untyped:
         return node
     execution = node.execution
     merged = WorkflowNodeExecution(
@@ -69,8 +65,6 @@ def merge_execution_defaults(node: WorkflowNode, defaults: WorkflowNodeExecution
         thinking=execution.thinking or defaults.thinking,
         prompt=execution.prompt,
         prompt_mode=execution.prompt_mode,
-        # #933: the runtime default reaches agent nodes only — a code node
-        # must not declare one (the snapshot would fail its own reload).
         runtime=execution.runtime or (defaults.runtime if node.node_type == "agent" else ""),
     )
     if merged == execution:
@@ -79,21 +73,29 @@ def merge_execution_defaults(node: WorkflowNode, defaults: WorkflowNodeExecution
 
 
 def apply_execution_defaults(
-    nodes: dict[str, WorkflowNode], defaults: WorkflowNodeExecution
+    nodes: dict[str, WorkflowNode],
+    defaults: WorkflowNodeExecution,
+    *,
+    legacy_untyped_keys: frozenset[str] = frozenset(),
 ) -> dict[str, WorkflowNode]:
-    """Merge the top-level defaults into every node; no-op when undeclared."""
     if not (defaults.provider or defaults.model or defaults.thinking or defaults.runtime):
         return nodes
-    return {key: merge_execution_defaults(node, defaults) for key, node in nodes.items()}
+    return {
+        key: merge_execution_defaults(node, defaults, legacy_untyped=key in legacy_untyped_keys)
+        for key, node in nodes.items()
+    }
 
 
 def apply_workflow_execution(
     raw: dict[str, Any], nodes: dict[str, WorkflowNode]
-) -> tuple[WorkflowNodeExecution, dict[str, WorkflowNode]]:
-    """Load the top-level defaults and merge them into the loaded nodes.
-
-    Single wiring entry for the loader: returns the parsed defaults (for the
-    definition snapshot) alongside the merged node map.
-    """
-    execution = load_workflow_execution(raw)
-    return execution, apply_execution_defaults(nodes, execution)
+) -> dict[str, WorkflowNode]:
+    """Materialize stored defaults without guessing types for explicit code nodes."""
+    raw_nodes = raw.get("nodes") or {}
+    legacy_untyped_keys = frozenset(
+        key for key, raw_node in raw_nodes.items() if raw_node.get("type") in (None, "node")
+    )
+    return apply_execution_defaults(
+        nodes,
+        load_workflow_execution(raw),
+        legacy_untyped_keys=legacy_untyped_keys,
+    )

@@ -32,7 +32,7 @@ from server.app.services.agent_backfill_routes import load_route_targets
 from server.app.services.agent_node_profile import build_capability_index
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.agent_service import AgentService
-from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.services.workflow_drafts import workflow_definition_from_stored_yaml_string
 from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 
 if TYPE_CHECKING:
@@ -61,7 +61,9 @@ def _sources(reader: JobQueries, workspace_id: str) -> Iterable[dict[str, Any]]:
     if draft is not None:
         yield {
             "source": SOURCE_DRAFT,
-            "_parse": lambda: workflow_definition_from_yaml_string(str(draft["definition_yaml"])),
+            "_parse": lambda: workflow_definition_from_stored_yaml_string(
+                str(draft["definition_yaml"])
+            ),
         }
 
 

@@ -21,7 +21,10 @@ from server.app.services.agent_node_profile import resolve_agent_node_profile
 from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_draft_cas import save_workflow_draft_if_unchanged
-from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.services.workflow_drafts import (
+    workflow_definition_from_stored_yaml_string,
+    workflow_definition_from_yaml_string,
+)
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.node_prompt import build_default_node_instructions
 from server.app.workflows.pi_protocol import (
@@ -183,7 +186,7 @@ def save_node_prompt(
         )
     else:
         try:
-            base_definition = workflow_definition_from_yaml_string(base_yaml)
+            base_definition = workflow_definition_from_stored_yaml_string(base_yaml)
         except WorkflowDefinitionError as exc:
             raise InvalidOperationError(f"Current workflow draft is invalid: {exc}") from exc
     node = _locate_executable_node(base_definition, node_key)

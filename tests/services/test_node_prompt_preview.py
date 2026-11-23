@@ -116,6 +116,31 @@ def test_preview_active_revision_defaults(job_db) -> None:
     assert payload["default_instructions"] in effective
 
 
+def test_save_node_prompt_reads_stored_legacy_draft(job_db) -> None:
+    import json
+
+    import yaml
+
+    from server.app.services.workflow_revision_format import definition_to_yaml
+    from server.app.workflows.definition import workflow_definition_from_dict
+
+    workspace_id = _workspace(job_db, "ws-prompt-stored-legacy")
+    active = job_db.get_active_workflow_revision(workspace_id, _WORKFLOW_KEY)
+    definition = workflow_definition_from_dict(json.loads(str(active["definition_json"])))
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    raw["execution"] = {"provider": "legacy-provider"}
+    legacy_yaml = yaml.safe_dump(raw)
+    job_db.upsert_workspace_workflow_draft(workspace_id, legacy_yaml)
+
+    saved = save_node_prompt(job_db, workspace_id, "write_script", "Stored draft prompt.")
+
+    assert saved["is_default"] is False
+    assert "prompt: Stored draft prompt." in saved["definition_yaml"]
+    before = job_db.get_workspace_workflow_draft_state(workspace_id)
+    assert int(before["generation"]) == 2
+    assert before["definition_yaml"] != legacy_yaml
+
+
 def test_preview_definition_yaml_override_with_custom_prompt(job_db) -> None:
     workspace_id = _workspace(job_db, "ws-prompt-custom")
 

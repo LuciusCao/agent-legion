@@ -246,7 +246,7 @@ def test_control_selection_short_circuits_and_preserves_plan(
     plan = _plan(jobs, FakeStorage(objects))
 
     assert calls == ["job-b", "job-c", "job-b", "job-b"]
-    assert plan["plan_sha256"] == "a6c61328c2146b334cab767ce88d1a0fded79ca838146261a76707e69c960ead"
+    assert plan["plan_sha256"] == "b80023e6c8995f6c04e52b6b672a32fd33d42f9b32e5c238859854e079a83927"
     assert plan["artifacts"][0]["positive_controls"] == [
         {
             "workspace_id": "ws",

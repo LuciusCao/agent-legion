@@ -122,6 +122,30 @@ def test_human_confirm_publishes_and_records_revision(client, job_db) -> None:
     assert _pending(client, workspace_id).json()["request"] is None
 
 
+def test_legacy_stored_draft_preserves_raw_hash_through_request_and_confirm(client, job_db) -> None:
+    import hashlib
+
+    workspace_id = _seed_workspace(client, job_db)
+    legacy_yaml = _DRAFT_YAML + "execution:\n  provider: legacy-provider\n"
+    job_db.upsert_workspace_workflow_draft(workspace_id, legacy_yaml)
+    scoped = _scoped_client(client, job_db, workspace_id)
+
+    requested = _request_publish(scoped, workspace_id)
+
+    assert requested.status_code == 200, requested.text
+    request = requested.json()["request"]
+    assert request["draft_hash"] == hashlib.sha256(legacy_yaml.encode("utf-8")).hexdigest()
+
+    confirmed = client.post(
+        f"/api/workspaces/{workspace_id}/workflow-drafts/publish-request/{request['id']}/confirm"
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["request"]["status"] == "confirmed"
+    draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+    assert draft.json()["definition_yaml"] is None
+
+
 def test_human_confirm_deletes_the_draft_row(client, job_db) -> None:
     """#1221: the confirm action IS a publish — the draft row is deleted with
     the revision write, so no surviving draft can race the new canonical

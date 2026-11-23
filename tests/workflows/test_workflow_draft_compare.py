@@ -142,7 +142,7 @@ def test_compare_execution_only_change_does_not_create_revision(app_with_workspa
     node = definition.nodes["write_script"]
     definition.nodes["write_script"] = replace(
         node,
-        execution=WorkflowNodeExecution(provider="openai", model="gpt-5.2"),
+        execution=WorkflowNodeExecution(runtime="velites", provider="openai", model="gpt-5.2"),
     )
 
     with authenticate_client(TestClient(app)) as client:
@@ -339,7 +339,6 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace, 
     app, workspace_id = app_with_workspace
     definition = load_builtin_definition("education_video_problems_generation")
     if node_type == "legacy_agent":
-        definition = replace(definition, execution=WorkflowNodeExecution())
         legacy = definition.nodes["write_script"]
         definition.nodes["write_script"] = replace(legacy, execution=WorkflowNodeExecution())
         WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
@@ -368,20 +367,15 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace, 
     assert "能力标签" not in flag["message"]
 
 
-@pytest.mark.parametrize("runtime_source", ["node", "workflow"])
 def test_compare_self_contained_capability_label_is_structural_not_route_warning(
-    app_with_workspace, runtime_source
+    app_with_workspace,
 ):
     import yaml
 
     app, workspace_id = app_with_workspace
     raw_doc = yaml.safe_load(definition_to_yaml(load_builtin_definition(workspace_id)))
-    raw_doc.setdefault("execution", {})["runtime"] = "velites"
     execution = raw_doc["nodes"]["write_script"].setdefault("execution", {})
-    if runtime_source == "node":
-        execution["runtime"] = "velites"
-    else:
-        execution.pop("runtime", None)
+    execution["runtime"] = "velites"
     raw_doc["nodes"]["write_script"]["capability"] = ""
 
     with authenticate_client(TestClient(app)) as client:

@@ -1,19 +1,4 @@
-"""Issue #1114: 草稿对比 creates_revision 与发布路径同一判定（runtime 属结构）。
-
-compare 曾按自己的字段名清单判定、把一切 ``execution`` 变更当作可原地应用，
-于是仅改 ``execution.runtime`` 的草稿被判 ``creates_revision=false``，界面
-「应用到运行」承诺「不产生新版本」，而发布路径（``structural_payload``）把
-effective runtime 计入结构、实际发布了新 revision。修复后两侧共用
-``revision_structurally_changed``；这里按决策表参数化钉住：
-
-| 草稿改动                              | creates_revision | 发布路径       |
-|---------------------------------------|------------------|----------------|
-| 节点 execution.runtime                | true             | 新 revision    |
-| 顶层 execution.runtime（节点继承）    | true             | 新 revision    |
-| 节点 provider/model/thinking/prompt/prompt_mode | false  | 原地更新       |
-| 顶层 provider/model/thinking          | false            | 原地更新       |
-| 节点 tools / requires_labels（M47）   | false            | 原地更新       |
-"""
+"""Draft compare and publish agree on node-level runtime classification (#1114, #805)."""
 
 from dataclasses import replace
 
@@ -28,6 +13,7 @@ from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.schema import (
     WorkflowDefinition,
+    WorkflowDefinitionError,
     WorkflowIntake,
     WorkflowNode,
     WorkflowNodeExecution,
@@ -38,13 +24,7 @@ from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
 
 _WORKSPACE = "education_video_problems_generation"
-# 演示 DAG：顶层 execution.runtime=velites，四个 agent 节点全部继承。
 _AGENT_NODE = "write_script"
-
-
-# ---------------------------------------------------------------------------
-# Unit level: the shared judgment over definitions (no DB).
-# ---------------------------------------------------------------------------
 
 
 def _definition(node: WorkflowNode) -> WorkflowDefinition:
@@ -74,8 +54,6 @@ def _agent_node(**execution: str) -> WorkflowNode:
         ({"after": ["x"]}, True),
         ({"shard": WorkflowShardSpec(count=4)}, True),
         ({"reduce": WorkflowReduceSpec(from_node="x")}, True),
-        # M47：tools / requires_labels 归入 runtime 通道（原地生效 + 配置版本
-        # 历史），不再是结构字段。
         ({"tools": ("bash",)}, False),
         ({"requires_labels": {"gpu": "true"}}, False),
         ({"execution": WorkflowNodeExecution(runtime="velites", provider="p")}, False),
@@ -89,24 +67,6 @@ def test_revision_structurally_changed_decision_table(change, structural):
     base = _agent_node()
     draft = replace(base, **change)
     assert revision_structurally_changed(_definition(base), _definition(draft)) is structural
-
-
-@pytest.mark.no_db
-def test_revision_structurally_changed_top_level_defaults():
-    """顶层 execution 块本身不计结构；只有它改变了某节点的 effective runtime 才计。"""
-    base = _definition(_agent_node())
-    assert (
-        revision_structurally_changed(
-            base, replace(base, execution=WorkflowNodeExecution(provider="p", model="m"))
-        )
-        is False
-    )
-    assert revision_structurally_changed(base, base) is False
-
-
-# ---------------------------------------------------------------------------
-# HTTP level: compare route + the publish path agree on every row.
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -125,13 +85,10 @@ def _node_runtime(raw: dict) -> None:
     raw["nodes"][_AGENT_NODE]["execution"] = {"runtime": "pi"}
 
 
-def _top_level_runtime(raw: dict) -> None:
-    raw["execution"] = {"runtime": "pi"}
-
-
 def _node_execution(**values: str):
     def mutate(raw: dict) -> None:
-        raw["nodes"][_AGENT_NODE]["execution"] = dict(values)
+        node = raw["nodes"][_AGENT_NODE]
+        node["execution"] = {**node.get("execution", {}), **values}
 
     return mutate
 
@@ -147,12 +104,6 @@ def _top_level_execution(**values: str):
     ("mutate", "creates_revision", "runtime_nodes"),
     [
         pytest.param(_node_runtime, True, {_AGENT_NODE}, id="node-runtime"),
-        pytest.param(
-            _top_level_runtime,
-            True,
-            {"write_script", "review_script", "generate_questions", "review_questions"},
-            id="top-level-runtime",
-        ),
         pytest.param(_node_execution(provider="openai"), False, set(), id="node-provider"),
         pytest.param(_node_execution(model="gpt-x"), False, set(), id="node-model"),
         pytest.param(_node_execution(thinking="high"), False, set(), id="node-thinking"),
@@ -163,7 +114,6 @@ def _top_level_execution(**values: str):
             set(),
             id="node-prompt-mode",
         ),
-        pytest.param(_top_level_execution(model="gpt-x"), False, set(), id="top-level-model"),
     ],
 )
 def test_compare_creates_revision_matches_publish_path(
@@ -183,7 +133,6 @@ def test_compare_creates_revision_matches_publish_path(
     result = response.json()
     assert result["valid"] is True
     assert result["creates_revision"] is creates_revision
-    # 改了 runtime 的节点单独标出 runtime 字段（前端据此说明「需发布新版本」）。
     changed = {
         change["node_key"]
         for change in result["summary"]["node_changes"]
@@ -191,15 +140,60 @@ def test_compare_creates_revision_matches_publish_path(
     }
     assert changed == runtime_nodes
     if not creates_revision:
-        # 原地可应用的改动只报告为 execution 变更（面板据此提供「应用到运行」）。
         node_changes = result["summary"]["node_changes"]
         assert node_changes
         assert all(change["fields"] == ["execution"] for change in node_changes)
 
-    # 发布路径实测：creates_revision 与是否真的出新版本一致。
     service = WorkflowRevisionService(app.state.job_db)
     before = service.get_active(workspace_id, definition.key)
     after = service.save_workspace_revision(
         workspace_id, workflow_definition_from_yaml_string(draft_yaml)
     )
     assert (int(after["version"]) != int(before["version"])) is creates_revision
+
+
+def test_stored_legacy_draft_is_migrated_for_compare_and_publish(baseline) -> None:
+    app, workspace_id, definition = baseline
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    _top_level_execution(model="gpt-x")(raw)
+    app.state.job_db.upsert_workspace_workflow_draft(workspace_id, yaml.safe_dump(raw))
+
+    with authenticate_client(TestClient(app)) as client:
+        stored = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+        migrated_yaml = stored.json()["definition_yaml"]
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": migrated_yaml},
+        )
+
+    assert stored.status_code == 200
+    assert "execution" not in yaml.safe_load(migrated_yaml)
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    service = WorkflowRevisionService(app.state.job_db)
+    before = service.get_active(workspace_id, definition.key)
+    after = service.save_workspace_revision(
+        workspace_id, workflow_definition_from_yaml_string(migrated_yaml)
+    )
+    assert int(after["version"]) == int(before["version"])
+
+
+def test_compare_and_publish_reject_top_level_execution(baseline) -> None:
+    app, workspace_id, definition = baseline
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    _top_level_execution(model="gpt-x")(raw)
+    draft_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": draft_yaml},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["valid"] is False
+    assert result["summary"] is None
+    assert any("field 'execution' was removed" in error["message"] for error in result["errors"])
+    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+        workflow_definition_from_yaml_string(draft_yaml)

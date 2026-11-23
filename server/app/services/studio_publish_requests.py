@@ -52,6 +52,7 @@ from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
     validate_workflow_draft_for_publish,
 )
+from server.app.services.workflow_drafts import migrate_stored_draft_yaml
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -89,7 +90,7 @@ class StudioPublishRequestService:
         errors = validate_workflow_draft_for_publish(
             self._job_db,
             workspace_id,
-            draft_yaml,
+            migrate_stored_draft_yaml(draft_yaml),
             self._settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         if errors:
@@ -192,6 +193,7 @@ class StudioPublishRequestService:
             # for the drifted-draft case (P1-3) and 404 otherwise.
             refuse_stale_draft_claim(self._job_db, workspace_id, request_id, draft_yaml)
             raise NotFoundError("Publish request not found or already resolved")
+        effective_yaml = migrate_stored_draft_yaml(draft_yaml)
         # #464：执行期心跳续租（契约见 confirming_claim_heartbeat）——包住
         # 门禁+before 探测+publish+after 探测+resolve 全程：publish 返回后
         # 的探测与落账同样吃 DB 锁/慢存储，窗口不续到 resolve 会重现
@@ -204,12 +206,12 @@ class StudioPublishRequestService:
                     # The key-match guard is a publish gate (422): replay it here so
                     # the confirm action is gate-equivalent to the manual publish
                     # button.
-                    require_draft_workflow_key_match(self._job_db, workspace_id, draft_yaml)
+                    require_draft_workflow_key_match(self._job_db, workspace_id, effective_yaml)
                     active_before = active_revision_id(self._job_db, workspace_id)
                     valid, errors = publish_workflow_draft(
                         self._job_db,
                         workspace_id,
-                        draft_yaml,
+                        effective_yaml,
                         self._settings.executor_runtime.workflows.custom_nodes_enabled,
                     )
                 except Exception:
