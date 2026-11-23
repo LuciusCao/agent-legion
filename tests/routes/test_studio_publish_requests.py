@@ -142,6 +142,8 @@ def test_legacy_stored_draft_preserves_raw_hash_through_request_and_confirm(clie
 
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["request"]["status"] == "confirmed"
+    draft = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+    assert draft.json()["definition_yaml"] is None
 
 
 def test_human_confirm_deletes_the_draft_row(client, job_db) -> None:

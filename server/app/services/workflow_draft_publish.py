@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.workflow_drafts import (
+    migrate_stored_draft_yaml,
     validate_workflow_definition,
     validate_workflow_for_publish,
     workflow_definition_from_yaml_string,
@@ -74,7 +75,8 @@ def publish_workflow_draft(
         stored = job_db.read_workspace_workflow_draft_for_update(conn, workspace_id)
         if stored is None:
             return
-        if workflow_draft_identity_hash(str(stored["definition_yaml"])) != published_hash:
+        stored_yaml = migrate_stored_draft_yaml(str(stored["definition_yaml"]))
+        if workflow_draft_identity_hash(stored_yaml) != published_hash:
             # A concurrent save advanced the draft past the published content
             # (#1226 P1): keep the row — the newer edit is the unpublished
             # draft now; wiping it would lose it behind the old revision.
