@@ -269,3 +269,43 @@ def test_restore_owner_read_error_fails_closed_before_uploads_restart(
         restore_uploads_with_lease_clamp(client, uploads, work_root)
 
     assert uploads.timeouts == []
+
+
+def test_restore_dangling_owner_symlink_fails_closed_before_uploads_restart(
+    tmp_path: Path,
+) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-1", 30)
+    owner = work_root / "exec-1" / OWNER_FILENAME
+    owner.unlink()
+    owner.symlink_to(tmp_path / "missing-owner-target")
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client)
+
+    with pytest.raises(ValueError, match="invalid restored owner marker"):
+        restore_uploads_with_lease_clamp(client, uploads, work_root)
+
+    assert uploads.timeouts == []
+
+
+def test_restore_owner_file_not_found_fails_closed_before_uploads_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-1", 30)
+    owner = work_root / "exec-1" / OWNER_FILENAME
+    real_read_text = Path.read_text
+
+    def failing_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == owner:
+            raise FileNotFoundError(2, "No such file or directory", str(owner))
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failing_read_text)
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client)
+
+    with pytest.raises(ValueError, match="invalid restored owner marker"):
+        restore_uploads_with_lease_clamp(client, uploads, work_root)
+
+    assert uploads.timeouts == []
