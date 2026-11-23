@@ -99,6 +99,42 @@ def test_sweep_scan_work_is_bounded(tmp_path: Path) -> None:
     assert sum(path.exists() for path in raws) == 1
 
 
+def test_sweep_cursor_advances_across_successive_startups(tmp_path: Path) -> None:
+    root = tmp_path / "evidence"
+    raws = [_raw(root, f"exec-{index:02d}", age=100) for index in range(5)]
+    for raw in raws:
+        (raw.parent / "events.jsonl").write_text("processed", encoding="utf-8")
+
+    removed = [
+        sweep_raw_event_copies(root, tmp_path / "work", now=_NOW, min_age_seconds=50, scan_limit=2)
+        for _ in range(4)
+    ]
+
+    assert removed == [2, 2, 1, 0]
+    assert all(not raw.exists() for raw in raws)
+
+
+def test_sweep_cursor_does_not_stall_behind_fresh_or_owned_incidents(tmp_path: Path) -> None:
+    root = tmp_path / "evidence"
+    work = tmp_path / "work"
+    fresh = _raw(root, "exec-00-fresh", age=5)
+    owned = _raw(root, "exec-01-owned", age=100)
+    abandoned = _raw(root, "exec-02-abandoned", age=100)
+    marker = work / "exec-01-owned" / PENDING_FILENAME
+    marker.parent.mkdir(parents=True)
+    marker.write_text("{}", encoding="utf-8")
+
+    removed = [
+        sweep_raw_event_copies(root, work, now=_NOW, min_age_seconds=50, scan_limit=2)
+        for _ in range(2)
+    ]
+
+    assert removed == [0, 1]
+    assert fresh.is_file()
+    assert owned.is_file()
+    assert not abandoned.exists()
+
+
 def test_sweep_ignores_raw_symlinks(tmp_path: Path) -> None:
     root = tmp_path / "evidence"
     incident = root / "exec-old__node-a"
