@@ -7,7 +7,11 @@ import pytest
 
 from worker.host.client import Client
 from worker.host.errors import HostResponseError
-from worker.host.transfer_lease import apply_lease_ttl, update_heartbeat_interval
+from worker.host.transfer_lease import (
+    apply_lease_ttl,
+    sync_transfer_heartbeat,
+    update_heartbeat_interval,
+)
 from worker.transfer_controls import load_transfer_controls
 from worker.transfer_lease_controls import transfer_timeout_cap, validate_transfer_timeout
 
@@ -126,7 +130,10 @@ def test_relay_heartbeat_hot_update_reclamps_current_transfer_timeout(tmp_path: 
     config.write_text("transfer_timeout_seconds: 120\nheartbeat_interval_seconds: 45\n")
     updated = load_transfer_controls(config)
     assert updated.heartbeat_interval_seconds == 45
-    update_heartbeat_interval(client, updated.heartbeat_interval_seconds)
+    sync_transfer_heartbeat(client, updated, relay=False)
+    assert client.heartbeat_interval == 15
+    assert client.transfer_timeout == 45
+    sync_transfer_heartbeat(client, updated, relay=True)
 
     assert client.heartbeat_interval == 45
     assert client.transfer_timeout == 15
