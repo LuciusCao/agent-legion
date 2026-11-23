@@ -339,7 +339,6 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace, 
     app, workspace_id = app_with_workspace
     definition = load_builtin_definition("education_video_problems_generation")
     if node_type == "legacy_agent":
-        definition = replace(definition, execution=WorkflowNodeExecution())
         legacy = definition.nodes["write_script"]
         definition.nodes["write_script"] = replace(legacy, execution=WorkflowNodeExecution())
         WorkflowRevisionService(app.state.job_db).publish_workspace_revision(

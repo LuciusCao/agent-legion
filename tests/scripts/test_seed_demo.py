@@ -51,8 +51,7 @@ def _agent_rows(settings, workspace_id: str) -> list[dict]:
 
 def _assert_demo_profiles(revision: dict) -> None:
     definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-    assert definition.execution.runtime == "velites"
-    assert DEMO_WORKFLOW_DEFINITION["execution"] == {"runtime": "velites"}
+    assert "execution" not in DEMO_WORKFLOW_DEFINITION
     expected = {
         "write_script": ("example-write-script-v1", "write-script"),
         "review_script": ("example-review-script-v1", "review-script"),
