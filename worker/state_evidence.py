@@ -95,6 +95,7 @@ import json
 import re
 import shutil
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -200,6 +201,33 @@ def tree_missing_inside(exc: BaseException, execution_dir: Path) -> bool:
         except OSError:
             continue
     return False
+
+
+def scan_primary_events(
+    events: Path, evidence_dir: Path, redactor: SecretRedactor, observer: Callable[..., None]
+) -> tuple[str | None, int, bytes, bool]:
+    """Scan primary events and return an explicit completion marker."""
+    completed = events.is_file() and events.stat().st_size == 0
+    model_error, original, _, tail = (
+        (None, 0, 0, b"")
+        if completed
+        else scan_and_compress_pi_events(
+            events, evidence_dir / AGENT_STDERR_FILENAME, redactor, observer
+        )
+    )
+    return model_error, original, tail, completed or original > 0
+
+
+def validate_scanned_events(events: Path, original: int, completed: bool) -> None:
+    """Fail closed on raw survivors unless a scanned events tree vanished."""
+    try:
+        raw_survived = original == 0 and events.is_file() and events.stat().st_size > 0
+    except OSError as exc:
+        if not completed or not tree_missing_inside(exc, events.parent):
+            raise
+        raw_survived = False
+    if raw_survived:
+        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
 
 
 def dump_prep_evidence(task: UploadTask, exc: BaseException) -> Path | None:

@@ -65,10 +65,8 @@ def completed_emergency_events(events: Path, lease_id: str | None = None) -> boo
     return current_attempt and normal_end
 
 
-def validate_scanned_events(events: Path, original: int, recovered: bool) -> None:
-    """Fail closed on raw survivors or completion proof lost during compression."""
-    if original == 0 and events.is_file() and events.stat().st_size > 0:
-        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
+def validate_recovered_completion(events: Path, recovered: bool) -> None:
+    """Ensure compression preserved a recovered attempt's completion proof."""
     if recovered and not completed_emergency_events(events):
         raise RuntimeError("recovered emergency events lost completion evidence during compression")
 
@@ -118,13 +116,13 @@ def copy_completed_emergency_events(task: UploadTask) -> Path | None:
 
 
 def scanned_stderr_tail(
-    task: UploadTask, evidence_dir: Path, scanned_tail: bytes, scanned_original: int
+    task: UploadTask, evidence_dir: Path, scanned_tail: bytes, scan_completed: bool
 ) -> bytes:
     """Keep the scanned verdict when only the stderr anchor vanishes afterwards."""
     try:
         return stderr_tail_for_run(evidence_dir, scanned_tail)
     except OSError as exc:
-        if scanned_original <= 0 or not tree_missing_inside(exc, evidence_dir):
+        if not scan_completed or not tree_missing_inside(exc, evidence_dir):
             raise
         print(
             f"run stderr anchor vanished for {task.execution_id}; preserving the scanned verdict",

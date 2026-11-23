@@ -433,14 +433,14 @@ def test_cleanup_before_primary_scan_does_not_count_as_scanned(
     work_root = tmp_path / "work"
     _execution_dir(work_root)
     run_dir = work_root / "exec-1" / "job" / "runs" / "node_a" / "worker"
-    original_scan = upload_prepare.scan_and_compress_pi_events
+    original_scan = upload_prepare.scan_primary_events
 
     def delete_before_scan(*args: Any, **kwargs: Any):
         shutil.rmtree(run_dir)
         _write_emergency(evidence_root, _successful_events())
         return original_scan(*args, **kwargs)
 
-    monkeypatch.setattr(upload_prepare, "scan_and_compress_pi_events", delete_before_scan)
+    monkeypatch.setattr(upload_prepare, "scan_primary_events", delete_before_scan)
     client = QueueFakeClient()
     queue = _queue(client)
     queue.submit(_task(work_root, exit_code=0))

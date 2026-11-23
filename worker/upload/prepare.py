@@ -20,10 +20,13 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from shared.output_truncation import OutputTruncation
-from shared.pi_events import scan_and_compress_pi_events
 from shared.pi_model_error import model_error_for_exit
-from shared.stderr_tail import AGENT_STDERR_FILENAME
-from worker.state_evidence import dump_prep_evidence, prep_failure_message
+from worker.state_evidence import (
+    dump_prep_evidence,
+    prep_failure_message,
+    scan_primary_events,
+    validate_scanned_events,
+)
 from worker.upload import result_recovery as recovery
 from worker.upload.degraded_archive import (
     failed_metadata,
@@ -141,19 +144,20 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # exit 1 且带明确 Provider 鉴权签名（#1502），保留原文供 Host 分类。
     # #952: the same pass counts per-call output truncations (stopReason=length).
     snapshot = secret_snapshot()
-    scanned_model_error, scanned_original, _, scanned_tail = scan_and_compress_pi_events(
-        events,
-        stderr_sink=evidence_dir / AGENT_STDERR_FILENAME,
-        redactor=snapshot,
-        event_observer=(truncation := OutputTruncation()).observe,
+    truncation = OutputTruncation()
+    scanned_model_error, scanned_original, scanned_tail, primary_scanned = scan_primary_events(
+        events, evidence_dir, snapshot, truncation.observe
     )
+    # 空文件以成功 stat(size=0) 显式完成扫描；非空扫描须实际读到字节，
+    # 扫描前缺失或整趟扫描失败均不能把后续清理误记成扫描后降级。
     # #1165 belt-and-braces：带 redactor 的整趟扫描失败已在 pi_events 内把
     # 原文件就地截空（见其失败臂）；original==0 而文件仍在且非空 = 截断也
     # 失败（EACCES 族），此时绝不让未脱敏字节随 run_dir 进归档——诚实判败
     # 走空归档（#959 语义保持：failed 是可上报的降级，不是丢结果）。
     # original==0 的另外两形态（文件缺失 / 空文件）不触发本守卫。
-    recovery.validate_scanned_events(events, scanned_original, evidence_dir != run_dir)
-    stderr_tail = recovery.scanned_stderr_tail(task, evidence_dir, scanned_tail, scanned_original)
+    validate_scanned_events(events, scanned_original, primary_scanned)
+    recovery.validate_recovered_completion(events, evidence_dir != run_dir)
+    stderr_tail = recovery.scanned_stderr_tail(task, evidence_dir, scanned_tail, primary_scanned)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
     # Host-judged) / "Agent process exited 1" (velites output contract) face;
@@ -194,7 +198,5 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         metadata["agent_stderr_tail"] = stderr_tail.decode("utf-8", "replace")[
             -MAX_ERROR_MESSAGE_CHARS:
         ]
-    write_agent_archive(
-        task, archive, job_dir, run_dir, evidence_dir, outputs, scanned_original > 0
-    )
+    write_agent_archive(task, archive, job_dir, run_dir, evidence_dir, outputs, primary_scanned)
     return metadata, archive, outputs
