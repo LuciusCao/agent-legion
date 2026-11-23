@@ -16,32 +16,38 @@ shared/code_contract.RESULT_METADATA_MEMBER）。产物清单留在 result.json
 
 from __future__ import annotations
 
-import tarfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from shared.output_truncation import OutputTruncation
-from shared.pi_events import scan_and_compress_pi_events
 from shared.pi_model_error import model_error_for_exit
-from shared.stderr_tail import AGENT_STDERR_FILENAME
-from worker.state_evidence import dump_prep_evidence, prep_failure_message
+from worker.state_evidence import (
+    dump_prep_evidence,
+    prep_failure_message,
+    scan_primary_events,
+    validate_scanned_events,
+)
+from worker.upload import result_recovery as recovery
 from worker.upload.degraded_archive import (
     failed_metadata,
+    write_agent_archive,
     write_degraded_empty_archive,
     write_empty_archive,
 )
 from worker.upload.report_policy import declared_ceiling_rejection
 from worker.upload.result_metadata import MAX_ERROR_MESSAGE_CHARS, exit_verdict
 from worker.upload.secret_registry import secret_snapshot
-from worker.upload.stderr_evidence import stderr_tail_for_run
 
 if TYPE_CHECKING:
     from worker.upload.queue import UploadTask
 
 
-def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-    """prepare_result + 失败降级为 failed 上报；直传回落后按清空的
-    artifact_uploads 重跑，tar 随之内嵌产物。#959：备妥的归档超 Host 下发
+def prepare_or_failed(
+    task: UploadTask, scanned_result: tuple[dict[str, Any], list[str]] | None = None
+) -> tuple[dict[str, Any], Path, list[str]]:
+    """prepare_result + 失败降级为 failed 上报；直传回落复用同任务首次扫描的
+    verdict/outputs，清空 artifact_uploads 后仅重打包，tar 随之内嵌产物。
+    #959：备妥的归档超 Host 下发
     上限即诚实判败（空归档 + failed），不把注定 413 的归档送进 report 车道。
 
     失败臂（except）的子步序与前置条件模型（#1168 深化；每步独立降级，
@@ -73,7 +79,7 @@ def prepare_or_failed(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]
     tests/workers/test_worker_upload_archive_safety.py）。
     """
     try:
-        metadata, archive, outputs = prepare_result(task)
+        metadata, archive, outputs = recovery.from_scan(task, scanned_result, prepare_result)
         rejection = declared_ceiling_rejection(task, archive)
     except Exception as exc:
         # #204 broad-except audit: 归档准备的故意降级（prepare_result 的
@@ -120,13 +126,15 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         return prepare_code_result(task)
     job_dir = task.execution_dir / "job"
     run_dir = job_dir / "runs" / task.node_key / "worker"
-    events = run_dir / "events.jsonl"
+    evidence_dir = recovery.recover_completed_run(task, job_dir, run_dir)
+    task.scanned_evidence_dir = evidence_dir
+    events = evidence_dir / "events.jsonl"
     # Pi exits 0 even when the model call fails (e.g. provider 401); one
     # pass folds the model-error scan into the compression rewrite.
     # #748: the pass persists the non-JSON (merged-stderr) tail to the sink
-    # file at scan time; stderr_tail_for_run reads it back when a re-entry
-    # (direct-upload fallback / worker-restart restore) finds the events
-    # file already compressed — a second scan would yield nothing.
+    # file at scan time; stderr_tail_for_run reads it back when worker-restart
+    # restore finds the events file already compressed — a second scan would
+    # yield nothing. Direct-upload fallback instead repacks the scanned result.
     # The scan redacts before any cut or durable write — the stderr tail AND
     # the kept events' string values (#842: tool output echoing a secret must
     # not ride the compressed events.jsonl to the Host renderer) — through
@@ -136,20 +144,20 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
     # exit 1 且带明确 Provider 鉴权签名（#1502），保留原文供 Host 分类。
     # #952: the same pass counts per-call output truncations (stopReason=length).
     snapshot = secret_snapshot()
-    scanned_model_error, scanned_original, _, scanned_tail = scan_and_compress_pi_events(
-        events,
-        stderr_sink=run_dir / AGENT_STDERR_FILENAME,
-        redactor=snapshot,
-        event_observer=(truncation := OutputTruncation()).observe,
+    truncation = OutputTruncation()
+    scanned_model_error, scanned_original, scanned_tail, primary_scanned = scan_primary_events(
+        events, evidence_dir, snapshot, truncation.observe
     )
+    # 空文件以成功 stat(size=0) 显式完成扫描；非空扫描须实际读到字节，
+    # 扫描前缺失或整趟扫描失败均不能把后续清理误记成扫描后降级。
     # #1165 belt-and-braces：带 redactor 的整趟扫描失败已在 pi_events 内把
     # 原文件就地截空（见其失败臂）；original==0 而文件仍在且非空 = 截断也
     # 失败（EACCES 族），此时绝不让未脱敏字节随 run_dir 进归档——诚实判败
     # 走空归档（#959 语义保持：failed 是可上报的降级，不是丢结果）。
     # original==0 的另外两形态（文件缺失 / 空文件）不触发本守卫。
-    if scanned_original == 0 and events.is_file() and events.stat().st_size > 0:
-        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
-    stderr_tail = stderr_tail_for_run(run_dir, scanned_tail)
+    validate_scanned_events(events, scanned_original, primary_scanned)
+    recovery.validate_recovered_completion(events, evidence_dir != run_dir)
+    stderr_tail = recovery.scanned_stderr_tail(task, evidence_dir, scanned_tail, primary_scanned)
     outputs = [name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()]
     # #952: attribution only — replaces the opaque "Missing outputs" (exit 0,
     # Host-judged) / "Agent process exited 1" (velites output contract) face;
@@ -190,12 +198,5 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         metadata["agent_stderr_tail"] = stderr_tail.decode("utf-8", "replace")[
             -MAX_ERROR_MESSAGE_CHARS:
         ]
-    # #160 D12：与 upload_queue._bulk_transfer 同一直传判定（#201 收敛进
-    # UploadTask.is_direct_upload）；直传时产物不再内嵌归档（字节走 presigned PUT）。
-    direct = task.is_direct_upload(outputs)
-    with tarfile.open(archive, "w:gz") as tar:
-        if not direct:
-            for name in outputs:
-                tar.add(job_dir / PurePosixPath(name), arcname=name)
-        tar.add(run_dir, arcname=str(run_dir.relative_to(job_dir)))
+    write_agent_archive(task, archive, job_dir, run_dir, evidence_dir, outputs, primary_scanned)
     return metadata, archive, outputs

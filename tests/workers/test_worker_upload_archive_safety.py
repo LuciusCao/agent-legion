@@ -135,8 +135,8 @@ def test_scan_failure_survivor_fails_honestly(
     )
     # 模拟「扫描失败 + pi_events 的就地销毁未能落地」：返回整趟失败形且原文件原样。
     monkeypatch.setattr(
-        "worker.upload.prepare.scan_and_compress_pi_events",
-        lambda *args, **kwargs: (None, 0, 0, b""),
+        "worker.upload.prepare.scan_primary_events",
+        lambda *args, **kwargs: (None, 0, b"", False),
     )
     client = _ArchiveCapturingClient()
     queue = _queue(client)
