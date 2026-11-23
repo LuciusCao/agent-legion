@@ -375,22 +375,16 @@ def test_rejects_invalid_builtin_workflow_definition(definition, expected_error)
     assert any(expected_error in error for error in errors)
 
 
-def _code_builtin_declaration(capability: str | None, runtime_location: str) -> dict:
+def _code_builtin_declaration(capability: str | None) -> dict:
     node: dict = {"type": "code"}
     if capability is not None:
         node["capability"] = capability
-    raw = {"key": "example", "label": "Example", "nodes": {"fetch": node}}
-    if runtime_location == "workflow":
-        raw["execution"] = {"runtime": "velites"}
-    return raw
+    return {"key": "example", "label": "Example", "nodes": {"fetch": node}}
 
 
 @pytest.mark.parametrize("capability", [None, ""])
-@pytest.mark.parametrize("runtime_location", ["none", "workflow"])
-def test_builtin_code_capability_may_be_omitted_or_empty(
-    capability: str | None, runtime_location: str
-) -> None:
-    raw = _code_builtin_declaration(capability, runtime_location)
+def test_builtin_code_capability_may_be_omitted_or_empty(capability: str | None) -> None:
+    raw = _code_builtin_declaration(capability)
 
     loaded = workflow_definition_from_mapping(raw)
 
@@ -402,7 +396,7 @@ def test_builtin_code_capability_may_be_omitted_or_empty(
 
 @pytest.mark.parametrize("capability", [None, 42, []])
 @pytest.mark.parametrize("node_type", ["code", "agent"])
-@pytest.mark.parametrize("runtime_location", ["none", "node", "workflow"])
+@pytest.mark.parametrize("runtime_location", ["none", "node"])
 def test_builtin_capability_rejects_null_and_non_strings(
     capability, node_type: str, runtime_location: str
 ) -> None:
@@ -410,8 +404,6 @@ def test_builtin_capability_rejects_null_and_non_strings(
     raw = {"key": "example", "label": "Example", "nodes": {"fetch": node}}
     if runtime_location == "node":
         node["execution"] = {"runtime": "velites"}
-    elif runtime_location == "workflow":
-        raw["execution"] = {"runtime": "velites"}
 
     errors = check_workflow_raw_definitions({"example": raw})
 
@@ -455,27 +447,20 @@ def test_rejects_forbidden_pattern_in_source(tmp_path):
     assert any("forbidden pattern" in error and "node.runner literal" in error for error in errors)
 
 
-def _agent_builtin_declaration(capability: str | None, runtime_location: str) -> dict:
+def _agent_builtin_declaration(capability: str | None) -> dict:
     node = {
         "type": "agent",
         "skill": {"key": "capability_optional/draft"},
+        "execution": {"runtime": "velites"},
     }
     if capability is not None:
         node["capability"] = capability
-    raw = {"key": "ws", "label": "Workspace", "nodes": {"draft": node}}
-    if runtime_location == "node":
-        node["execution"] = {"runtime": "velites"}
-    else:
-        raw["execution"] = {"runtime": "velites"}
-    return raw
+    return {"key": "ws", "label": "Workspace", "nodes": {"draft": node}}
 
 
 @pytest.mark.parametrize("capability", [None, ""])
-@pytest.mark.parametrize("runtime_location", ["node", "workflow"])
-def test_builtin_agent_optional_capability_matches_loader(
-    monkeypatch, capability: str | None, runtime_location: str
-):
-    raw = _agent_builtin_declaration(capability, runtime_location)
+def test_builtin_agent_optional_capability_matches_loader(monkeypatch, capability: str | None):
+    raw = _agent_builtin_declaration(capability)
 
     loaded = workflow_definition_from_mapping(raw)
 
@@ -485,6 +470,16 @@ def test_builtin_agent_optional_capability_matches_loader(
     # is the supported shape the old lint rejected despite loader acceptance.
     monkeypatch.setattr("scripts.architecture.workflow.BUILTIN_WORKFLOW_DEFINITIONS", {"ws": raw})
     assert check_workflow_definitions(Path(".")) == []
+
+
+@pytest.mark.parametrize("execution", [{"runtime": "velites"}, None], ids=["dict", "null"])
+def test_builtin_raw_lint_rejects_top_level_execution(execution) -> None:
+    raw = _agent_builtin_declaration("")
+    raw["execution"] = execution
+
+    errors = check_workflow_raw_definitions({"ws": raw})
+
+    assert any("field 'execution' was removed" in error for error in errors)
 
 
 @pytest.mark.parametrize("capability", [None, ""])

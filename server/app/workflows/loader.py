@@ -23,6 +23,7 @@ from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_execution_defaults import (
     apply_workflow_execution,
     load_workflow_execution,
+    reject_workflow_execution,
 )
 from server.app.workflows.workflow_intake import load_intake
 from server.app.workflows.workflow_node_execution import load_node_execution
@@ -264,13 +265,18 @@ def _load_nodes(
 
 
 def load_workflow_nodes_with_execution(
-    raw: dict[str, Any], raw_nodes: dict[str, Any]
+    raw: dict[str, Any],
+    raw_nodes: dict[str, Any],
+    *,
+    allow_legacy_execution: bool = False,
 ) -> tuple[WorkflowNodeExecution, dict[str, WorkflowNode]]:
     """Load node declarations and validate capability after runtime merging.
 
-    Shared with the built-in DAG lint so both accept exactly the same
-    self-contained agent, code, and legacy declaration shapes (#936/#440).
+    Authoring and the built-in DAG lint reject top-level execution; only stored
+    loading opts into legacy materialization (#805/#936/#440).
     """
+    if not allow_legacy_execution:
+        reject_workflow_execution(raw)
     execution = load_workflow_execution(raw)
     nodes = apply_workflow_execution(raw, _load_nodes(raw_nodes))
     for node in nodes.values():
@@ -282,7 +288,9 @@ def load_workflow_nodes_with_execution(
     return execution, nodes
 
 
-def _load_workflow_definition(raw: dict[str, Any]) -> WorkflowDefinition:
+def _load_workflow_definition(
+    raw: dict[str, Any], *, allow_legacy_execution: bool = False
+) -> WorkflowDefinition:
     key = raw.get("key")
     label = raw.get("label")
     raw_nodes = raw.get("nodes")
@@ -304,7 +312,9 @@ def _load_workflow_definition(raw: dict[str, Any]) -> WorkflowDefinition:
         raise WorkflowDefinitionError("Workflow schema_version must be an integer")
 
     intake = load_intake(raw)
-    _, nodes = load_workflow_nodes_with_execution(raw, raw_nodes)
+    _, nodes = load_workflow_nodes_with_execution(
+        raw, raw_nodes, allow_legacy_execution=allow_legacy_execution
+    )
     edges = _load_edges(raw, nodes, schema_version)
     nodes, edges = ensure_start_node(nodes, edges)
     validate_approval_edges(nodes, edges)
@@ -320,7 +330,7 @@ def _load_workflow_definition(raw: dict[str, Any]) -> WorkflowDefinition:
 
 
 def workflow_definition_from_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
-    """Load mapping/YAML input; legacy defaults materialize until M201 rejects them."""
+    """Load strict mapping/YAML authoring input."""
     return _load_workflow_definition(raw)
 
 
@@ -328,7 +338,7 @@ def workflow_definition_from_dict(
     payload: dict[str, Any],
 ) -> WorkflowDefinition:
     """Load a stored revision/job snapshot, including legacy default materialization."""
-    return _load_workflow_definition(snapshot_to_mapping(payload))
+    return _load_workflow_definition(snapshot_to_mapping(payload), allow_legacy_execution=True)
 
 
 def load_workflow_definition(

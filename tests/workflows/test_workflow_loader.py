@@ -60,8 +60,8 @@ def test_self_contained_agent_capability_is_an_empty_optional_label(
     assert node.execution.runtime == "velites"
 
 
-def test_agent_capability_may_inherit_the_existing_top_level_runtime_default() -> None:
-    definition = workflow_definition_from_mapping(
+def test_stored_agent_capability_may_inherit_the_legacy_runtime_default() -> None:
+    definition = workflow_definition_from_dict(
         _raw(
             _agent(runtime=None),
             execution={"runtime": "pi", "provider": "gateway", "model": "test-model"},

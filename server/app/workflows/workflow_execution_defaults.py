@@ -1,10 +1,11 @@
 """Legacy workflow-level execution defaults, materialized into node profiles.
 
-Persisted revisions, intake-frozen job snapshots and pre-M201 mapping/YAML input
-may still contain the top-level block. Loading fills empty fields on Agent nodes
-and non-runtime fields on pre-explicit-type aliases, preserving node overrides
-and legacy nodes whose runtime was never declared. Explicit non-Agent nodes are
-left untouched; M201 owns the separate authoring-write rejection.
+Persisted revisions and intake-frozen job snapshots may still contain the
+top-level block. Stored loading fills empty fields on Agent nodes and
+non-runtime fields on pre-explicit-type aliases, preserving node overrides and
+legacy nodes whose runtime was never declared. Explicit non-Agent nodes are
+left untouched. Authoring mapping/YAML and built-in raw definitions reject the
+key outright.
 """
 
 from __future__ import annotations
@@ -18,6 +19,14 @@ from server.app.workflows.schema import (
     WorkflowNodeExecution,
 )
 from server.app.workflows.workflow_node_profile import validate_agent_runtime
+
+
+def reject_workflow_execution(raw: dict[str, Any]) -> None:
+    """Reject the retired top-level block on every authoring input shape."""
+    if "execution" in raw:
+        raise WorkflowDefinitionError(
+            "Workflow field 'execution' was removed; declare execution on each Agent node"
+        )
 
 
 def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:

@@ -62,22 +62,35 @@ def _mapping(raw: dict | None = None):
     return workflow_definition_from_mapping(_authoring(raw))
 
 
-def test_mapping_authoring_remains_compatible_before_m201_write_rejection() -> None:
-    definition = _mapping()
+@pytest.mark.parametrize("execution", [{"runtime": "velites"}, None], ids=["dict", "null"])
+def test_mapping_authoring_rejects_top_level_execution(execution) -> None:
+    raw = _authoring()
+    raw["execution"] = execution
 
-    assert definition.nodes["empty_agent"].execution.runtime == "velites"
-    assert definition.nodes["empty_agent"].execution.provider == "top-provider"
-    assert not hasattr(definition, "execution")
+    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+        _mapping(raw)
 
 
-def test_yaml_file_authoring_uses_the_same_compatibility_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize("execution", [{"runtime": "velites"}, None], ids=["dict", "null"])
+def test_yaml_file_authoring_rejects_top_level_execution(tmp_path: Path, execution) -> None:
+    raw = _authoring()
+    raw["execution"] = execution
     path = tmp_path / "workflow.yaml"
-    path.write_text(yaml.safe_dump(_authoring()), encoding="utf-8")
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
-    definition = load_workflow_definition(path)
+    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+        load_workflow_definition(path)
+
+
+def test_stored_null_execution_remains_readable() -> None:
+    raw = copy.deepcopy(_STORED)
+    raw["execution"] = None
+
+    definition = _stored(raw)
 
     assert definition.nodes["agent_node"].execution.provider == "node-provider"
-    assert definition.nodes["empty_agent"].execution.model == "top-model"
+    assert definition.nodes["agent_node"].execution.runtime == "pi"
+    assert definition.nodes["empty_agent"].execution == WorkflowNodeExecution()
 
 
 def test_stored_legacy_materializes_agent_nodes_and_preserves_mixed_overrides() -> None:

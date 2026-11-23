@@ -367,20 +367,15 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace, 
     assert "能力标签" not in flag["message"]
 
 
-@pytest.mark.parametrize("runtime_source", ["node", "workflow"])
 def test_compare_self_contained_capability_label_is_structural_not_route_warning(
-    app_with_workspace, runtime_source
+    app_with_workspace,
 ):
     import yaml
 
     app, workspace_id = app_with_workspace
     raw_doc = yaml.safe_load(definition_to_yaml(load_builtin_definition(workspace_id)))
-    raw_doc.setdefault("execution", {})["runtime"] = "velites"
     execution = raw_doc["nodes"]["write_script"].setdefault("execution", {})
-    if runtime_source == "node":
-        execution["runtime"] = "velites"
-    else:
-        execution.pop("runtime", None)
+    execution["runtime"] = "velites"
     raw_doc["nodes"]["write_script"]["capability"] = ""
 
     with authenticate_client(TestClient(app)) as client:

@@ -13,6 +13,7 @@ from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.schema import (
     WorkflowDefinition,
+    WorkflowDefinitionError,
     WorkflowIntake,
     WorkflowNode,
     WorkflowNodeExecution,
@@ -113,9 +114,6 @@ def _top_level_execution(**values: str):
             set(),
             id="node-prompt-mode",
         ),
-        pytest.param(
-            _top_level_execution(model="gpt-x"), False, set(), id="legacy-top-level-model"
-        ),
     ],
 )
 def test_compare_creates_revision_matches_publish_path(
@@ -152,3 +150,24 @@ def test_compare_creates_revision_matches_publish_path(
         workspace_id, workflow_definition_from_yaml_string(draft_yaml)
     )
     assert (int(after["version"]) != int(before["version"])) is creates_revision
+
+
+def test_compare_and_publish_reject_top_level_execution(baseline) -> None:
+    app, workspace_id, definition = baseline
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    _top_level_execution(model="gpt-x")(raw)
+    draft_yaml = yaml.safe_dump(raw, allow_unicode=True)
+
+    with authenticate_client(TestClient(app)) as client:
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": draft_yaml},
+        )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["valid"] is False
+    assert result["summary"] is None
+    assert any("field 'execution' was removed" in error["message"] for error in result["errors"])
+    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+        workflow_definition_from_yaml_string(draft_yaml)
