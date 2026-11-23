@@ -1,8 +1,24 @@
+import { hasTopLevelExecution } from './workflowRuntimeSlice'
 import {
   parseWorkflowYaml,
   type WorkflowYamlNode,
   type WorkflowYamlObject,
 } from './workflowStudioYamlDraft.parse'
+
+const MIGRATE_TOP_LEVEL_EXECUTION =
+  '请把 runtime/provider/model/thinking 分别移到每个 agent 节点的 execution'
+
+export function retiredMessage(
+  sourceYaml: string,
+  action: '保存' | '回滚',
+  agentProposal: boolean
+): string | null {
+  if (!hasTopLevelExecution(sourceYaml)) return null
+  if (agentProposal) {
+    return `未应用 agent 建议：其中包含已退役的顶层 execution。${MIGRATE_TOP_LEVEL_EXECUTION}，再重新生成建议；本次未保存任何修改。`
+  }
+  return `运行配置${action}已取消：当前草稿包含已退役的顶层 execution。${MIGRATE_TOP_LEVEL_EXECUTION}，再${action}；本次未${action === '保存' ? '保存任何修改' : '回滚'}，草稿已保留。`
+}
 
 /**
  * agent 节点必须自含执行档案：节点 `execution.runtime` 缺失即由 legacy

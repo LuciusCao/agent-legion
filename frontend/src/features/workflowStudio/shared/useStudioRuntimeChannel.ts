@@ -7,7 +7,12 @@ import {
 import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { useUiStore } from '../../../stores/uiStore'
 import { fetchActiveRevisionOrNull } from '../canvas/workflowStudioEmptyState'
-import { runtimeSaveError } from './runtimeChannelErrors'
+import {
+  errorMessage,
+  runtimeSaveError,
+  runtimeSourceSyntaxMessage,
+} from './runtimeChannelErrors'
+import { retiredMessage } from './workflowStudioYamlDraft.runtime'
 import {
   combineYamlStructureRuntime,
   diffRuntimeSliceKeys,
@@ -38,10 +43,6 @@ type StudioDataSnapshot = {
   active: unknown
   history: unknown
   workspaces: unknown
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : '网络错误'
 }
 
 /**
@@ -110,12 +111,13 @@ export function useStudioRuntimeChannel(args: {
       extraQueryKeys.workflowStudioData(workspaceId),
       (old) => (old ? { ...old, active: fresh } : old)
     )
-    // 无结构编辑：直接对齐新 canonical 基线（基线同步随之 reset，dirty 归零）；
-    // 有结构编辑：保留草稿结构、并入刚生效的 runtime 切片——之后的结构发布
-    // 才不会把运行配置打回保存前的旧值。
-    const nextDraft = hasStructuralYamlChanges(baseline, currentDraft)
-      ? combineYamlStructureRuntime(currentDraft, fresh.definition_yaml)
-      : fresh.definition_yaml
+    // 请求在途时仍可能收到人工编辑；含退役顶层块的最新草稿绝不能被
+    // canonical active 或 nodes-only 合并结果覆盖。
+    const nextDraft = hasTopLevelExecution(currentDraft)
+      ? currentDraft
+      : hasStructuralYamlChanges(baseline, currentDraft)
+        ? combineYamlStructureRuntime(currentDraft, fresh.definition_yaml)
+        : fresh.definition_yaml
     if (nextDraft !== currentDraft) args.setDraftYaml(nextDraft)
     return fresh.definition_yaml
   }
@@ -143,25 +145,15 @@ export function useStudioRuntimeChannel(args: {
   ): Promise<boolean> {
     // 置位/复位与 rollbackRuntimeConfig 对称（见彼处 r1 P1-1 注释）。
     if (!workspaceId || savingRef.current) return false
-    if (runtimeSourceYaml) {
-      try {
-        if (hasTopLevelExecution(runtimeSourceYaml)) {
-          return fail(
-            '未应用 agent 建议：其中包含已退役的顶层 execution。请把 runtime/provider/model/thinking 分别写入每个 agent 节点的 execution，再重新生成建议；本次未保存任何修改。'
-          )
-        }
-      } catch {
-        return fail('agent 建议 YAML 有语法错误，本次未保存任何修改')
-      }
-    }
+    const sourceYaml = runtimeSourceYaml ?? draftYaml
+    const agentProposal = runtimeSourceYaml !== undefined
     let saveYaml: string
     try {
-      saveYaml = combineYamlStructureRuntime(
-        originalYaml,
-        runtimeSourceYaml ?? draftYaml
-      )
+      const rejection = retiredMessage(sourceYaml, '保存', agentProposal)
+      if (rejection) return fail(rejection)
+      saveYaml = combineYamlStructureRuntime(originalYaml, sourceYaml)
     } catch {
-      return fail('草稿 YAML 有语法错误，修复后才能保存运行配置')
+      return fail(runtimeSourceSyntaxMessage(runtimeSourceYaml))
     }
     savingRef.current = true
     setRuntimeSaving(true)
@@ -187,6 +179,12 @@ export function useStudioRuntimeChannel(args: {
     // 置位/复位与 saveRuntimeConfig 对称（见彼处的 M49 注释）——finally 里
     // 的 savingRef 复位漏一行就是整会话运行通道静默锁死（r1 P1-1）。
     if (!workspaceId || savingRef.current) return false
+    try {
+      const rejection = retiredMessage(draftYaml, '回滚', false)
+      if (rejection) return fail(rejection)
+    } catch {
+      return fail('草稿 YAML 有语法错误，修复后才能回滚运行配置')
+    }
     savingRef.current = true
     setRuntimeSaving(true)
     try {

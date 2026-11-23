@@ -48,6 +48,10 @@ nodes:
   workflow: null,
 }
 
+const RETIRED_TOP_LEVEL_DRAFT = `execution:
+  provider: retired-new-provider
+${BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')}`
+
 function setup(args: {
   draftYaml: string
   originalYaml?: string
@@ -62,15 +66,16 @@ function setup(args: {
   const setDraftYaml = args.setDraftYaml ?? vi.fn()
   const markRuntimeChannelSaved = vi.fn()
   const view = renderHook(
-    () =>
+    (props: { draftYaml: string }) =>
       useStudioRuntimeChannel({
         workspaceId: 'ws1',
         originalYaml: args.originalYaml ?? BASELINE,
-        draftYaml: args.draftYaml,
+        draftYaml: props.draftYaml,
         setDraftYaml,
         markRuntimeChannelSaved,
       }),
     {
+      initialProps: { draftYaml: args.draftYaml },
       wrapper: ({ children }: { children: React.ReactNode }) => (
         <QueryClientProvider client={queryClient}>
           {children}
@@ -249,6 +254,94 @@ describe('useStudioRuntimeChannel（M48 运行通道）', () => {
     expect(mocks.save).not.toHaveBeenCalled()
     expect(result.current.runtimeError).toContain('未应用 agent 建议')
     expect(result.current.runtimeError).toContain('本次未保存任何修改')
+  })
+
+  it('无参数人工保存拒绝含顶层 execution 的草稿：零请求、草稿不变、指引持续', async () => {
+    const { result, rerender, setDraftYaml, markRuntimeChannelSaved } = setup({
+      draftYaml: RETIRED_TOP_LEVEL_DRAFT,
+    })
+
+    let ok = true
+    await act(async () => {
+      ok = await result.current.saveRuntimeConfig()
+    })
+
+    expect(ok).toBe(false)
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(mocks.fetchActive).not.toHaveBeenCalled()
+    expect(setDraftYaml).not.toHaveBeenCalled()
+    expect(markRuntimeChannelSaved).not.toHaveBeenCalled()
+    expect(result.current.runtimeSaving).toBe(false)
+    expect(result.current.runtimeError).toContain('运行配置保存已取消')
+    expect(result.current.runtimeError).toContain('每个 agent 节点的 execution')
+    expect(result.current.runtimeError).toContain('草稿已保留')
+
+    rerender({ draftYaml: RETIRED_TOP_LEVEL_DRAFT })
+    expect(result.current.runtimeError).toContain('运行配置保存已取消')
+    expect(setDraftYaml).not.toHaveBeenCalled()
+  })
+
+  it('人工回滚拒绝含顶层 execution 的草稿：零请求、草稿不变、指引持续', async () => {
+    const { result, rerender, setDraftYaml, markRuntimeChannelSaved } = setup({
+      draftYaml: RETIRED_TOP_LEVEL_DRAFT,
+    })
+
+    let ok = true
+    await act(async () => {
+      ok = await result.current.rollbackRuntimeConfig(1)
+    })
+
+    expect(ok).toBe(false)
+    expect(mocks.rollback).not.toHaveBeenCalled()
+    expect(mocks.fetchActive).not.toHaveBeenCalled()
+    expect(setDraftYaml).not.toHaveBeenCalled()
+    expect(markRuntimeChannelSaved).not.toHaveBeenCalled()
+    expect(result.current.runtimeSaving).toBe(false)
+    expect(result.current.runtimeError).toContain('运行配置回滚已取消')
+    expect(result.current.runtimeError).toContain('每个 agent 节点的 execution')
+    expect(result.current.runtimeError).toContain('草稿已保留')
+
+    rerender({ draftYaml: RETIRED_TOP_LEVEL_DRAFT })
+    expect(result.current.runtimeError).toContain('运行配置回滚已取消')
+    expect(setDraftYaml).not.toHaveBeenCalled()
+  })
+
+  it('保存在途新增的顶层 execution 不被 fresh-active canonical 覆盖', async () => {
+    let releaseSave: (() => void) | null = null
+    mocks.save.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseSave = () =>
+            resolve({
+              revision: FRESH_ACTIVE.revision,
+              runtime_version: {
+                version: 1,
+                revision_id: 'rev1',
+                changed_keys: ['nodes.write_script.model'],
+                created_by: 'user:1',
+                created_at: '2026-10-21T10:00:00',
+              },
+            })
+        })
+    )
+    const validDraft = BASELINE.replace('model: gpt-5.1', 'model: gpt-5.2')
+    const { result, rerender, setDraftYaml } = setup({
+      draftYaml: validDraft,
+    })
+
+    let savePromise!: Promise<boolean>
+    act(() => {
+      savePromise = result.current.saveRuntimeConfig()
+    })
+    rerender({ draftYaml: RETIRED_TOP_LEVEL_DRAFT })
+    await act(async () => {
+      releaseSave?.()
+      expect(await savePromise).toBe(true)
+    })
+
+    expect(mocks.save).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchActive).toHaveBeenCalledTimes(1)
+    expect(setDraftYaml).not.toHaveBeenCalled()
   })
 
   it('M49 连续编辑：两次「应用并生效」各发一次 PATCH（每次生效一条配置版本）', async () => {
