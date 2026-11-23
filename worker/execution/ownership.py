@@ -110,9 +110,13 @@ def restored_lease_ttls(work_root: Path) -> list[Any]:
             continue
         try:
             payload = json.loads(owner.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             continue
-        if isinstance(payload, dict) and payload.get("lease_ttl_seconds") is not None:
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"invalid restored owner marker: {owner}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"invalid restored owner marker: {owner}")
+        if payload.get("lease_ttl_seconds") is not None:
             ttls.append(payload["lease_ttl_seconds"])
     return ttls
 

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from worker.execution.ownership import write_owner_marker
+from worker.execution.ownership import OWNER_FILENAME, write_owner_marker
 from worker.host.client import Client
 from worker.host.errors import HostResponseError
 from worker.host.transfer_lease import (
@@ -216,3 +216,56 @@ def test_restore_without_ttl_keeps_legacy_mixed_fleet_timeout(tmp_path: Path) ->
 
     assert uploads.timeouts == [120]
     assert client.transfer_lease_ttl is None
+
+
+def test_restore_without_owner_keeps_legacy_timeout(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    execution_dir = work_root / "exec-legacy"
+    execution_dir.mkdir(parents=True)
+    (execution_dir / PENDING_FILENAME).write_text("{}", encoding="utf-8")
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client)
+
+    assert restore_uploads_with_lease_clamp(client, uploads, work_root) == 1
+
+    assert uploads.timeouts == [120]
+    assert client.transfer_lease_ttl is None
+
+
+@pytest.mark.parametrize("contents", ["not json", "[]"])
+def test_restore_invalid_owner_fails_closed_before_uploads_restart(
+    tmp_path: Path, contents: str
+) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-1", 30)
+    (work_root / "exec-1" / OWNER_FILENAME).write_text(contents, encoding="utf-8")
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client)
+
+    with pytest.raises(ValueError, match="invalid restored owner marker"):
+        restore_uploads_with_lease_clamp(client, uploads, work_root)
+
+    assert uploads.timeouts == []
+
+
+def test_restore_owner_read_error_fails_closed_before_uploads_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    work_root = tmp_path / "work"
+    _pending_upload(work_root, "exec-1", 30)
+    owner = work_root / "exec-1" / OWNER_FILENAME
+    real_read_text = Path.read_text
+
+    def failing_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path == owner:
+            raise PermissionError(13, "Permission denied", str(owner))
+        return real_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failing_read_text)
+    client = Client("http://unused", transfer_timeout=120, heartbeat_interval=15)
+    uploads = _RestoreRecorder(client)
+
+    with pytest.raises(ValueError, match="invalid restored owner marker"):
+        restore_uploads_with_lease_clamp(client, uploads, work_root)
+
+    assert uploads.timeouts == []
