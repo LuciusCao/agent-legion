@@ -266,9 +266,86 @@ def test_draft_is_rewritten_sparsely_and_loads() -> None:
     assert "requires_labels" not in nodes["review_b"]
     assert "config_schema" not in nodes["review_b"]
     assert "execution" not in nodes["ghost"]
-    definition = workflow_definition_from_mapping(draft)
+    definition = workflow_definition_from_dict(draft)
     assert definition.nodes["gen"].config_schema == _GEN.config_schema
     assert {b["source"] for b in backups} == {"active_revision", "draft"}
+
+
+def test_historical_draft_backfill_does_not_depend_on_authoring_loader(monkeypatch) -> None:
+    def reject_authoring(_payload):
+        raise AssertionError("v93 must use the explicit stored legacy loader")
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed(conn)
+        monkeypatch.setattr(
+            "server.app.workflows.loader.workflow_definition_from_mapping", reject_authoring
+        )
+        migrate_agent_profile_backfill(conn)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        draft = yaml.safe_load(_draft(conn))
+    assert draft["nodes"]["gen"]["execution"]["runtime"] == "velites"
+
+
+def test_historical_draft_defaults_survive_backfill_as_nodes_only() -> None:
+    original = yaml.safe_dump(
+        {
+            "key": _WS,
+            "label": "V93 stored defaults",
+            "execution": {
+                "runtime": "pi",
+                "provider": "workflow-provider",
+                "model": "workflow-model",
+                "thinking": "workflow-thinking",
+            },
+            "nodes": {
+                "gen": {"type": "agent", "capability": "generate"},
+                "review": {
+                    "type": "agent",
+                    "capability": "review",
+                    "execution": {"provider": "node-provider"},
+                    "after": ["gen"],
+                },
+            },
+        },
+        sort_keys=False,
+    )
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _seed(conn)
+        conn.execute(
+            "update workspace_workflow_drafts set definition_yaml=%s where workspace_id=%s",
+            (original, _WS),
+        )
+        migrate_agent_profile_backfill(conn)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        draft_text = _draft(conn)
+        backups = _backups(conn)
+    draft = yaml.safe_load(draft_text)
+    assert "execution" not in draft
+    assert set(draft["nodes"]) == {"gen", "review"}
+    assert draft["nodes"]["gen"]["execution"] == {
+        "runtime": "velites",
+        "provider": "workflow-provider",
+        "model": "workflow-model",
+        "thinking": "workflow-thinking",
+    }
+    assert draft["nodes"]["gen"]["tools"] == ["read", "write"]
+    assert draft["nodes"]["review"]["execution"] == {
+        "runtime": "pi",
+        "provider": "node-provider",
+        "model": "workflow-model",
+        "thinking": "workflow-thinking",
+    }
+    workflow_definition_from_mapping(draft)
+    backup = next(item for item in backups if item["source"] == "draft")
+    assert backup["original_text"] == original
+    assert backup["original_hash"] is None
+    first = (draft_text, backups)
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        migrate_agent_profile_backfill(conn)
+    with read_connection(TEST_DATABASE_URL) as conn:
+        assert (_draft(conn), _backups(conn)) == first
 
 
 def test_replay_is_a_no_op() -> None:

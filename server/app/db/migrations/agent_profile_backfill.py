@@ -18,10 +18,13 @@ it runs today written onto the node itself (``execution.runtime``,
   definition_hash, restore}}`` records where each profile came from —
   the workflow upgrade diff uses it so old jobs whose node ran exactly that
   definition are not re-run just because the node was inlined.
-- **Drafts** are rewritten only when a node changes (same as v66).
+- **Drafts** are rewritten only when a node changes (same as v66). Historical
+  workflow defaults are then echoed onto the original Agent nodes and the
+  top-level block is removed, without adding the loader's synthetic start.
 - **Unresolved** nodes (no / several published Agents, archived, draft-only,
-  route drift, unportable skill, invalid definition) stay untouched and are
-  reported; the publish gate blocks them until the author inlines a profile.
+  route drift, unportable skill, invalid definition) keep their Agent-derived
+  profile fields unresolved and are reported; the publish gate blocks them
+  until the author inlines a profile.
 - **Validation**: the rewritten payload must still load through the current
   workflow loader; a node whose inlining breaks it is reverted and reported
   (``backfill_invalid``).
@@ -32,10 +35,10 @@ intake-frozen snapshots and are untouched. No down migration (same as v66):
 old binaries read only the execution keys they know and ignore the new
 node fields; Agent definitions are not deleted.
 
-Unlike earlier data migrations this one imports two app models lazily:
-``AgentDefinition`` (the provenance hash must equal the identity dispatch
-records, which only the model defines) and the workflow loader (the
-rewritten payload is validated by the very code that will read it).
+Unlike earlier data migrations this one imports the Agent model and workflow
+loading/serialization helpers lazily: the provenance hash must equal the
+identity dispatch records, and stored payloads must be validated and echoed by
+the same code that reads them.
 """
 
 from __future__ import annotations
@@ -139,18 +142,12 @@ def _load_catalog(conn: Any, workspace_id: str) -> LegacyCatalog:
 
 
 def _loads(kind: str, payload: dict[str, Any]) -> bool:
-    """True when *payload* loads through the current workflow loader."""
-    from server.app.workflows.loader import (
-        workflow_definition_from_dict,
-        workflow_definition_from_mapping,
-    )
+    """True when stored active/draft input loads through legacy materialization."""
+    from server.app.workflows.loader import workflow_definition_from_dict
     from server.app.workflows.schema import WorkflowDefinitionError
 
     try:
-        if kind == "active_revision":
-            workflow_definition_from_dict(copy.deepcopy(payload))
-        else:
-            workflow_definition_from_mapping(copy.deepcopy(payload))
+        workflow_definition_from_dict(copy.deepcopy(payload))
     except (WorkflowDefinitionError, ValueError):
         return False
     return True
@@ -177,7 +174,8 @@ def _backfill_payload(
         node = nodes[node_key]
         if not isinstance(node, dict) or _node_type(node, kind) != "agent":
             continue
-        if effective_runtime(node, payload.get("execution")):
+        top_execution = payload.get("execution") if kind == "active_revision" else None
+        if effective_runtime(node, top_execution):
             continue  # already self-contained (#933)
         entry: dict[str, Any] = {"node_key": node_key, "capability": node.get("capability")}
         resolution: Resolution = resolve(node_key, str(node.get("capability") or ""))
@@ -324,6 +322,25 @@ def _migrate_revisions(conn: Any, catalogs: dict[str, LegacyCatalog]) -> None:
         )
 
 
+def _echo_draft_execution(payload: dict[str, Any]) -> None:
+    """Materialize stored defaults on original Agent nodes, keeping YAML sparse."""
+    from server.app.workflows.loader import workflow_definition_from_dict
+    from server.app.workflows.workflow_node_execution import node_execution_payload
+
+    normalized = workflow_definition_from_dict(copy.deepcopy(payload))
+    for node_key, node in payload["nodes"].items():
+        if not isinstance(node, dict) or _node_type(node, "draft") != "agent":
+            continue
+        execution = {
+            key: value
+            for key, value in node_execution_payload(normalized.nodes[node_key].execution).items()
+            if value
+        }
+        if execution:
+            node["execution"] = execution
+    payload.pop("execution", None)
+
+
 def _migrate_drafts(conn: Any, catalogs: dict[str, LegacyCatalog]) -> None:
     if (
         conn.execute("select to_regclass('workspace_workflow_drafts') as oid").fetchone()["oid"]
@@ -350,6 +367,7 @@ def _migrate_drafts(conn: Any, catalogs: dict[str, LegacyCatalog]) -> None:
         _backup(conn, workspace_id, "draft", workspace_id, original, report)
         if not any(node["status"] == "backfilled" for node in report):
             continue
+        _echo_draft_execution(payload)
         conn.execute(
             "update workspace_workflow_drafts set definition_yaml=%s, updated_at=current_timestamp"
             " where workspace_id=%s",
