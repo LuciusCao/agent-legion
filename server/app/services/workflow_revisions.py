@@ -71,10 +71,10 @@ class WorkflowRevisionService:
         return revision
 
     def ensure_active_revision(self, workspace_id: str, definition: WorkflowDefinition) -> dict:
-        # The demo branch materializes Agents before publishing; validation must
-        # precede that side effect too, not merely the revision write below.
-        require_unreserved_workflow_outputs(definition)
         existing = self.job_db.get_active_workflow_revision(workspace_id, definition.key)
         if existing is not None:
             return existing
+        # Only creation needs publish validation; seed-if-absent must remain a
+        # read-only short circuit for revisions published by older versions.
+        require_unreserved_workflow_outputs(definition)
         return self.publish_workspace_revision(workspace_id, definition)

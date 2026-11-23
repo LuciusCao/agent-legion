@@ -5,6 +5,7 @@ from dataclasses import replace as dc_replace
 
 import pytest
 
+from server.app.db.transaction import write_transaction
 from server.app.jobs.queries import JobQueries
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_draft_publish import (
@@ -144,3 +145,24 @@ def test_demo_seed_reserved_output_has_no_agent_or_revision_side_effects(
             (workspace["id"],),
         ).fetchone()
     assert agents["count"] == 0
+
+
+def test_ensure_active_revision_returns_legacy_reserved_revision_without_publishing(
+    job_db: JobQueries,
+) -> None:
+    workspace = _workspace(job_db)
+    service = WorkflowRevisionService(job_db)
+    original = service.publish_workspace_revision(workspace["id"], _definition("output.json"))
+    legacy = json.loads(original["definition_json"])
+    legacy["nodes"]["do_thing"]["outputs"] = ["result.json"]
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update workflow_revisions set definition_json=%s where id=%s",
+            (json.dumps(legacy), original["id"]),
+        )
+
+    active = service.ensure_active_revision(workspace["id"], _definition("result.json"))
+
+    assert active["id"] == original["id"]
+    assert active["version"] == original["version"]
+    assert json.loads(active["definition_json"])["nodes"]["do_thing"]["outputs"] == ["result.json"]
