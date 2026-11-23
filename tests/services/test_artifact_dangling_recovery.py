@@ -67,14 +67,14 @@ def definition(workspace_id: str = "ws") -> WorkflowDefinition:
         intake=WorkflowIntake(),
         nodes={
             "producer": WorkflowNode(
-                key="producer", label="Producer", capability="produce", outputs=["result.json"]
+                key="producer", label="Producer", capability="produce", outputs=["output.json"]
             ),
             "consumer": WorkflowNode(
                 key="consumer",
                 label="Consumer",
                 capability="consume",
                 after=["producer"],
-                inputs=["result.json"],
+                inputs=["output.json"],
             ),
         },
     )
@@ -122,9 +122,9 @@ def seed_job(
     expected = f"expected:{source_id}".encode()
     suffix = ".gz" if gzip_stored else ""
     key = (
-        f"jobs/ws/{job_id}/result.json{suffix}"
+        f"jobs/ws/{job_id}/output.json{suffix}"
         if legacy_key
-        else f"jobs/ws/{job_id}/.v/attempt/result.json{suffix}"
+        else f"jobs/ws/{job_id}/.v/attempt/output.json{suffix}"
     )
     stored_expected = gzip.compress(expected, mtime=0) if gzip_stored else expected
     if hash_mismatch:
@@ -138,14 +138,14 @@ def seed_job(
             workspace_id="ws",
             job_id=job_id,
             node_key="producer",
-            name="result.json",
+            name="output.json",
             storage_key=key,
             size_bytes=len(stored_expected),
             content_hash=hashlib.sha256(expected).hexdigest(),
         )
     job_dir = resolve_job_dir(job, settings.jobs_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / "result.json").write_bytes(expected)
+    (job_dir / "output.json").write_bytes(expected)
     return job_db.get_job(job_id), key, expected
 
 
@@ -238,7 +238,7 @@ def test_apply_recovers_raw_gzip_legacy_and_versioned_rows(
     assert plan["health"]["passed"] is True
     assert plan["summary"]["actionable_count"] == 1
     prepared = prepare(job_db, storage, plan)
-    notices = (HydrationDeferNotice("result.json", "object_missing", ("producer",), ("consumer",)),)
+    notices = (HydrationDeferNotice("output.json", "object_missing", ("producer",), ("consumer",)),)
     HYDRATION_DEFER_BOARD.publish(job_id, notices)
     wakeups: list[bool] = []
     monkeypatch.setattr(
@@ -262,7 +262,7 @@ def test_apply_recovers_raw_gzip_legacy_and_versioned_rows(
     assert after["rows"] == []
     assert key not in storage.objects
     assert control_key in storage.objects
-    assert not (resolve_job_dir(candidate, settings.jobs_dir) / "result.json").exists()
+    assert not (resolve_job_dir(candidate, settings.jobs_dir) / "output.json").exists()
     assert HYDRATION_DEFER_BOARD.for_job(job_id) == ()
     assert wakeups == [True]
     HYDRATION_DEFER_BOARD.publish(job_id, notices)
