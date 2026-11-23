@@ -132,7 +132,8 @@ The mapping and replacement policy are deliberately explicit:
   `materials` rows. `job_artifacts` is restricted to those sampled jobs. Job,
   workspace, material, and artifact ids and every `storage_key` remain
   unchanged; only the bucket changes. Material `object_etag` is rebound from
-  the destination HEAD after a copy.
+  the destination HEAD after a copy. Object-row CSV rewriting preserves SQL
+  NULL, literal `\N`, and empty text as three distinct values.
 - Existing target Layer 1/2 rows are replaced, not merged. Local job dirs and
   legacy CAS blobs retain their compatibility copy behavior and may be rerun;
   job dirs are only caches and `jobs.sqlite` is excluded. The legacy CAS is not

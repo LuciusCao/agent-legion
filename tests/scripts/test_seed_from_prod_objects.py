@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import csv
+import io
 from pathlib import Path
 
 import pytest
 
+from scripts.seed_from_prod_csv import CSVValue, read_csv_dicts, write_csv_row
 from scripts.seed_from_prod_objects import (
     ObjectHead,
     ObjectSeedError,
@@ -56,27 +57,27 @@ class FakeCrossBucketStorage:
         self.target[key] = (size, f"dev-etag-{len(self.copy_calls)}")
 
 
-def write_csv(path: Path, columns: list[str], rows: list[dict[str, str]]) -> Path:
+def write_csv(path: Path, columns: list[str], rows: list[dict[str, CSVValue]]) -> Path:
     with path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=columns, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(rows)
+        write_csv_row(fh, columns)
+        for row in rows:
+            write_csv_row(fh, (row.get(column, "") for column in columns))
     return path
 
 
-def read_csv(path: Path) -> list[dict[str, str]]:
+def read_csv(path: Path) -> list[dict[str, CSVValue]]:
     with path.open(newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+        return list(read_csv_dicts(fh))
 
 
-def material(mid: str, key: str, size: int = 3, workspace: str = "ws") -> dict[str, str]:
+def material(mid: str, key: str, size: int = 3, workspace: str = "ws") -> dict[str, CSVValue]:
     return {
         "id": mid,
         "workspace_id": workspace,
         "size_bytes": str(size),
         "storage_key": key,
         "object_etag": "prod-etag",
-        "expires_at": "\\N",
+        "expires_at": None,
     }
 
 
@@ -92,7 +93,7 @@ def artifact(job: str, key: str, size: int = 3) -> dict[str, str]:
 
 def copy_materials(
     tmp_path: Path,
-    rows: list[dict[str, str]],
+    rows: list[dict[str, CSVValue]],
     storage: FakeCrossBucketStorage,
     **kwargs: object,
 ):
@@ -130,7 +131,7 @@ def test_mixed_material_and_artifact_keep_ids_keys_and_rebind_etag(tmp_path: Pat
     copied_artifact = read_csv(tmp_path / "artifacts.ready.csv")
     assert copied_material == [{**material("m1", material_key), "object_etag": "dev-etag-1"}]
     assert copied_artifact == [artifact("job-1", artifact_key)]
-    assert copied_material[0]["expires_at"] == "\\N"
+    assert copied_material[0]["expires_at"] is None
     assert storage.copy_calls == [material_key, artifact_key]
     assert material_report.rows_ready == artifact_report.rows_ready == 1
     assert material_report.ok and artifact_report.ok
@@ -153,6 +154,61 @@ def test_object_csv_accepts_large_database_text(tmp_path: Path):
     )
     assert report.rows_ready == 1
     assert read_csv(tmp_path / "large.ready.csv")[0]["extracted_text"] == large_text
+
+
+def test_object_csv_preserves_literal_backslash_n_and_sql_null(tmp_path: Path):
+    columns = [*MATERIAL_COLUMNS, "filename", "nullable_text"]
+    rows = [
+        {
+            **material("literal", "ws/literal"),
+            "filename": "\\N",
+            "nullable_text": None,
+        },
+        {
+            **material("null", "ws/null"),
+            "filename": None,
+            "nullable_text": "\\N",
+        },
+    ]
+    report = copy_rows_with_objects(
+        "materials",
+        write_csv(tmp_path / "nulls.csv", columns, rows),
+        tmp_path / "nulls.ready.csv",
+        columns,
+        FakeCrossBucketStorage({"ws/literal": (3, "p"), "ws/null": (3, "p")}),
+        job_workspaces={},
+        dry_run=False,
+        overwrite=False,
+    )
+
+    assert report.rows_ready == 2
+    copied = read_csv(tmp_path / "nulls.ready.csv")
+    assert [(row["filename"], row["nullable_text"]) for row in copied] == [
+        ("\\N", None),
+        (None, "\\N"),
+    ]
+    raw = (tmp_path / "nulls.ready.csv").read_text(encoding="utf-8")
+    assert raw.count('"\\N"') == 2
+    assert ",\\N," in raw
+    assert ",\\N\n" in raw
+
+
+def test_postgres_csv_handles_multiline_quotes_and_empty_text():
+    raw = 'id,payload,null_value,empty_text\n1,"line 1,\n""quoted"" and \\N",\\N,\n'
+    rows = list(read_csv_dicts(io.StringIO(raw)))
+    assert rows == [
+        {
+            "id": "1",
+            "payload": 'line 1,\n"quoted" and \\N',
+            "null_value": None,
+            "empty_text": "",
+        }
+    ]
+    output = io.StringIO()
+    write_csv_row(output, ["id", "payload", "null_value", "empty_text"])
+    for row in rows:
+        write_csv_row(output, row.values())
+    assert list(read_csv_dicts(io.StringIO(output.getvalue()))) == rows
 
 
 def test_batches_are_bounded_and_cover_tail(tmp_path: Path):

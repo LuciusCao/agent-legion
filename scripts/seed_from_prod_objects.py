@@ -8,18 +8,16 @@ retryable; dry-run performs HEAD reads only.
 
 from __future__ import annotations
 
-import csv
 import re
-import sys
 import urllib.parse
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from scripts.seed_from_prod_csv import CSVDictReader, CSVValue, write_csv_row
 from server.app.storage import ObjectHead, S3Settings
 
-csv.field_size_limit(sys.maxsize)
 PROD_BUCKET = "agent-legion"
 DERIVED_BUCKET_PREFIX = "agent-legion-"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -261,10 +259,10 @@ class S3CrossBucketStorage:
         )
 
 
-def _batches(rows: Iterator[dict[str, str]], size: int) -> Iterator[list[dict[str, str]]]:
+def _batches(rows: Iterator[dict[str, CSVValue]], size: int) -> Iterator[list[dict[str, CSVValue]]]:
     if size < 1:
         raise ObjectSeedError("object batch size 必须 >= 1")
-    batch: list[dict[str, str]] = []
+    batch: list[dict[str, CSVValue]] = []
     for row in rows:
         batch.append(row)
         if len(batch) == size:
@@ -274,10 +272,10 @@ def _batches(rows: Iterator[dict[str, str]], size: int) -> Iterator[list[dict[st
         yield batch
 
 
-def _row_id(table: str, row: Mapping[str, str]) -> str:
+def _row_id(table: str, row: Mapping[str, CSVValue]) -> str:
     if table == "materials":
-        return row.get("id", "")
-    return "/".join((row.get("job_id", ""), row.get("node_key", ""), row.get("name", "")))
+        return row.get("id") or ""
+    return "/".join((row.get("job_id") or "", row.get("node_key") or "", row.get("name") or ""))
 
 
 def copy_rows_with_objects(
@@ -299,28 +297,28 @@ def copy_rows_with_objects(
         source_csv.open(newline="", encoding="utf-8") as src,
         destination_csv.open("w", newline="", encoding="utf-8") as dst,
     ):
-        reader = csv.DictReader(src)
-        missing_columns = {"storage_key", "size_bytes"} - set(reader.fieldnames or [])
+        reader = CSVDictReader(src)
+        missing_columns = {"storage_key", "size_bytes"} - set(reader.fieldnames)
         if missing_columns:
             raise ObjectSeedError(f"{table} 导出缺少列: {sorted(missing_columns)}")
-        writer = csv.DictWriter(dst, fieldnames=list(columns), lineterminator="\n")
-        writer.writeheader()
-        for batch in _batches((dict(row) for row in reader), batch_size):
+        write_csv_row(dst, columns)
+        for batch in _batches(iter(reader), batch_size):
             outcomes: dict[tuple[str, int], tuple[ObjectHead | None, ObjectFailure | None]] = {}
             for row in batch:
                 report.selected += 1
                 key = row.get("storage_key", "")
                 row_id = _row_id(table, row)
                 try:
-                    size = int(row.get("size_bytes", ""))
+                    size = int(row.get("size_bytes") or "")
                 except ValueError:
                     size = -1
                 failure: ObjectFailure | None = None
                 if not key or size < 0:
                     failure = ObjectFailure(table, row_id, key, "validate", "invalid_row")
                 elif table == "job_artifacts":
-                    workspace_id = job_workspaces.get(row.get("job_id", ""), "")
-                    expected = f"jobs/{workspace_id}/{row.get('job_id', '')}/"
+                    job_id = row.get("job_id") or ""
+                    workspace_id = job_workspaces.get(job_id, "")
+                    expected = f"jobs/{workspace_id}/{job_id}/"
                     if not workspace_id or not key.startswith(expected):
                         failure = ObjectFailure(table, row_id, key, "validate", "job_key_mismatch")
                 if failure is not None:
@@ -347,7 +345,7 @@ def copy_rows_with_objects(
                 assert head is not None
                 if not dry_run and table == "materials" and "object_etag" in columns:
                     row["object_etag"] = head.etag
-                writer.writerow({column: row.get(column, "") for column in columns})
+                write_csv_row(dst, (row.get(column, "") for column in columns))
                 report.rows_ready += 1
     return report
 
