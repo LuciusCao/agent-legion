@@ -13,13 +13,20 @@ from server.app.services.workflow_draft_publish_gates import validate_workflow_f
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowDefinitionError,
+    workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
-from server.app.workflows.revision_format import definition_hash, serialize_definition
+from server.app.workflows.revision_format import (
+    definition_hash,
+    definition_to_yaml,
+    serialize_definition,
+)
 
 __all__ = [
+    "migrate_stored_draft_yaml",
     "validate_workflow_definition",
     "validate_workflow_for_publish",
+    "workflow_definition_from_stored_yaml_string",
     "workflow_definition_from_yaml_string",
     "workflow_draft_identity_hash",
 ]
@@ -33,6 +40,22 @@ def workflow_definition_from_yaml_string(raw_yaml: str) -> WorkflowDefinition:
     if not isinstance(raw, dict):
         raise WorkflowDefinitionError("Workflow definition must be a mapping")
     return workflow_definition_from_mapping(raw)
+
+
+def migrate_stored_draft_yaml(raw_yaml: str) -> str:
+    """Materialize a valid legacy DB draft without changing its stored row."""
+    try:
+        raw = yaml.safe_load(raw_yaml)
+        if not isinstance(raw, dict) or "execution" not in raw:
+            return raw_yaml
+        return definition_to_yaml(workflow_definition_from_dict(raw))
+    except (yaml.YAMLError, TypeError, ValueError, RecursionError):
+        return raw_yaml
+
+
+def workflow_definition_from_stored_yaml_string(raw_yaml: str) -> WorkflowDefinition:
+    """Parse a DB draft after read-time legacy materialization."""
+    return workflow_definition_from_yaml_string(migrate_stored_draft_yaml(raw_yaml))
 
 
 def workflow_draft_identity_hash(raw_yaml: str) -> str | None:

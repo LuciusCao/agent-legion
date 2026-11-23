@@ -36,6 +36,47 @@ def test_put_then_get_roundtrip(client, job_db) -> None:
     assert got.json()["updated_at"] == put.json()["updated_at"]
 
 
+def test_get_migrates_legacy_draft_without_rewriting_raw_or_generation(client, job_db) -> None:
+    import yaml
+
+    workspace = job_db.create_workspace("ws-store-legacy")
+    legacy_yaml = (
+        "key: wf\nlabel: Draft\n"
+        "execution: {runtime: velites, provider: legacy-provider}\n"
+        "nodes:\n"
+        "  review:\n"
+        "    type: agent\n"
+        "    capability: review\n"
+        "    execution: {runtime: pi}\n"
+        "  generate:\n"
+        "    type: agent\n"
+        "    capability: generate\n"
+    )
+    job_db.upsert_workspace_workflow_draft(workspace["id"], legacy_yaml)
+
+    response = client.get(_url(workspace["id"]))
+
+    assert response.status_code == 200
+    migrated = yaml.safe_load(response.json()["definition_yaml"])
+    assert "execution" not in migrated
+    assert migrated["nodes"]["review"]["execution"]["runtime"] == "pi"
+    assert migrated["nodes"]["generate"]["execution"] == {
+        "provider": "legacy-provider",
+        "runtime": "velites",
+    }
+    assert response.json()["generation"] == 1
+    stored = job_db.get_workspace_workflow_draft(workspace["id"])
+    assert stored["definition_yaml"] == legacy_yaml
+    assert int(stored["generation"]) == 1
+
+    saved = client.put(
+        _url(workspace["id"]),
+        json={"definition_yaml": _DRAFT_YAML, "base_generation": response.json()["generation"]},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["generation"] == 2
+
+
 def test_put_then_get_echo_the_semantic_identity_hash(client, job_db) -> None:
     """#1143：draft 存取响应携带语义身份 hash——同一身份在 PUT/GET 间一致，
     语义等价（仅序列化风格不同）的 YAML 产生相同 hash，语义变化产生新

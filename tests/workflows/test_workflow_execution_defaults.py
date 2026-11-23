@@ -93,6 +93,30 @@ def test_stored_null_execution_remains_readable() -> None:
     assert definition.nodes["empty_agent"].execution == WorkflowNodeExecution()
 
 
+def test_stored_draft_migration_preserves_mixed_profiles_for_strict_reloading() -> None:
+    from server.app.services.workflow_drafts import migrate_stored_draft_yaml
+
+    raw_yaml = yaml.safe_dump(_authoring())
+    migrated = migrate_stored_draft_yaml(raw_yaml)
+
+    assert "execution" not in yaml.safe_load(migrated)
+    assert _mapping(yaml.safe_load(migrated)).nodes == _stored().nodes
+    assert yaml.safe_load(raw_yaml)["execution"]["provider"] == "top-provider"
+
+
+def test_stored_draft_migration_accepts_null_for_strict_reloading() -> None:
+    from server.app.services.workflow_drafts import migrate_stored_draft_yaml
+
+    raw = _authoring()
+    raw["execution"] = None
+    migrated = migrate_stored_draft_yaml(yaml.safe_dump(raw))
+
+    assert "execution" not in yaml.safe_load(migrated)
+    assert _mapping(yaml.safe_load(migrated)).nodes["empty_agent"].execution == (
+        WorkflowNodeExecution()
+    )
+
+
 def test_stored_legacy_materializes_agent_nodes_and_preserves_mixed_overrides() -> None:
     definition = _stored()
 

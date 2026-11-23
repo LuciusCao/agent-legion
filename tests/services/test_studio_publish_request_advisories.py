@@ -41,6 +41,23 @@ def test_draft_warnings_pass_through_advisory_text_unchanged(monkeypatch) -> Non
     assert result == expected
 
 
+def test_legacy_draft_advisories_use_materialized_node_profiles(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.app.services.studio_publish_request_advisories.skill_repo_publish_warnings",
+        lambda definition, workspace_id, job_db: [definition.nodes["review"].execution.runtime],
+    )
+    legacy_yaml = (
+        "key: ws-1\nlabel: Publish Flow\n"
+        "execution: {runtime: velites}\n"
+        "nodes:\n"
+        "  review:\n"
+        "    type: agent\n"
+        "    capability: review\n"
+    )
+
+    assert draft_warnings(_JobDB(None), "ws-1", legacy_yaml) == ["velites"]
+
+
 def test_current_draft_advisories_preserve_payload_and_missing_draft_shape() -> None:
     payload = {"id": "request-1", "status": "pending"}
     result = with_current_draft_warnings(_JobDB(None), "ws-1", payload)

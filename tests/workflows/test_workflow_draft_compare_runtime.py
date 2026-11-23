@@ -152,6 +152,32 @@ def test_compare_creates_revision_matches_publish_path(
     assert (int(after["version"]) != int(before["version"])) is creates_revision
 
 
+def test_stored_legacy_draft_is_migrated_for_compare_and_publish(baseline) -> None:
+    app, workspace_id, definition = baseline
+    raw = yaml.safe_load(definition_to_yaml(definition))
+    _top_level_execution(model="gpt-x")(raw)
+    app.state.job_db.upsert_workspace_workflow_draft(workspace_id, yaml.safe_dump(raw))
+
+    with authenticate_client(TestClient(app)) as client:
+        stored = client.get(f"/api/workspaces/{workspace_id}/workflow-draft")
+        migrated_yaml = stored.json()["definition_yaml"]
+        response = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": migrated_yaml},
+        )
+
+    assert stored.status_code == 200
+    assert "execution" not in yaml.safe_load(migrated_yaml)
+    assert response.status_code == 200
+    assert response.json()["valid"] is True
+    service = WorkflowRevisionService(app.state.job_db)
+    before = service.get_active(workspace_id, definition.key)
+    after = service.save_workspace_revision(
+        workspace_id, workflow_definition_from_yaml_string(migrated_yaml)
+    )
+    assert int(after["version"]) == int(before["version"])
+
+
 def test_compare_and_publish_reject_top_level_execution(baseline) -> None:
     app, workspace_id, definition = baseline
     raw = yaml.safe_load(definition_to_yaml(definition))

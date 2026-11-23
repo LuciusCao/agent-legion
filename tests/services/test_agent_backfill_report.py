@@ -301,6 +301,20 @@ def test_workspace_filter_narrows_the_walk(fixture_db: JobQueries) -> None:
     assert [w["workspace_id"] for w in report["workspaces"]] == ["ws_empty"]
 
 
+def test_report_reads_stored_legacy_draft_execution(fixture_db: JobQueries) -> None:
+    fixture_db.upsert_workspace_workflow_draft(
+        "ws_bf", _DRAFT_YAML + "execution:\n  provider: legacy-provider\n"
+    )
+
+    report = _report()
+
+    assert report["summary"]["source_errors"] == 1
+    ws_bf = next(item for item in report["workspaces"] if item["workspace_id"] == "ws_bf")
+    _active, draft = ws_bf["sources"]
+    assert draft["error"] is None
+    assert draft["nodes"]
+
+
 def test_dry_run_writes_nothing_to_db_or_object_storage(
     fixture_db: JobQueries, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

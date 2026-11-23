@@ -66,11 +66,15 @@ def _definition(runtime: str = "velites"):
         {
             "key": _WS,
             "label": "Self-contained",
-            "execution": {"runtime": runtime, "provider": "gateway", "model": "test-model"},
             "nodes": {
                 "draft": {
                     "type": "agent",
                     "capability": "draft",
+                    "execution": {
+                        "runtime": runtime,
+                        "provider": "gateway",
+                        "model": "test-model",
+                    },
                     "outputs": ["draft.json"],
                     "skill": {"key": _SKILL},
                     **labels,

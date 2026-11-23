@@ -16,7 +16,10 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
-from server.app.services.workflow_drafts import workflow_draft_identity_hash
+from server.app.services.workflow_drafts import (
+    migrate_stored_draft_yaml,
+    workflow_draft_identity_hash,
+)
 
 __all__ = [
     "attach_draft_identity_hash",
@@ -42,9 +45,12 @@ def get_workflow_draft_state(job_db: JobQueries, workspace_id: str) -> dict[str,
     错配。"""
     if job_db.get_workspace(workspace_id) is None:
         raise NotFoundError("Workspace not found")
-    state = attach_draft_identity_hash(job_db.get_workspace_workflow_draft_state(workspace_id))
-    assert state is not None  # the state read always returns one row
-    return state
+    state = job_db.get_workspace_workflow_draft_state(workspace_id)
+    if state["definition_yaml"] is not None:
+        state["definition_yaml"] = migrate_stored_draft_yaml(str(state["definition_yaml"]))
+    attached = attach_draft_identity_hash(state)
+    assert attached is not None  # the state read always returns one row
+    return attached
 
 
 def save_workflow_draft(

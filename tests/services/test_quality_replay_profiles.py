@@ -283,6 +283,35 @@ def test_draft_choice_freezes_the_draft_profile(job_db) -> None:
     assert replay["revision_id"] is None
 
 
+def test_draft_choice_materializes_stored_legacy_profile(job_db) -> None:
+    env = _Env(job_db, _definition(_ORIGINAL))
+    draft = {
+        "key": "test",
+        "label": "Test",
+        "execution": {"runtime": "velites", "provider": "top-provider", "model": "m3"},
+        "nodes": {
+            "intake": {"capability": "intake_items", "outputs": ["question.json"]},
+            "generate": {
+                "type": "agent",
+                "capability": "write_script",
+                "after": ["intake"],
+                "inputs": ["question.json"],
+                "outputs": ["key_info.json"],
+                "execution": {"provider": "node-provider"},
+            },
+        },
+    }
+    job_db.upsert_workspace_workflow_draft(env.workspace_id, yaml.safe_dump(draft))
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", use_draft=True)
+
+    copy_job, _pins = env.copy(replay)
+    execution = _copy_node(copy_job).execution
+    assert execution.runtime == "velites"
+    assert execution.provider == "node-provider"
+    assert execution.model == "m3"
+
+
 def test_replay_profile_choice_errors(job_db, tmp_path: Path) -> None:
     env = _Env(job_db, _definition(_ORIGINAL))
     legacy_rev = env.add_revision(2, _definition(None), "archived")
