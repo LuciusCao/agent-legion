@@ -180,8 +180,7 @@ describe('buildDagNodes', () => {
   })
 
   it('injects execution warnings only for agent nodes missing provider/model (#333)', () => {
-    // 记录侧节点 execution 是有效值（草稿已经 workflowYamlToDefinitionRecord
-    // 合并顶层默认，published 快照经后端 loader 合并）；这里只读节点值。
+    // 草稿记录与 published 快照均只读节点自身 execution。
     const nodes = buildDagNodes(workflow)
 
     // branch 是 agent 节点且未配置 execution → 警告；start/code 节点不警告。
@@ -231,10 +230,8 @@ describe('buildDagNodes', () => {
   })
 
   it('reaches the agent·runtime badge from draft YAML through the draft record (#1180)', () => {
-    // r3 评审回归：草稿画布（主编辑视图）走 workflowYamlToDefinitionRecord
-    // → buildDagNodes 链——mergeNodeExecution 漏丢 runtime 时草稿画布
-    // agent 节点恒只显示「agent」，与只读 revision 视图的「agent·velites」
-    // 口径不一致。这里钉住全链路数据到达。
+    // 草稿画布走 workflowYamlToDefinitionRecord → buildDagNodes 链，
+    // 节点自身 runtime 必须完整到达类型徽标。
     const draftRecord = workflowYamlToDefinitionRecord(`key: demo
 nodes:
   _start:

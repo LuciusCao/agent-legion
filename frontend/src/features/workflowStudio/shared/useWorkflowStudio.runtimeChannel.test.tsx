@@ -219,4 +219,34 @@ describe('useWorkflowStudio 运行通道基线推进（M48 r1 P2-4）', () => {
     expect(result.current.hasPreservedDraft).toBe(false)
     expect(result.current.dirty).toBe(true)
   })
+
+  it('人工保存与回滚都在请求前保护含顶层 execution 的真实草稿状态', async () => {
+    const { result } = await renderStudio()
+    const retiredDraft = `execution:\n  provider: retired-new-provider\n${BASELINE_YAML.replace('model: gpt-5.1', 'model: gpt-5.2')}`
+    act(() => result.current.setDefinitionYaml(retiredDraft))
+    mocks.saveWorkflowRuntimeConfig.mockClear()
+    mocks.rollbackWorkflowRuntimeConfig.mockClear()
+    mocks.fetchActiveWorkflowRevision.mockClear()
+
+    let saveOk = true
+    await act(async () => {
+      saveOk = await result.current.saveRuntimeConfig()
+    })
+    expect(saveOk).toBe(false)
+    expect(result.current.draftYaml).toBe(retiredDraft)
+    expect(result.current.definitionYaml).toBe(retiredDraft)
+    expect(result.current.runtimeError).toContain('运行配置保存已取消')
+
+    let rollbackOk = true
+    await act(async () => {
+      rollbackOk = await result.current.rollbackRuntimeConfig(1)
+    })
+    expect(rollbackOk).toBe(false)
+    expect(result.current.draftYaml).toBe(retiredDraft)
+    expect(result.current.definitionYaml).toBe(retiredDraft)
+    expect(result.current.runtimeError).toContain('运行配置回滚已取消')
+    expect(mocks.saveWorkflowRuntimeConfig).not.toHaveBeenCalled()
+    expect(mocks.rollbackWorkflowRuntimeConfig).not.toHaveBeenCalled()
+    expect(mocks.fetchActiveWorkflowRevision).not.toHaveBeenCalled()
+  })
 })

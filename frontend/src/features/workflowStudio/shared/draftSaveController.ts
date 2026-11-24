@@ -63,16 +63,27 @@ export class DraftSaveController extends DraftSaveLifecycle {
         // 身份；pending 期间没有消费方按 settled 读它，而画布 revert 到
         // 该内容后它恰好正确（否则一张记录旧 hash 的卡可短路隐藏提示）。
         if (current)
-          this.setState({ status: 'saved', savedAt: at, savedHash: hash })
+          this.setState({
+            status: 'saved',
+            savedAt: at,
+            savedHash: hash,
+            saveErrorMessage: null,
+          })
         else this.setState({ ...this.state, savedHash: hash })
       },
-      onSaving: () => this.setState({ ...this.state, status: 'saving' }),
+      onSaving: () =>
+        this.setState({
+          ...this.state,
+          status: 'saving',
+          saveErrorMessage: null,
+        }),
       onConflict: this.enterConflict.bind(this),
-      onTransientError: (terminal) =>
+      onTransientError: (terminal, message) =>
         this.setState({
           ...this.state,
           status: 'error',
           saveError: terminal ? 'terminal' : 'retrying',
+          saveErrorMessage: message,
         }),
       armRetry: (timer) => {
         this.retryTimer = timer

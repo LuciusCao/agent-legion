@@ -9,7 +9,7 @@ import { WorkflowNodeRuntimeSelect } from './WorkflowNodeRuntimeSelect'
 import { WorkflowNodeSkillEditor } from './WorkflowNodeSkillEditor'
 
 export type NodeRuntimeView = NodeRuntimeInfo & {
-  /** 节点级优先、其次 workflow 顶层默认；'' = legacy（未自含）。 */
+  /** 节点自身 runtime；'' = legacy（未自含，进入补档界面）。 */
   effectiveRuntime: string
 }
 
@@ -22,18 +22,14 @@ export function useNodeRuntimeInfo(
   return useMemo(() => {
     const info = readNodeRuntimeInfo(definitionYaml, node.key, {
       nodeRuntime: fallbackRuntime,
-      defaultRuntime: '',
     })
-    return {
-      ...info,
-      effectiveRuntime: info.nodeRuntime || info.defaultRuntime,
-    }
+    return { ...info, effectiveRuntime: info.nodeRuntime }
   }, [definitionYaml, node.key, fallbackRuntime])
 }
 
 /**
- * #935（#440 P3）：自含 agent 节点（节点或 workflow 顶层声明了
- * `execution.runtime`）的执行档案编辑区。执行档案随 workflow revision
+ * 自含 agent 节点（节点自身声明 `execution.runtime`）的执行档案编辑区。
+ * 执行档案随 workflow revision
  * 发布、随 job 快照冻结——这里的全部编辑都写进节点草稿 YAML；Agent 定义
  * 不再参与（#1079 起 Studio 已无 Agent 定义编辑入口）。
  */
@@ -49,7 +45,6 @@ export function WorkflowNodeProfileBody(props: {
       <WorkflowNodeRuntimeSelect
         node={props.node}
         nodeRuntime={props.runtimeInfo.nodeRuntime}
-        defaultRuntime={props.runtimeInfo.defaultRuntime}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

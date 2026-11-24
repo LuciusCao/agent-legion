@@ -48,6 +48,7 @@ function makeStudio(overrides: Record<string, unknown> = {}) {
     runtimeChangedKeys: [],
     runtimeSaveUnavailable: false,
     runtimeSaving: false,
+    runtimeError: null,
     lastRuntimeSavedKeys: [],
     saveRuntimeConfig: vi.fn(() => Promise.resolve(true)),
     rollbackRuntimeConfig: vi.fn(() => Promise.resolve(true)),
@@ -109,13 +110,20 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     expect(screen.getByRole('button', { name: '版本历史' })).toBeInTheDocument()
   })
 
-  it('keeps the save button disabled without runtime changes and enables it with changes', () => {
+  it('uses the same compact outlined save action as the other inspector save controls', () => {
     const studio = makeStudio({
       runtimeChangedKeys: ['nodes.generate_key_info.model'],
     })
     renderSection({}, studio)
 
-    expect(screen.getByRole('button', { name: /保存运行配置/ })).toBeEnabled()
+    const saveButton = screen.getByRole('button', { name: '保存运行配置' })
+    expect(saveButton).toBeEnabled()
+    expect(saveButton).toHaveClass('MuiButton-outlined', 'MuiButton-sizeSmall')
+    expect(saveButton.className).toContain('saveButton')
+    expect(saveButton).not.toHaveClass(
+      'MuiButton-contained',
+      'MuiButton-fullWidth'
+    )
   })
 
   it('disables the save button when nothing changed', () => {
@@ -241,7 +249,7 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
       target: { value: '' },
     })
 
-    // 顶层 execution 默认保留在 YAML，节点级 provider（6 空格缩进）必须被移除。
+    // 顶层 execution 原样保留，节点级 provider（6 空格缩进）必须被移除。
     expect(nextYaml).not.toContain('      provider:')
   })
 
@@ -265,14 +273,28 @@ describe('WorkflowNodeRuntimeChannelSection（M48 运行通道专区）', () => 
     )
   })
 
-  it('shows the workflow thinking default on the empty option', () => {
+  it('does not present inherited defaults even when legacy top-level values exist', () => {
     renderSection()
 
+    expect((screen.getByLabelText('Provider') as HTMLInputElement).value).toBe(
+      ''
+    )
+    expect((screen.getByLabelText('Model') as HTMLInputElement).value).toBe('')
     const thinkingSelect = screen.getByLabelText(
       'Thinking'
     ) as HTMLSelectElement
-    expect(thinkingSelect.options[0].textContent).toBe(
-      '继承 workflow 默认（low）'
+    expect(thinkingSelect.options[0].textContent).toBe('runtime 决定')
+    expect(screen.queryByText(/继承 workflow/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the full save or migration error visible next to the save action', () => {
+    renderSection(
+      {},
+      makeStudio({ runtimeError: '请将 provider/model 移到每个 agent 节点' })
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '请将 provider/model 移到每个 agent 节点'
     )
   })
 

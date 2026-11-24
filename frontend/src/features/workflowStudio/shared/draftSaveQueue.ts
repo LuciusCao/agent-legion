@@ -109,7 +109,7 @@ export function runTrackedSave(context: {
     serverHash: string | null,
     serverGeneration: number | null
   ) => void
-  onTransientError: (terminal: boolean) => void
+  onTransientError: (terminal: boolean, message: string) => void
   armRetry: (timer: ReturnType<typeof setTimeout>) => void
   save: (
     yaml: string,
@@ -154,7 +154,10 @@ export function runTrackedSave(context: {
         const terminal =
           (typeof status === 'number' && status >= 400 && status < 500) ||
           retriesLeft === 0
-        context.onTransientError(terminal)
+        context.onTransientError(
+          terminal,
+          (error instanceof Error && error.message) || '网络错误'
+        )
         if (terminal) return resolveRetry(false)
         const attempt = MAX_PUT_RETRIES - retriesLeft + 1
         context.armRetry(

@@ -80,25 +80,28 @@ const agentCatalog: AgentDefinition[] = [
   },
 ]
 
-// #1079（#440 P3b）：workflow 顶层 execution.runtime 让三个 agent 节点都
-// 自含（执行档案编辑区含「查看 Prompt / 浏览技能文件」）；legacy 用例另配。
+// 三个 agent 节点各自声明 runtime；legacy 补档用例另配。
 const definitionYaml = [
   'key: demo_workflow',
-  'execution:',
-  '  runtime: pi',
   'nodes:',
   '  generate_key_info:',
   '    type: agent',
   '    capability: generate_key_info',
   '    label: 生成关键信息',
+  '    execution:',
+  '      runtime: pi',
   '  review:',
   '    type: agent',
   '    capability: review',
   '    label: 评审',
+  '    execution:',
+  '      runtime: pi',
   '  generate_key_info_v2:',
   '    type: agent',
   '    capability: generate_key_info',
   '    label: 生成关键信息（复算）',
+  '    execution:',
+  '      runtime: pi',
   '',
 ].join('\n')
 
@@ -207,6 +210,19 @@ describe('WorkflowNodeDetailDrawer（#804 抽屉化）', () => {
     // 冲突操作出口在抽屉里同样可用。
     expect(
       within(alert).getByRole('button', { name: '保留本页编辑' })
+    ).toBeInTheDocument()
+  })
+
+  it('持续展示 autosave 的服务端迁移详情', () => {
+    renderDrawer('generate_key_info', {
+      status: 'error',
+      savedAt: null,
+      saveError: 'terminal',
+      saveErrorMessage: '顶层 execution 已退役；请移到每个 agent 节点',
+    })
+
+    expect(
+      screen.getByText(/顶层 execution 已退役；请移到每个 agent 节点/)
     ).toBeInTheDocument()
   })
 
@@ -423,7 +439,10 @@ describe('WorkflowNodeDetailBody（inspector 级，抽屉壳不介入）', () =>
   })
 
   it('asks a legacy node only for a runtime (no Agent editor fallback)', () => {
-    const legacyYaml = definitionYaml.replace('execution:\n  runtime: pi\n', '')
+    const legacyYaml = definitionYaml.replace(
+      '  review:\n    type: agent\n    capability: review\n    label: 评审\n    execution:\n      runtime: pi',
+      '  review:\n    type: agent\n    capability: review\n    label: 评审'
+    )
     render(bodyFor('review', legacyYaml))
 
     expect(screen.getByText(/尚未内联执行档案/)).toBeInTheDocument()

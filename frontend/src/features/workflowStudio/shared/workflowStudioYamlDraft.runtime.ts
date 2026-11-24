@@ -1,51 +1,59 @@
+import { hasTopLevelExecution } from './workflowRuntimeSlice'
 import {
   parseWorkflowYaml,
   type WorkflowYamlNode,
   type WorkflowYamlObject,
 } from './workflowStudioYamlDraft.parse'
 
+const MIGRATE_TOP_LEVEL_EXECUTION =
+  '请把 runtime/provider/model/thinking 分别移到每个 agent 节点的 execution'
+
+export function retiredMessage(
+  sourceYaml: string,
+  action: '保存' | '回滚',
+  agentProposal: boolean
+): string | null {
+  if (!hasTopLevelExecution(sourceYaml)) return null
+  if (agentProposal) {
+    return `未应用 agent 建议：其中包含已退役的顶层 execution。${MIGRATE_TOP_LEVEL_EXECUTION}，再重新生成建议；本次未保存任何修改。`
+  }
+  return `运行配置${action}已取消：当前草稿包含已退役的顶层 execution。${MIGRATE_TOP_LEVEL_EXECUTION}，再${action}；本次未${action === '保存' ? '保存任何修改' : '回滚'}，草稿已保留。`
+}
+
 /**
- * #935（#440 P3）：agent 节点必须自含执行档案——`execution.runtime`（节点
- * 级，或 workflow 顶层 `execution.runtime` 默认）缺失即发布门禁报错。
- *
- * 新建 / 切换成 agent 的节点没有顶层默认可继承时，写入的默认 runtime 取
- * velites：它是平台默认 runtime（#408，`AgentDefinition` 的默认 tools 也
- * 按 velites 目录给出），不依赖异步加载的 runtime 目录，写路径保持同步、
- * 确定。作者随后可在检查器的 runtime 下拉里改成 pi。
+ * agent 节点必须自含执行档案：节点 `execution.runtime` 缺失即由 legacy
+ * 补档界面承接，不从 workflow 顶层补值。无遗留块的新建 / 转型节点仍写入
+ * 平台默认 velites；有遗留 runtime 时不另造 velites，保留 legacy 补档。
  */
 export const DEFAULT_AGENT_RUNTIME = 'velites'
-
-function topLevelRuntime(draft: WorkflowYamlObject): string {
-  const execution = (draft as { execution?: unknown }).execution
-  if (!execution || typeof execution !== 'object') return ''
-  const runtime = (execution as { runtime?: unknown }).runtime
-  return typeof runtime === 'string' ? runtime : ''
-}
 
 function nodeRuntime(node: WorkflowYamlNode): string {
   const runtime = node.execution?.runtime
   return typeof runtime === 'string' ? runtime : ''
 }
 
-/** 节点的生效 runtime：节点级优先，其次 workflow 顶层默认；皆空 = ''。 */
+/** 节点的生效 runtime 只来自节点自身；缺失 = ''（legacy 补档）。 */
 export function effectiveNodeRuntime(
-  draft: WorkflowYamlObject,
+  _draft: WorkflowYamlObject,
   node: WorkflowYamlNode
 ): string {
-  return nodeRuntime(node) || topLevelRuntime(draft)
+  return nodeRuntime(node)
 }
 
-/** workflow 顶层 `execution.runtime` 默认（未声明 = ''）。 */
-export function workflowDefaultRuntime(draft: WorkflowYamlObject): string {
-  return topLevelRuntime(draft)
+function hasLegacyTopLevelRuntime(draft: WorkflowYamlObject): boolean {
+  const execution = (draft as { execution?: unknown }).execution
+  if (!execution || typeof execution !== 'object') return false
+  const runtime = (execution as { runtime?: unknown }).runtime
+  return typeof runtime === 'string' && runtime !== ''
 }
 
-/** agent 节点无生效 runtime 时写入默认 runtime（就地修改）。 */
+/** 无遗留 runtime 的新 agent 写默认值；legacy 缺档不另造 velites。 */
 export function ensureAgentNodeRuntime(
   draft: WorkflowYamlObject,
   node: WorkflowYamlNode
 ): void {
-  if (effectiveNodeRuntime(draft, node)) return
+  if (effectiveNodeRuntime(draft, node) || hasLegacyTopLevelRuntime(draft))
+    return
   node.execution = { ...(node.execution ?? {}), runtime: DEFAULT_AGENT_RUNTIME }
 }
 
@@ -61,10 +69,8 @@ export function stripAgentProfileFields(node: WorkflowYamlNode): void {
 }
 
 export type NodeRuntimeInfo = {
-  /** 节点级 `execution.runtime`（'' = 未声明）。 */
+  /** 节点级 `execution.runtime`（'' = 未声明，显示 legacy 补档）。 */
   nodeRuntime: string
-  /** workflow 顶层 `execution.runtime` 默认（'' = 无）。 */
-  defaultRuntime: string
 }
 
 /** 从草稿 YAML 读节点的 runtime 声明；草稿解析失败 / 节点缺失时回落 *fallback*。 */
@@ -77,10 +83,7 @@ export function readNodeRuntimeInfo(
     const draft = parseWorkflowYaml(rawYaml)
     const node = draft.nodes?.[nodeKey]
     if (!node) return fallback
-    return {
-      nodeRuntime: nodeRuntime(node),
-      defaultRuntime: topLevelRuntime(draft),
-    }
+    return { nodeRuntime: nodeRuntime(node) }
   } catch {
     return fallback
   }

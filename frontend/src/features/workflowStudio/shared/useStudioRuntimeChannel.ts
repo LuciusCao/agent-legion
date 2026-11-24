@@ -8,10 +8,17 @@ import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import { useUiStore } from '../../../stores/uiStore'
 import { fetchActiveRevisionOrNull } from '../canvas/workflowStudioEmptyState'
 import {
+  errorMessage,
+  runtimeSaveError,
+  runtimeSourceSyntaxMessage,
+} from './runtimeChannelErrors'
+import { retiredMessage } from './workflowStudioYamlDraft.runtime'
+import {
   combineYamlStructureRuntime,
   diffRuntimeSliceKeys,
   extractRuntimeSlice,
   hasStructuralYamlChanges,
+  hasTopLevelExecution,
 } from './workflowRuntimeSlice'
 
 export type UseStudioRuntimeChannelResult = {
@@ -21,6 +28,8 @@ export type UseStudioRuntimeChannelResult = {
   /** 草稿或基线 YAML 语法错误：无法合并保存请求体，保存动作不可用。 */
   runtimeSaveUnavailable: boolean
   runtimeSaving: boolean
+  /** 最近一次失败的完整迁移/冲突指引；持续展示到下一次操作。 */
+  runtimeError: string | null
   /** 最近一次保存/回滚实际写入的键（后端 changed_keys）——「已生效」标记
    * 与发布复核框信息条的数据源；下一次保存/回滚或卸载前保持。 */
   lastRuntimeSavedKeys: string[]
@@ -36,17 +45,9 @@ type StudioDataSnapshot = {
   workspaces: unknown
 }
 
-function errorStatus(error: unknown): number | null {
-  return (error as { status?: number } | null)?.status ?? null
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error && error.message ? error.message : '网络错误'
-}
-
 /**
- * 运行通道（M48）：runtime 字段（provider/model/thinking/prompt/prompt_mode/
- * tools/requires_labels + 顶层 execution 默认块）的即改即存通道——绕过草稿
+ * 运行通道（M48）：节点 runtime 字段（provider/model/thinking/prompt/
+ * prompt_mode/tools/requires_labels）的即改即存通道——绕过草稿
  * 发布链路，PATCH 后 active revision 原地生效并追加配置版本（M47）。
  * 保存成功后：拉取新 active 写入查询缓存（baseline sync 经
  *  markRuntimeChannelSaved 静默推进，不误报外部变更）；草稿无结构编辑时
@@ -63,6 +64,7 @@ export function useStudioRuntimeChannel(args: {
   const { workspaceId, originalYaml, draftYaml } = args
   const queryClient = useQueryClient()
   const [runtimeSaving, setRuntimeSaving] = useState(false)
+  const [runtimeError, setRuntimeError] = useState<string | null>(null)
   // M49 会话内连续编辑：在途守卫用 ref 而不是 state——state 读的是闭包
   // 快照，同一渲染周期内的第二次调用（建议卡双击 / 卡片与 Inspector 保存
   // 按钮近乎同帧触发）会穿透 state 守卫发出第二个 PATCH。后端虽靠
@@ -109,12 +111,13 @@ export function useStudioRuntimeChannel(args: {
       extraQueryKeys.workflowStudioData(workspaceId),
       (old) => (old ? { ...old, active: fresh } : old)
     )
-    // 无结构编辑：直接对齐新 canonical 基线（基线同步随之 reset，dirty 归零）；
-    // 有结构编辑：保留草稿结构、并入刚生效的 runtime 切片——之后的结构发布
-    // 才不会把运行配置打回保存前的旧值。
-    const nextDraft = hasStructuralYamlChanges(baseline, currentDraft)
-      ? combineYamlStructureRuntime(currentDraft, fresh.definition_yaml)
-      : fresh.definition_yaml
+    // 请求在途时仍可能收到人工编辑；含退役顶层块的最新草稿绝不能被
+    // canonical active 或 nodes-only 合并结果覆盖。
+    const nextDraft = hasTopLevelExecution(currentDraft)
+      ? currentDraft
+      : hasStructuralYamlChanges(baseline, currentDraft)
+        ? combineYamlStructureRuntime(currentDraft, fresh.definition_yaml)
+        : fresh.definition_yaml
     if (nextDraft !== currentDraft) args.setDraftYaml(nextDraft)
     return fresh.definition_yaml
   }
@@ -131,22 +134,26 @@ export function useStudioRuntimeChannel(args: {
     }
   }
 
+  function fail(message: string): false {
+    setRuntimeError(message)
+    useUiStore.getState().showToast(message, 'error')
+    return false
+  }
+
   async function saveRuntimeConfig(
     runtimeSourceYaml?: string
   ): Promise<boolean> {
     // 置位/复位与 rollbackRuntimeConfig 对称（见彼处 r1 P1-1 注释）。
     if (!workspaceId || savingRef.current) return false
+    const sourceYaml = runtimeSourceYaml ?? draftYaml
+    const agentProposal = runtimeSourceYaml !== undefined
     let saveYaml: string
     try {
-      saveYaml = combineYamlStructureRuntime(
-        originalYaml,
-        runtimeSourceYaml ?? draftYaml
-      )
+      const rejection = retiredMessage(sourceYaml, '保存', agentProposal)
+      if (rejection) return fail(rejection)
+      saveYaml = combineYamlStructureRuntime(originalYaml, sourceYaml)
     } catch {
-      useUiStore
-        .getState()
-        .showToast('草稿 YAML 有语法错误，修复后才能保存运行配置', 'error')
-      return false
+      return fail(runtimeSourceSyntaxMessage(runtimeSourceYaml))
     }
     savingRef.current = true
     setRuntimeSaving(true)
@@ -154,22 +161,14 @@ export function useStudioRuntimeChannel(args: {
       const result = await saveWorkflowRuntimeConfig(workspaceId, saveYaml)
       setLastRuntimeSavedKeys(result.runtime_version?.changed_keys ?? [])
       const refreshed = await tryApplyFreshActive()
-      useUiStore
-        .getState()
-        .showToast(
-          refreshed
-            ? '运行配置已保存并生效（不产生新版本）'
-            : '运行配置已保存并生效；本地刷新失败，请手动刷新页面查看最新配置',
-          refreshed ? 'success' : 'error'
-        )
+      const message = refreshed
+        ? '运行配置已保存并生效（不产生新版本）'
+        : '运行配置已保存并生效；本地刷新失败，请手动刷新页面查看最新配置'
+      setRuntimeError(refreshed ? null : message)
+      useUiStore.getState().showToast(message, refreshed ? 'success' : 'error')
       return true
     } catch (error) {
-      const message =
-        errorStatus(error) === 409
-          ? '运行配置保存失败：workflow 刚被其他操作更新，请刷新后重试'
-          : `运行配置保存失败：${errorMessage(error)}`
-      useUiStore.getState().showToast(message, 'error')
-      return false
+      return fail(runtimeSaveError(error))
     } finally {
       savingRef.current = false
       setRuntimeSaving(false)
@@ -180,26 +179,26 @@ export function useStudioRuntimeChannel(args: {
     // 置位/复位与 saveRuntimeConfig 对称（见彼处的 M49 注释）——finally 里
     // 的 savingRef 复位漏一行就是整会话运行通道静默锁死（r1 P1-1）。
     if (!workspaceId || savingRef.current) return false
+    try {
+      const rejection = retiredMessage(draftYaml, '回滚', false)
+      if (rejection) return fail(rejection)
+    } catch {
+      return fail('草稿 YAML 有语法错误，修复后才能回滚运行配置')
+    }
     savingRef.current = true
     setRuntimeSaving(true)
     try {
       const result = await rollbackWorkflowRuntimeConfig(workspaceId, version)
       setLastRuntimeSavedKeys(result.runtime_version?.changed_keys ?? [])
       const refreshed = await tryApplyFreshActive()
-      useUiStore
-        .getState()
-        .showToast(
-          refreshed
-            ? `已回滚到运行配置 v${version}（作为新版本追加）`
-            : `已回滚到运行配置 v${version} 并生效；本地刷新失败，请手动刷新页面`,
-          refreshed ? 'success' : 'error'
-        )
+      const message = refreshed
+        ? `已回滚到运行配置 v${version}（作为新版本追加）`
+        : `已回滚到运行配置 v${version} 并生效；本地刷新失败，请手动刷新页面`
+      setRuntimeError(refreshed ? null : message)
+      useUiStore.getState().showToast(message, refreshed ? 'success' : 'error')
       return true
     } catch (error) {
-      useUiStore
-        .getState()
-        .showToast(`运行配置回滚失败：${errorMessage(error)}`, 'error')
-      return false
+      return fail(`运行配置回滚失败：${errorMessage(error)}`)
     } finally {
       savingRef.current = false
       setRuntimeSaving(false)
@@ -210,6 +209,7 @@ export function useStudioRuntimeChannel(args: {
     runtimeChangedKeys,
     runtimeSaveUnavailable,
     runtimeSaving,
+    runtimeError,
     lastRuntimeSavedKeys,
     saveRuntimeConfig,
     rollbackRuntimeConfig,

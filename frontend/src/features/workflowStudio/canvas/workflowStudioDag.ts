@@ -16,7 +16,7 @@ export function buildDagNodes(
   routing?: StudioNodeRouting
 ): DagGraphNode[] {
   // executionWarning（#333）：agent 节点有效 execution 缺 provider/model 时
-  // 注入警告文案（记录侧已合并顶层 execution 默认，节点值即有效值）。
+  // 注入警告文案（只读节点自身 execution，不合并顶层默认值）。
   // 保留 workflow?. 可选链形态：回调内 workflow 的非空收窄依赖它。
   return (
     workflow?.nodes.map((node) => ({

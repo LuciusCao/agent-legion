@@ -12,8 +12,7 @@ import { asConfigValue } from './workflowStudioYamlDraft.execution'
  * server/app/services/runtime_config.py 的语义：
  * - 节点级 runtime 键：execution.{provider,model,thinking,prompt,prompt_mode}
  *   + tools + requires_labels（execution.runtime 是结构键，永远不动）；
- * - 顶层 execution 默认块只带 provider/model/thinking（loader 拒绝顶层
- *   prompt/prompt_mode）。
+ * - 顶层 execution 已退役，不读取、不合并，也不随运行通道保存。
  * 用途：①运行配置保存请求体 = 基线结构 + 草稿 runtime 切片；
  * ②运行配置 diff（保存按钮启停、「已修改」标记、发布复核框信息条）；
  * ③结构改动判定（草稿是否只剩 runtime 差异）。
@@ -30,7 +29,6 @@ export type RuntimeSliceNode = {
 }
 
 export type RuntimeSlice = {
-  execution: { provider: string; model: string; thinking: string }
   nodes: Record<string, RuntimeSliceNode>
 }
 
@@ -41,10 +39,14 @@ const NODE_EXECUTION_KEYS = [
   'prompt',
   'prompt_mode',
 ] as const
-const TOP_EXECUTION_KEYS = ['provider', 'model', 'thinking'] as const
-
 type YamlWithTopExecution = WorkflowYamlObject & {
   execution?: Record<string, unknown>
+}
+
+/** 顶层 execution 只用于拒绝 authoring 写入，绝不作为运行时输入。 */
+export function hasTopLevelExecution(rawYaml: string): boolean {
+  const doc = parseWorkflowYaml(rawYaml) as YamlWithTopExecution
+  return doc.execution !== undefined
 }
 
 function normalizeLabels(value: unknown): Record<string, string> {
@@ -73,20 +75,12 @@ function normalizeNode(node: WorkflowYamlNode | undefined): RuntimeSliceNode {
 
 /** 完整归一化的 runtime 切片（含空值）——与后端 extract_runtime_config 同形。 */
 export function extractRuntimeSlice(rawYaml: string): RuntimeSlice {
-  const doc = parseWorkflowYaml(rawYaml) as YamlWithTopExecution
-  const top = doc.execution ?? {}
+  const doc = parseWorkflowYaml(rawYaml)
   const nodes: Record<string, RuntimeSliceNode> = {}
   for (const [key, node] of Object.entries(doc.nodes ?? {})) {
     nodes[key] = normalizeNode(node)
   }
-  return {
-    execution: {
-      provider: asConfigValue(top.provider),
-      model: asConfigValue(top.model),
-      thinking: asConfigValue(top.thinking),
-    },
-    nodes,
-  }
+  return { nodes }
 }
 
 function flattenSlice(
@@ -107,8 +101,8 @@ function flattenSlice(
 }
 
 /**
- * 切片 diff：返回排序后的点路径（nodes.<key>.<field> / execution.<field>），
- * 列表/mapping 整体比较——与后端 diff_runtime_config_keys 同口径。
+ * 切片 diff：返回排序后的 nodes.<key>.<field> 点路径，列表/mapping
+ * 整体比较——与后端 diff_runtime_config_keys 同口径。
  * 只覆盖两侧都存在的节点：草稿里新增/删除的节点属结构改动，其 runtime
  * 键不参与运行配置保存的启停判定（基线不认识的节点保存时本就被忽略）。
  */
@@ -117,7 +111,6 @@ export function diffRuntimeSliceKeys(
   b: RuntimeSlice
 ): string[] {
   const sharedNodes: RuntimeSlice = {
-    execution: a.execution,
     nodes: Object.fromEntries(
       Object.keys(a.nodes)
         .filter((key) => key in b.nodes)
@@ -125,7 +118,6 @@ export function diffRuntimeSliceKeys(
     ),
   }
   const sharedNodesB: RuntimeSlice = {
-    execution: b.execution,
     nodes: Object.fromEntries(
       Object.keys(b.nodes)
         .filter((key) => key in sharedNodes.nodes)
@@ -172,17 +164,8 @@ export function combineYamlStructureRuntime(
   structureYaml: string,
   runtimeYaml: string
 ): string {
-  const structure = parseWorkflowYaml(structureYaml) as YamlWithTopExecution
+  const structure = parseWorkflowYaml(structureYaml)
   const runtime = extractRuntimeSlice(runtimeYaml)
-  const topExecution = { ...(structure.execution ?? {}) }
-  for (const key of TOP_EXECUTION_KEYS) {
-    // 同节点级：不 trim（与后端 apply_runtime_config 对齐）。
-    const value = runtime.execution[key]
-    if (value) topExecution[key] = value
-    else delete topExecution[key]
-  }
-  if (Object.keys(topExecution).length === 0) delete structure.execution
-  else structure.execution = topExecution
   for (const [key, node] of Object.entries(structure.nodes ?? {})) {
     const source = runtime.nodes[key]
     if (source) applyRuntimeToNode(node, source)
@@ -214,22 +197,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** 结构载荷：剥掉 runtime 切片后的定义——镜像后端 structural_payload
- * （节点 execution 折成 profile_runtime = 节点值 || 顶层默认；tools /
- * requires_labels / 顶层 execution 整块移除）。顶层默认只折进 agent 节点
- * ——后端 merge_execution_defaults 对 code/start/approval 节点不合并
- * runtime 默认（#1353：纯 code 节点 workflow 改顶层 execution.runtime
- * 在后端是非结构变更，前端不得判保守）。 */
+/** 结构载荷：剥掉 nodes-only runtime 切片后的定义——镜像后端
+ * structural_payload。execution.runtime 保留为 profile_runtime；顶层
+ * execution 不参与任何节点求值。 */
 function structuralPayload(rawYaml: string): unknown {
   const doc = parseWorkflowYaml(rawYaml) as YamlWithTopExecution
-  const topRuntime = asConfigValue(doc.execution?.runtime)
   const payload = JSON.parse(JSON.stringify(doc)) as YamlWithTopExecution & {
     nodes?: Record<string, WorkflowYamlNode & { profile_runtime?: string }>
   }
   for (const node of Object.values(payload.nodes ?? {})) {
-    node.profile_runtime =
-      asConfigValue(node.execution?.runtime) ||
-      (node.type === 'agent' ? topRuntime : '')
+    node.profile_runtime = asConfigValue(node.execution?.runtime)
     delete node.execution
     delete node.tools
     delete node.requires_labels
@@ -238,8 +215,8 @@ function structuralPayload(rawYaml: string): unknown {
   return payload
 }
 
-/** 变更键的用户可读格式化：nodes.<key>.<field> → <key>.<field>，
- * execution.<field> → 顶层 <field>（发布复核框信息条 / 版本历史共用）。 */
+/** 变更键的用户可读格式化。旧历史里的 execution.<field> 仍显示为
+ * 「顶层 <field>」供审计；新保存与回滚只产生 nodes.* 键。 */
 export function formatRuntimeChangedKeys(keys: string[]): string {
   return keys
     .map((key) =>

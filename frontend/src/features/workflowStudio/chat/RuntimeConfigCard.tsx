@@ -3,6 +3,7 @@ import CheckCircleOutlinedIcon from '@mui/icons-material/CheckCircleOutlined'
 import HistoryOutlinedIcon from '@mui/icons-material/HistoryOutlined'
 import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
 import { fetchWorkflowRuntimeVersions } from '../../../api'
+import { WorkflowStudioErrorDetails } from '../shared/WorkflowStudioErrorDetails'
 import { WorkflowRuntimeVersionsDialog } from '../inspector/WorkflowRuntimeVersionsDialog'
 import { useStudioStateOptional } from '../shared/studioStateContext'
 import {
@@ -176,6 +177,7 @@ export function RuntimeConfigCard(props: {
           revision；进行中的任务不受影响。
         </div>
       )}
+      <WorkflowStudioErrorDetails runtimeError={studio.runtimeError} />
       <div className={`${styles.draftActions} ${splitStyles.actions}`}>
         {!settlement && (
           <button

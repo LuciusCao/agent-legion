@@ -38,6 +38,8 @@ export type DraftSaveState = {
    * 不得再承诺）。只在 status==='error' 时有意义，每次进入 error 由
    * controller 重写。 */
   saveError?: 'retrying' | 'terminal'
+  /** 服务端拒绝的完整详情（含顶层 execution 迁移指引），持续展示。 */
+  saveErrorMessage?: string | null
 }
 
 export const IDLE_DRAFT_SAVE: DraftSaveState = { status: 'idle', savedAt: null }

@@ -40,7 +40,10 @@ export function WorkflowStudioDraftWarningText(props: WarningTextProps) {
       <Typography
         variant="caption"
         color="error"
-        sx={{ whiteSpace: 'nowrap' }}
+        sx={{
+          whiteSpace: props.plain ? 'normal' : 'nowrap',
+          minWidth: props.plain ? 0 : undefined,
+        }}
         className={props.plain ? undefined : islandStyles.secondary}
       >
         {props.text}
@@ -65,7 +68,10 @@ export function WorkflowStudioDraftConflictControl(props: ConflictProps) {
       <Typography
         variant="caption"
         color="error"
-        sx={{ whiteSpace: 'nowrap' }}
+        sx={{
+          whiteSpace: props.plain ? 'normal' : 'nowrap',
+          minWidth: props.plain ? 0 : undefined,
+        }}
         className={props.plain ? undefined : islandStyles.secondary}
       >
         {props.text}

@@ -6,6 +6,7 @@ import { useDraftAutoValidation } from './useDraftAutoValidation'
 import type { DraftSaveState } from './draftSaveTypes'
 import type { UseWorkflowStudioDraftResult } from './useWorkflowStudioDraft'
 import type { UseWorkflowDraftCompareResult } from './useWorkflowDraftCompare'
+import { usePublishError } from './usePublishError'
 
 /* #804 定案：手动「校验」按钮退役——草稿保存成功后自动静默校验
  * （useDraftAutoValidation），结果驱动左岛状态 chip；actions 层需要保存
@@ -25,6 +26,8 @@ export type UseWorkflowStudioActionsResult = {
   validating: boolean
   validationErrors: string[]
   validationMessage: string
+  /** 发布请求的完整服务端错误；发布后在变更面板持续显示。 */
+  publishError: string | null
   reviewDialogOpen: boolean
   /** 审 A 发 B 守卫（#804 轮 4 P2-C）：确认框打开时捕获当时 YAML；
    * 打开期间草稿被后台换掉（agent turn-end 保存/reapply）→ true，
@@ -52,6 +55,7 @@ export function useWorkflowStudioActions(
   const [reviewYaml, setReviewYaml] = useState<string | null>(null)
   const { validationErrors, validationMessage, reportSilent, clear, notify } =
     useValidationFeedback(draft.definitionYaml, workspaceId)
+  const publish = usePublishError(notify)
   useDraftAutoValidation({
     workspaceId,
     saveState: draft.draftSave,
@@ -106,16 +110,15 @@ export function useWorkflowStudioActions(
            到 canonical 后保存控制器仍持旧草稿基线，尾随 debounce PUT 会按
            CAS-over-absence 语义立刻重建刚删的草稿行。 */
         await draft.invalidateServerDraft()
-        notify('保存成功', 'success')
+        publish.reportPublishSuccess('保存成功')
       } else {
         // 服务端发布期校验未过：错误列表归校验通道（chip ✗ + 抽屉详情），
         // toast 报动作失败——发布-side 校验权威，内容确实不可发布。
         reportSilent(result.errors, '校验失败')
-        notify('保存失败', 'error')
+        publish.reportPublishInvalid('保存失败')
       }
     } catch (e) {
-      const message = `保存失败：${(e instanceof Error && e.message) || '网络错误'}`
-      notify(message, 'error')
+      publish.reportPublishError(e)
     } finally {
       setPublishing(false)
     }
@@ -125,6 +128,7 @@ export function useWorkflowStudioActions(
     validating,
     validationErrors,
     validationMessage,
+    publishError: publish.publishError,
     reviewDialogOpen,
     canPublish,
     retryValidation: clear,

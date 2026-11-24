@@ -104,18 +104,20 @@ const agentCatalog: AgentDefinition[] = [
   },
 ]
 
-// #1079：workflow 顶层 runtime 让节点自含——预览按钮在执行档案编辑区。
+// 节点各自声明 runtime——预览按钮在执行档案编辑区。
 const definitionYaml = [
   'key: demo_workflow',
-  'execution:',
-  '  runtime: pi',
   'nodes:',
   '  generate_key_info:',
   '    type: agent',
   '    capability: generate_key_info',
+  '    execution:',
+  '      runtime: pi',
   '  review:',
   '    type: agent',
   '    capability: review',
+  '    execution:',
+  '      runtime: pi',
   '',
 ].join('\n')
 
