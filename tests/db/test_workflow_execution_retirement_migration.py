@@ -606,7 +606,7 @@ def test_jobs_manifest_node_runs_and_runtime_history_stay_byte_identical() -> No
 
 
 def test_fresh_schema_registers_v105_and_backup_table() -> None:
-    assert SCHEMA_VERSION == 105
+    assert SCHEMA_VERSION >= 105
     with read_connection(TEST_DATABASE_URL) as conn:
         migration = conn.execute("select name from schema_migrations where version=105").fetchone()
         table = conn.execute(

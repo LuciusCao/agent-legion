@@ -43,12 +43,14 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v105, execution retirement) must leave behind
-# so the undo step rewinds a current-shape database to exactly v104.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workflow_execution_retirement_backups",)
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "workflow_execution_defaults_retirement"
+# Effects the newest migration (v106, job_node_needs_capacity) must leave
+# behind so the undo step rewinds a current-shape database to exactly v105.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("job_nodes", "needs_capacity", "boolean"),
+)
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_job_nodes_approval_park_candidates",)
+_NEWEST_MIGRATION_NAME = "job_node_needs_capacity"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()

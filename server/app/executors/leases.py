@@ -12,7 +12,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.executors import _lease_finish_batch, _lease_write_paths
-from server.app.executors._lease_approval import park_awaiting_approval_repo
+from server.app.executors._approval_repository import park_awaiting_approval_repo
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
 from server.app.executors._lease_job_events import broadcast_job_update
@@ -99,12 +99,23 @@ class ExecutorLeaseRepository:
         return run_id
 
     def park_awaiting_approval(
-        self, job_id: str, node_key: str, *, execution_generation: int = 0
+        self,
+        job_id: str,
+        node_key: str,
+        *,
+        execution_generation: int = 0,
+        control_snapshot: dict[str, Any] | None = None,
+        allowed_node_keys: frozenset[str] | None = None,
     ) -> bool:
         """Park a ready approval node (EXEC-APPROVAL-001); no lease, no node_run."""
         if retry_on_database_conflict(
             lambda: park_awaiting_approval_repo(
-                self, job_id, node_key, execution_generation=execution_generation
+                self,
+                job_id,
+                node_key,
+                execution_generation=execution_generation,
+                control_snapshot=control_snapshot,
+                allowed_node_keys=allowed_node_keys,
             )
         ):
             self._broadcast_job_update(job_id)
