@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { StudioChatPanel } from './StudioChatPanel'
 import * as chatApi from './studioChatApi'
@@ -229,9 +236,96 @@ describe('StudioChatPanel', () => {
     expect(alert).toHaveTextContent('需要你的确认')
     expect(alert).toHaveTextContent('Bash')
     // 授权绑定的完整命令随卡展示（#954）：人批准的就是 terminal 要跑的那条。
-    expect(screen.getByLabelText('将要运行的命令')).toHaveTextContent(
-      'rm -rf build'
+    expect(
+      screen.getByLabelText('完整命令 · 此次授权将精确绑定')
+    ).toHaveTextContent('rm -rf build')
+    expect(alert).toHaveTextContent('命令已精确绑定')
+    expect(alert).toHaveTextContent('你批准的就是上方完整命令')
+  })
+
+  it('distinguishes unbound, late-bound and non-terminal permission cards', async () => {
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'awaiting_permission' }),
+    ])
+    const request = (
+      id: string,
+      seq: number,
+      toolCall: Record<string, unknown>
+    ) =>
+      chatMessage(id, seq, 'permission', 'agent', {
+        request_id: id,
+        status: 'pending',
+        tool_call: toolCall,
+        options: [{ optionId: 'allow', name: '允许一次', kind: 'allow_once' }],
+      })
+    const allowed = (id: string, seq: number) =>
+      chatMessage(`${id}-resolved`, seq, 'permission', 'user', {
+        request_id: id,
+        status: 'resolved',
+        decision: { option_id: 'allow' },
+      })
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      request('r-pending', 1, {
+        toolCallId: 'main-pending',
+        title: 'Bash',
+        content: 'Requesting approval to Running: git diff…',
+      }),
+      request('r-late', 2, {
+        toolCallId: 'main-late',
+        title: 'Bash',
+        content: 'Requesting approval to Running: git status…',
+      }),
+      allowed('r-late', 3),
+      chatMessage('late-started', 4, 'tool_call', 'agent', {
+        toolCallId: 'main-late',
+        title: 'Bash',
+        kind: 'execute',
+        rawInput: { command: 'git status --short' },
+      }),
+      request('r-child', 5, {
+        toolCallId: 'sub-call',
+        title: 'Bash',
+        content: 'Requesting approval to Running: npm test…',
+      }),
+      allowed('r-child', 6),
+      request('r-read', 7, { title: 'Read', kind: 'read' }),
+    ])
+    renderPanel()
+
+    const pendingSummary = await screen.findByLabelText(
+      '权限请求携带的截断摘要 · 不是完整命令'
     )
+    const pendingCard = pendingSummary.closest('[role="alert"]') as HTMLElement
+    expect(pendingCard).toHaveTextContent('命令未绑定 · 仅显示截断摘要')
+    expect(
+      within(pendingCard).getByRole('button', { name: '允许一次（未绑定）' })
+    ).toBeInTheDocument()
+    expect(pendingSummary).toHaveTextContent(
+      'Requesting approval to Running: git diff…'
+    )
+
+    const lateCommand = screen.getByLabelText('批准后取得 · 现已绑定的完整命令')
+    expect(lateCommand).toHaveTextContent('git status --short')
+    const lateCard = lateCommand.closest('[role="group"]') as HTMLElement
+    expect(lateCard).toHaveTextContent('已允许 · 批准后已晚绑定')
+    expect(lateCard).toHaveTextContent(
+      'Requesting approval to Running: git status…'
+    )
+
+    const childSummary = screen.getByText(
+      /Requesting approval to Running: npm test…/
+    )
+    const childCard = childSummary.closest('[role="group"]') as HTMLElement
+    expect(childCard).toHaveTextContent('已允许 · 命令仍未绑定')
+    expect(childCard).toHaveTextContent('没有可展示的完整命令')
+    expect(
+      within(childCard).queryByLabelText('批准后取得 · 现已绑定的完整命令')
+    ).not.toBeInTheDocument()
+
+    const readCard = screen
+      .getByText('Read')
+      .closest('[role="alert"]') as HTMLElement
+    expect(readCard).not.toHaveTextContent(/命令未绑定|仅显示截断摘要/)
   })
 
   it('answers only after the session reaches awaiting_permission', async () => {
@@ -247,7 +341,9 @@ describe('StudioChatPanel', () => {
     mockApi.answerStudioChatPermission.mockResolvedValue(undefined)
     renderPanel()
 
-    const allow = await screen.findByRole('button', { name: '允许一次' })
+    const allow = await screen.findByRole('button', {
+      name: '允许一次（未绑定）',
+    })
     expect(allow).toBeDisabled()
     await act(async () => {
       fireEvent.click(allow)
@@ -288,7 +384,9 @@ describe('StudioChatPanel', () => {
     mockApi.answerStudioChatPermission.mockResolvedValue(undefined)
     renderPanel()
 
-    const allow = await screen.findByRole('button', { name: '允许一次' })
+    const allow = await screen.findByRole('button', {
+      name: '允许一次（未绑定）',
+    })
     // 权限消息可能先于会话快照渲染；出现按钮不等于已经可回答。
     await waitFor(() => expect(allow).toBeEnabled())
     await act(async () => {

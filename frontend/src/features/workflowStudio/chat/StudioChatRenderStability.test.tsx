@@ -131,7 +131,7 @@ describe('StudioChat 渲染稳定性（#1120）', () => {
       chatMessage('m4', 4, 'permission', 'agent', {
         request_id: 'r1',
         status: 'pending',
-        tool_call: { title: 'Bash' },
+        tool_call: { toolCallId: 'terminal-permission', title: 'Bash' },
         options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
       }),
     ])
@@ -189,6 +189,54 @@ describe('StudioChat 渲染稳定性（#1120）', () => {
     expect(counters.tool.get('t3')).toBe(before.tool)
     expect(counters.permission.get('r1')).toBe(before.permission)
     expect(counters.text.get('m2')!).toBeGreaterThan(before.agentText)
+  })
+
+  it('晚绑定更新权限卡，无关流式 chunk 仍不穿透 memo', async () => {
+    render(
+      <TestQueryProvider>
+        <StudioChatPanel onApplyWorkflowDraft={vi.fn()} />
+      </TestQueryProvider>
+    )
+    await screen.findByText('问题')
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    const initial = counters.permission.get('r1') ?? 0
+    const source = EventSourceMock.instances[0]
+    act(() => {
+      source.emitMessage({
+        type: 'message',
+        message: chatMessage('m5', 5, 'permission', 'user', {
+          request_id: 'r1',
+          status: 'resolved',
+          decision: { option_id: 'o1' },
+        }),
+      })
+      source.emitMessage({
+        type: 'message',
+        message: chatMessage('m6', 6, 'tool_call', 'agent', {
+          toolCallId: 'terminal-permission',
+          title: 'Bash',
+          kind: 'execute',
+          rawInput: { command: 'git status --short' },
+        }),
+      })
+    })
+    await screen.findByLabelText('批准后取得 · 现已绑定的完整命令')
+    expect(counters.permission.get('r1')!).toBeGreaterThan(initial)
+
+    const settled = counters.permission.get('r1')!
+    act(() => {
+      source.emitMessage({
+        type: 'message',
+        message: {
+          id: 'm2',
+          session_id: 's1',
+          kind: 'text',
+          role: 'agent',
+          content: { text: '无关的流式更新' },
+        },
+      })
+    })
+    expect(counters.permission.get('r1')).toBe(settled)
   })
 
   it('后台任务中间通知不重渲染既有对话行', async () => {

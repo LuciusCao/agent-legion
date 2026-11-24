@@ -10,7 +10,6 @@ import {
 import { supersededCancelRequestIds } from './studioChatCancelVisibility'
 import { useQueuedMessageStates } from './studioChatTurnRecovery'
 import { MessageItem } from './StudioChatMessageItem'
-import { permissionRequestId } from './StudioChatPermission'
 import { StudioChatWindow } from './StudioChatWindow'
 import styles from './StudioChatPanel.module.css'
 
@@ -120,7 +119,7 @@ export function StudioChatMessageList(props: Props) {
               cancelSuperseded={supersededCancelIds.has(message.id)}
               toolCall={toolCallByFirstMessage.get(message.id) ?? null}
               permission={
-                permissionById.get(permissionRequestId(message)) ?? null
+                permissionById.get(asText(message.content?.request_id)) ?? null
               }
               draftAnchorId={draftAnchorId}
               workflowDraft={chat.workflowDraft}

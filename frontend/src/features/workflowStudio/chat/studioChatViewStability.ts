@@ -68,6 +68,9 @@ export function samePermissionView(
     a.requestId === b.requestId &&
     a.toolTitle === b.toolTitle &&
     a.command === b.command &&
+    a.terminal === b.terminal &&
+    a.summary === b.summary &&
+    a.lateBoundCommand === b.lateBoundCommand &&
     a.resolved === b.resolved &&
     a.decisionText === b.decisionText &&
     a.options.length === b.options.length &&

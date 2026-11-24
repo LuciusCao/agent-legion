@@ -1,13 +1,9 @@
-import type { ChatMessage, PermissionView } from './studioChatMessages'
+import type { PermissionView } from './studioChatMessages'
+import {
+  permissionActions,
+  permissionPresentation,
+} from './studioChatPermissionPresentation'
 import styles from './StudioChatPermission.module.css'
-
-/** 权限消息行的 request_id（消息列表按它查 PermissionView；从
- * StudioChatMessageList 迁来，#882 体积预算拆分）。 */
-export function permissionRequestId(message: ChatMessage): string {
-  if (message.kind !== 'permission') return ''
-  const content = message.content as Record<string, unknown>
-  return typeof content?.request_id === 'string' ? content.request_id : ''
-}
 
 type Props = {
   permission: PermissionView
@@ -22,11 +18,9 @@ type Props = {
 
 export function StudioChatPermission(props: Props) {
   const { permission } = props
-  const allowOptions = permission.options.filter((option) =>
-    option.kind.startsWith('allow')
-  )
-  const buttons = allowOptions.length > 0 ? allowOptions : permission.options
-  const pending = !permission.resolved
+  const { pending, unbound, state, details, lateDetails, summary, ariaLabel } =
+    permissionPresentation(permission)
+  const actions = permissionActions(permission, unbound)
   return (
     <div
       className={`${styles.permission}${pending ? ` ${styles.permissionPending}` : ''}`}
@@ -37,45 +31,53 @@ export function StudioChatPermission(props: Props) {
         {pending && (
           <span className={styles.permissionBadge}>需要你的确认</span>
         )}
+        {state && <span className={styles.permissionBadge}>{state}</span>}
         Agent 请求权限：<code>{permission.toolTitle}</code>
       </div>
-      {permission.command && (
-        <pre className={styles.permissionCommand} aria-label="将要运行的命令">
-          {permission.command}
+      {details && (
+        <pre
+          className={`${styles.permissionCommand}${summary ? ` ${styles.permissionSummary}` : ''}`}
+          aria-label={ariaLabel}
+        >
+          {details}
+        </pre>
+      )}
+      {lateDetails && (
+        <pre
+          className={styles.permissionCommand}
+          aria-label="批准后取得 · 现已绑定的完整命令"
+        >
+          {lateDetails}
         </pre>
       )}
       {permission.resolved ? (
         <div className={styles.permissionResolved}>
           {permission.decisionText ?? '已处理'}
+          {state ? ` · ${state}` : ''}
         </div>
       ) : (
         <>
           <div className={styles.permissionActions}>
-            {buttons.map((option) => (
+            {actions.map((action) => (
               <button
-                key={option.optionId}
+                key={action.optionId || action.kind}
                 type="button"
-                className={styles.permissionAllow}
+                className={
+                  action.deny ? styles.permissionDeny : styles.permissionAllow
+                }
                 disabled={props.disabled}
                 onClick={() =>
-                  props.onAnswer(permission.requestId, {
-                    option_id: option.optionId,
-                  })
+                  props.onAnswer(
+                    permission.requestId,
+                    action.deny
+                      ? { deny: true }
+                      : { option_id: action.optionId }
+                  )
                 }
               >
-                {option.name}
+                {action.name}
               </button>
             ))}
-            <button
-              type="button"
-              className={styles.permissionDeny}
-              disabled={props.disabled}
-              onClick={() =>
-                props.onAnswer(permission.requestId, { deny: true })
-              }
-            >
-              拒绝
-            </button>
           </div>
           <label className={styles.allowAll}>
             <input

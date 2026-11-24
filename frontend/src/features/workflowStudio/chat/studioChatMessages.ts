@@ -1,4 +1,7 @@
 import type { StudioChatMessageRecord } from './studioChatApi'
+import { permissionTerminalView } from './studioChatPermissionPresentation'
+
+export { permissionResolutionText } from './studioChatPermissionPresentation'
 
 // 消息 content 是后端透传的 ACP update / 业务字典（契约里是
 // { [key: string]: unknown }），这里集中做 unknown-safe 的读取与归并，
@@ -49,9 +52,13 @@ export type NodeCodeDraftView = {
 export type PermissionView = {
   requestId: string
   toolTitle: string
-  /** 授权绑定的命令（tool_call.rawInput.command，后端按 toolCallId 补齐，#954）：
-   * 卡片展示的就是 terminal 必须精确运行的那条。 */
+  /** 权限请求持久化时已绑定的完整命令；晚绑定不会回写这个批准时快照。 */
   command: string | null
+  terminal: boolean
+  /** 请求原样携带的摘要，不能当作完整命令。 */
+  summary: string | null
+  /** 同一 toolCallId 后续上报的完整命令；不会回写 command。 */
+  lateBoundCommand: string | null
   options: { optionId: string; name: string; kind: string }[]
   resolved: boolean
   decisionText: string | null
@@ -294,7 +301,7 @@ export function extractNodeCodeDrafts(
   return keepLatestPerEntity(drafts, (draft) => draft.nodeKey)
 }
 
-/** 待应答的权限请求：pending 消息存在且没有同 request_id 的 resolved 消息。 */
+/** pending 保留批准时快照；同调用的当前 rawInput 只用于补充晚绑定可见性。 */
 export function buildPermissionViews(
   messages: ChatMessage[]
 ): PermissionView[] {
@@ -306,6 +313,9 @@ export function buildPermissionViews(
     const requestId = asText(content.request_id)
     if (requestId) resolvedBy.set(requestId, content)
   }
+  const toolCallById = new Map(
+    groupToolCalls(messages).map((call) => [call.toolCallId, call])
+  )
   const views: PermissionView[] = []
   for (const message of messages) {
     if (message.kind !== 'permission') continue
@@ -316,10 +326,12 @@ export function buildPermissionViews(
     const toolCall = asRecord(content.tool_call)
     const options = Array.isArray(content.options) ? content.options : []
     const resolved = resolvedBy.get(requestId)
+    const toolTitle = asText(toolCall?.title) || '工具调用'
+    const evidence = toolCallById.get(asText(toolCall?.toolCallId))
     views.push({
       requestId,
-      toolTitle: asText(toolCall?.title) || '工具调用',
-      command: asText(asRecord(toolCall?.rawInput)?.command) || null,
+      toolTitle,
+      ...permissionTerminalView(toolCall, evidence, resolved, toolTitle),
       options: options
         .map((option) => asRecord(option))
         .filter((option): option is Record<string, unknown> => option !== null)
@@ -330,21 +342,9 @@ export function buildPermissionViews(
         }))
         .filter((option) => option.optionId),
       resolved: resolved !== undefined,
-      decisionText: resolved ? decisionText(resolved) : null,
     })
   }
   return views
-}
-
-/** 自动批准（平台工具/全部允许）的 permission 消息没有 pending 前置消息，
- * 渲染成一行系统提示时取这段文字。 */
-export function permissionResolutionText(message: ChatMessage): string | null {
-  const content = asRecord(message.content)
-  if (content?.status !== 'resolved') return null
-  const toolCall = asRecord(content.tool_call)
-  const title = asText(toolCall?.title)
-  const text = decisionText(content)
-  return title ? `${text}：${title}` : text
 }
 
 export type PlanEntry = { content: string; status: string }
@@ -402,17 +402,6 @@ export function streamingTextId(messages: ChatMessage[]): string | null {
     if (m.kind === 'text' && m.role === 'agent') return m.id
   }
   return null
-}
-
-function decisionText(resolved: Record<string, unknown>): string {
-  const decision = asRecord(resolved.decision)
-  if (!decision) return '已处理'
-  if (decision.deny === true) return '已拒绝'
-  const via = asText(decision.via)
-  if (via === 'auto_approved') return '已自动允许（平台工具）'
-  if (via === 'auto_read_only') return '已自动允许（只读工具）'
-  if (via === 'allow_all') return '已自动允许（本次全部允许）'
-  return '已允许'
 }
 
 /** 消息列表的派生视图集合（hook 里单次 useMemo 消费，避免每个视图一条
