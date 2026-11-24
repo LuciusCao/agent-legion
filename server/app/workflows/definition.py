@@ -41,7 +41,7 @@ def reject_retired_workflow_execution_yaml(raw_yaml: str) -> None:
     """Reject a parseable authoring YAML retired block; leave broken YAML to the caller."""
     try:
         raw = yaml.safe_load(raw_yaml)
-    except yaml.YAMLError:
+    except (yaml.YAMLError, RecursionError):
         return
     if isinstance(raw, dict):
         reject_workflow_execution(raw)

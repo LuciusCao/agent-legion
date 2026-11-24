@@ -7,7 +7,7 @@ from server.app.services.workflow_draft_publish import publish_workflow_draft
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.postgres_support import TEST_DATABASE_URL
-from tests.services.test_workflow_draft_publish import (
+from tests.services.workflow_draft_publish_testlib import (
     _DRAFT_YAML,
     _seed_node_code,
     _workspace,

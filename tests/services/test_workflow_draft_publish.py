@@ -5,7 +5,6 @@ import pytest
 from server.app.agent_catalog import AgentDefinition
 from server.app.jobs.queries import JobQueries
 from server.app.services.job_errors import DraftWorkflowKeyMismatchError, NotFoundError
-from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_draft_key import require_draft_workflow_key_match
 from server.app.services.workflow_draft_publish import (
     publish_workflow_draft,
@@ -14,6 +13,11 @@ from server.app.services.workflow_draft_publish import (
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.postgres_support import TEST_DATABASE_URL
+from tests.services.workflow_draft_publish_testlib import (
+    _DRAFT_YAML,
+    _seed_node_code,
+    _workspace,
+)
 
 
 def _make_skill_repo(repo_dir: Path) -> None:
@@ -25,14 +29,6 @@ def _make_skill_repo(repo_dir: Path) -> None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     subprocess.run(["git", "-C", str(repo_dir), "init", "-q"], check=True, env=env)
 
-
-_DRAFT_YAML = """
-key: test_publish_flow
-label: Test Publish Flow
-nodes:
-  do_thing:
-    capability: do_thing
-"""
 
 _DRAFT_YAML_WITH_SKILL = """
 key: test_publish_flow
@@ -90,23 +86,6 @@ nodes:
     capability: do_thing
     after: [_start]
 """
-
-
-def _workspace(queries: JobQueries) -> dict:
-    return queries.create_workspace("draft-publish-ws", workspace_id="test_publish_flow")
-
-
-def _seed_node_code(workspace_id: str) -> None:
-    """Publish a no-op workspace node code so the draft node is runnable."""
-    codes = NodeCodeService(TEST_DATABASE_URL)
-    codes.save_draft(
-        workspace_id,
-        "test_publish_flow",
-        "do_thing",
-        "def run(job, job_dir, runtime):\n    pass\n",
-        "test seed",
-    )
-    codes.publish(workspace_id, "test_publish_flow", "do_thing")
 
 
 def _patch_agent_catalog(
