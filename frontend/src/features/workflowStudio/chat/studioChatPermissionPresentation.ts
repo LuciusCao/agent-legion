@@ -47,6 +47,10 @@ export function decisionText(resolved: Record<string, unknown>): string {
   return '已允许'
 }
 
+function approvedDecision(text: string | null): boolean {
+  return text === '已允许' || text === '已自动允许（本次全部允许）'
+}
+
 export function permissionTerminalView(
   toolCall: Record<string, unknown> | null,
   evidence: ToolCallView | undefined,
@@ -55,9 +59,7 @@ export function permissionTerminalView(
 ) {
   const terminal = isTerminalPermission(toolTitle, asText(toolCall?.kind))
   const command = asText(asRecord(toolCall?.rawInput)?.command) || null
-  const approved = resolved
-    ? decisionText(resolved).startsWith('已允许')
-    : false
+  const approved = resolved ? approvedDecision(decisionText(resolved)) : false
   return {
     command,
     terminal,
@@ -101,7 +103,7 @@ export function permissionActions(
 /** 仅派生展示：command 是批准时快照，late 不回写批准前可见性。 */
 export function permissionPresentation(permission: PermissionView) {
   const pending = !permission.resolved
-  const approved = permission.decisionText?.startsWith('已允许') ?? false
+  const approved = approvedDecision(permission.decisionText)
   const late = approved ? permission.lateBoundCommand : null
   const command =
     permission.command ?? (pending ? permission.lateBoundCommand : null)

@@ -5,6 +5,7 @@ import {
   permissionPresentation,
   permissionResolutionText,
   permissionSummaryText,
+  permissionTerminalView,
 } from './studioChatPermissionPresentation'
 
 function permission(overrides: Partial<PermissionView>): PermissionView {
@@ -61,6 +62,32 @@ describe('permissionPresentation', () => {
     )
     expect(view.lateDetails).toContain('完整命令在批准后才出现')
     expect(input.command).toBeNull()
+  })
+
+  it('keeps late binding visible for the allow-all approval channel', () => {
+    const resolved = { decision: { option_id: 'allow', via: 'allow_all' } }
+    const terminal = permissionTerminalView(
+      null,
+      {
+        toolCallId: 'call',
+        title: 'Bash',
+        status: 'in_progress',
+        rawInput: { command: 'git status' },
+        outputText: '',
+      },
+      resolved,
+      'Bash'
+    )
+    expect(terminal.lateBoundCommand).toBe('git status')
+    const view = permissionPresentation(
+      permission({
+        resolved: true,
+        decisionText: '已自动允许（本次全部允许）',
+        lateBoundCommand: terminal.lateBoundCommand,
+      })
+    )
+    expect(view.state).toBe('批准后已晚绑定')
+    expect(view.lateDetails).toContain('git status')
   })
 
   it('keeps an approved child-agent request honestly unbound', () => {
