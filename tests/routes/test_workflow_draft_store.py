@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 _DRAFT_YAML = "key: wf\nlabel: Draft\nnodes:\n  intake:\n    capability: intake\n"
@@ -118,39 +119,47 @@ def test_unparseable_draft_carries_null_identity(client, job_db) -> None:
     assert client.get(_url(workspace["id"])).json()["definition_hash"] is None
 
 
-def test_put_deep_nested_lww_keeps_unparseable_draft_contract(client, job_db) -> None:
+@pytest.mark.parametrize(
+    "raw_yaml",
+    ["[" * 1500 + "]" * 1500, "date: 2026-02-30"],
+    ids=["deep-nesting", "invalid-date"],
+)
+def test_put_lww_keeps_unloadable_draft_contract(client, job_db, raw_yaml) -> None:
     workspace = job_db.create_workspace("ws-store-deep-lww")
     before = client.get(_url(workspace["id"])).json()
-    deep_yaml = "[" * 1500 + "]" * 1500
 
-    response = client.put(_url(workspace["id"]), json={"definition_yaml": deep_yaml})
+    response = client.put(_url(workspace["id"]), json={"definition_yaml": raw_yaml})
 
     assert response.status_code == 200, response.text
-    assert response.json()["definition_yaml"] == deep_yaml
+    assert response.json()["definition_yaml"] == raw_yaml
     assert response.json()["definition_hash"] is None
     assert response.json()["generation"] == before["generation"] + 1
     assert client.get(_url(workspace["id"])).json() == response.json()
-    assert job_db.get_workspace_workflow_draft(workspace["id"])["definition_yaml"] == deep_yaml
+    assert job_db.get_workspace_workflow_draft(workspace["id"])["definition_yaml"] == raw_yaml
 
 
-def test_put_deep_nested_cas_keeps_unparseable_draft_contract(client, job_db) -> None:
+@pytest.mark.parametrize(
+    "raw_yaml",
+    ["[" * 1500 + "]" * 1500, "date: 2026-02-30"],
+    ids=["deep-nesting", "invalid-date"],
+)
+def test_put_cas_keeps_unloadable_draft_contract(client, job_db, raw_yaml) -> None:
     workspace = job_db.create_workspace("ws-store-deep-cas")
     saved = client.put(_url(workspace["id"]), json={"definition_yaml": _DRAFT_YAML})
     assert saved.status_code == 200
     before = client.get(_url(workspace["id"])).json()
-    deep_yaml = "[" * 1500 + "]" * 1500
 
     response = client.put(
         _url(workspace["id"]),
-        json={"definition_yaml": deep_yaml, "base_generation": before["generation"]},
+        json={"definition_yaml": raw_yaml, "base_generation": before["generation"]},
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["definition_yaml"] == deep_yaml
+    assert response.json()["definition_yaml"] == raw_yaml
     assert response.json()["definition_hash"] is None
     assert response.json()["generation"] == before["generation"] + 1
     assert client.get(_url(workspace["id"])).json() == response.json()
-    assert job_db.get_workspace_workflow_draft(workspace["id"])["definition_yaml"] == deep_yaml
+    assert job_db.get_workspace_workflow_draft(workspace["id"])["definition_yaml"] == raw_yaml
 
 
 def test_stored_legacy_read_migration_does_not_bypass_write_rejection(client, job_db) -> None:
