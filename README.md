@@ -112,10 +112,9 @@ make import-demo      # 安装并锁定 demo skills；不存在时创建并 seed
 然后在控制台里：
 
 1. 打开命令输出中的 demo workspace（重复运行不会创建第二个）。
-2. 在 Studio 里配置 agent 执行：打开 workflow，在顶层 `execution:` 填入你的
-   LLM 端点提供的 provider/model（一处即覆盖全部 agent 节点，也可逐节点
-   `execution.*` 覆盖；输入框会按节点 Agent 的 runtime 给出在线 Worker
-   上报的可用 provider/model 选项，也可手输）。
+2. 在 Studio 里配置 agent 执行：打开 workflow，逐个 agent 节点在
+   `execution.*` 填入你的 LLM 端点提供的 provider/model（输入框会按节点
+   runtime 给出在线 Worker 上报的可用 provider/model 选项，也可手输）。
 3. 打开 workspace 的自动调度，并在 Worker 控制台打开 claim（主控制台会把
    未开领取的 Worker 标为「在线·未领取」，新 workspace 的引导也有这两步）。
 4. 提交一批任务：在 workspace 里「添加条目」对话框上传知识点 markdown，

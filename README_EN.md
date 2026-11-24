@@ -135,11 +135,10 @@ make import-demo      # install/lock skills and create+seed a demo workspace if 
 Then in the console:
 
 1. Open the demo workspace printed by the command (reruns reuse it).
-2. Configure agent execution in Studio: open the workflow and fill the
-   top-level `execution:` block with the provider/model your LLM endpoint
-   serves (one place covers every agent node; individual nodes can override
-   via `execution.*`; the input lists the provider/model options reported by
-   online Workers for that node's Agent runtime, and free text works too).
+2. Configure agent execution in Studio: open the workflow and set
+   `execution.provider` / `execution.model` on each agent node to the values
+   your LLM endpoint serves. The input lists the provider/model options
+   reported by online Workers for that node's runtime, and free text works too.
 3. Enable automatic scheduling for the workspace and claiming in the Worker
    console (the main console marks Workers with claiming off as
    「在线·未领取」 (online, not claiming); a new workspace's onboarding guide

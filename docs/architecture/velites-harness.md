@@ -500,9 +500,10 @@ runtime catalog（`server/app/agent_runtime/`，runtime 全集的单一事实来
 是其 `AGENT_RUNTIMES`）按 runtime 分发到各 adapter
 （EXEC-RUNTIME-DISPATCH-001）：`runtime: velites` → velites argv、
 `runtime: pi` → pi argv。执行配置（provider/model/thinking）按严格链解析：节点
-`execution.*` 覆盖 → workflow 顶层 `execution` 默认（loader 合并进节点）→
-报错，无 workspace/全局兜底（workspace `default_agent_*` 已随 schema v63
-退役）；解析结果按 adapter 声明的 `ExecutionContract` 校验——必填键缺失
+`execution.*` → 报错，无 workflow/workspace/全局兜底（workspace
+`default_agent_*` 已随 schema v63 退役）；#805 / schema v105 的存量物化与
+stored/frozen 兼容边界见 backend.md，旧 queued manifest 的只读 fallback
+不得用于新 dispatch。解析结果按 adapter 声明的 `ExecutionContract` 校验——必填键缺失
 或配置了 runtime 不支持的键（非空值）时 dispatch 与 claim 重解析都
 fail-fast（issue #75 阶段 2）。
 manifest 的执行块统一为
@@ -517,7 +518,7 @@ pi 作为备选实现与对照基线继续可用（`runtime: pi` 即完整 pi �
 [设计历史 §2](velites-harness-design-history.md#2-切换期决策原-9-历史段落)。
 
 **回退**：单节点异常把该 agent 节点的 `execution.runtime` 改回 `pi` 并发布；
-系统性异常同法全部迁回 `pi`（或改 workflow 顶层 `execution.runtime` 默认）。沙箱异常当前需发版调整
+系统性异常逐个 agent 节点同法迁回 `pi` 并发布，没有跨节点默认开关。沙箱异常当前需发版调整
 （`velites_no_sandbox` 配置项已随 `workflows.pi` 退役；`execution.no_sandbox`
 在 manifest 恒为 false）。
 
@@ -537,7 +538,7 @@ pi                      # 交互式完成认证
 ./scripts/check-pi.sh   # 验证安装与认证状态
 ```
 
-之后把 workflow 中对应 agent 节点的 `execution.runtime`（或 workflow 顶层 `execution.runtime` 默认）设为 `pi` 并发布即可。
+之后把 workflow 中每个目标 agent 节点的 `execution.runtime` 设为 `pi` 并发布即可。
 
 ### 新增 agent runtime 接入指南
 
