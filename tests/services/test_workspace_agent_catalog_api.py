@@ -16,8 +16,8 @@ def test_list_agent_catalog_endpoint(client):
     data = response.json()
     agent = next(item for item in data["agents"] if item["id"] == "example-review-questions-v1")
     assert agent["capability"] == "review_questions"
-    # 全局 provider/model/thinking 投影已退役（agent 配置治理 phase 3）：
-    # 执行默认走 workflow 顶层 execution 块，catalog 不再携带这些键。
+    # provider/model/thinking 只配置在各 Agent 节点（#805），历史 catalog
+    # 定义不携带这些执行值。
     assert agent["runtime"] == "velites"
     assert agent["provider"] is None
     assert agent["model"] is None

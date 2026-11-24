@@ -18,12 +18,10 @@ EXECUTION_TIMEOUT_SECONDS = 1800
 # manifest execution 块里契约管辖的全部键；契约表外的键视为 runtime 不支持。
 EXECUTION_KEYS: tuple[str, ...] = ("provider", "model", "thinking")
 
-# 必填缺失的可行动报错（指向 Studio / workflow 顶层 execution 默认）。
+# 必填缺失的可行动报错（#805：只能配置当前 Agent 节点）。
 _REQUIRED_DETAILS = {
-    "provider": "requires a provider: set the node execution provider "
-    "in Studio or a workflow top-level execution default",
-    "model": "requires a model: set the node execution model "
-    "in Studio or a workflow top-level execution default",
+    "provider": "requires a provider: set execution.provider on this Agent node in Studio",
+    "model": "requires a model: set execution.model on this Agent node in Studio",
 }
 
 
@@ -60,8 +58,8 @@ def resolve_execution(
 ) -> dict[str, Any]:
     """Resolve the manifest ``execution`` block (strict node-only source, contract-checked).
 
-    The node execution seen here already carries the loader-merged workflow
-    top-level defaults (workspace-level defaults retired at schema v64).
+    New dispatch reads only the node's execution (#805); the stored loader has
+    already materialized defaults for historical revisions and frozen jobs.
     ``timeout_seconds`` (#550) is the dispatch-resolved reserved-key value
     (agent nodes now merge it into their effective schema, so it travels the
     regular config chain); None or an invalid value falls back to the

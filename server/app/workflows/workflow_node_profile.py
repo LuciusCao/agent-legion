@@ -5,9 +5,8 @@ every published ``agent`` node carries its own execution profile — publish
 rejects one without a runtime; resolving a published Agent definition by
 capability survives only for legacy snapshots / nodes v93 could not inline —
 
-- ``execution.runtime`` (one of ``AGENT_RUNTIMES``; the workflow top-level
-  ``execution.runtime`` is the default, merged in by
-  ``workflow_execution_defaults``);
+- ``execution.runtime`` (one of ``AGENT_RUNTIMES``, declared on the node;
+  stored legacy defaults are materialized only by the historical loader #805);
 - node top-level ``requires_labels`` (Worker labels ⊇ these at claim);
 - the existing node ``tools`` / ``config_schema`` / ``skill`` fields.
 
@@ -23,7 +22,26 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.agent_runtime.catalog import AGENT_RUNTIMES
+from server.app.services.job_errors import (
+    RETIRED_WORKFLOW_EXECUTION_GUIDANCE,
+    RetiredWorkflowExecutionError,
+)
 from server.app.workflows.schema import WorkflowDefinitionError, WorkflowNode
+
+
+def reject_workflow_execution(raw: dict[str, Any]) -> None:
+    """Fail authoring on key presence, including an empty or null block (#805)."""
+    if "execution" not in raw:
+        return
+    raw_nodes = raw.get("nodes")
+    agent_keys = sorted(
+        str(key)
+        for key, node in (raw_nodes if isinstance(raw_nodes, dict) else {}).items()
+        if isinstance(node, dict) and node.get("type") == "agent"
+    )
+    targets = ", ".join(f"nodes.{key}.execution" for key in agent_keys)
+    detail = f" This draft's Agent targets: {targets}." if targets else ""
+    raise RetiredWorkflowExecutionError(RETIRED_WORKFLOW_EXECUTION_GUIDANCE + detail)
 
 
 def validate_agent_runtime(runtime: str, where: str) -> None:

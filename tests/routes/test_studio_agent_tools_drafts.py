@@ -214,6 +214,31 @@ def test_save_workflow_draft_rejects_blank_and_missing_base_generation(client, j
     assert scoped.get(_draft_url(workspace_id)).json()["definition_yaml"] is None
 
 
+def test_save_workflow_draft_rejects_retired_execution_without_generation_change(
+    client, job_db
+) -> None:
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    draft_yaml = _active_yaml(scoped, workspace_id)
+    saved = scoped.put(
+        _draft_url(workspace_id),
+        json={"definition_yaml": draft_yaml, "base_generation": 0},
+    )
+    assert saved.status_code == 200
+    before = scoped.get(_draft_url(workspace_id)).json()
+    retired = draft_yaml + "\nexecution: null\n"
+
+    response = scoped.put(
+        _draft_url(workspace_id),
+        json={"definition_yaml": retired, "base_generation": before["generation"]},
+    )
+
+    assert response.status_code == 422
+    assert "#805" in response.json()["detail"]
+    assert "do not re-add" in response.json()["detail"]
+    assert scoped.get(_draft_url(workspace_id)).json() == before
+
+
 def test_save_workflow_draft_rejects_invalid_base_generation_with_422(client, job_db) -> None:
     """非法代次（负数/非整数）是契约层 422——不是 DB 错误（500）。"""
     workspace_id = _create_workspace(client)

@@ -178,11 +178,12 @@ def test_stored_legacy_draft_is_migrated_for_compare_and_publish(baseline) -> No
     assert int(after["version"]) == int(before["version"])
 
 
-def test_compare_and_publish_reject_top_level_execution(baseline) -> None:
+def test_compare_rejects_retired_top_level_execution_without_side_effects(baseline) -> None:
     app, workspace_id, definition = baseline
     raw = yaml.safe_load(definition_to_yaml(definition))
-    _top_level_execution(model="gpt-x")(raw)
+    _top_level_execution(model="must-not-land")(raw)
     draft_yaml = yaml.safe_dump(raw, allow_unicode=True)
+    before = app.state.job_db.get_active_workflow_revision(workspace_id, workspace_id)
 
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
@@ -194,6 +195,9 @@ def test_compare_and_publish_reject_top_level_execution(baseline) -> None:
     result = response.json()
     assert result["valid"] is False
     assert result["summary"] is None
-    assert any("field 'execution' was removed" in error["message"] for error in result["errors"])
-    with pytest.raises(WorkflowDefinitionError, match="field 'execution' was removed"):
+    assert "#805" in result["errors"][0]["message"]
+    assert f"nodes.{_AGENT_NODE}.execution" in result["errors"][0]["message"]
+    after = app.state.job_db.get_active_workflow_revision(workspace_id, workspace_id)
+    assert after == before
+    with pytest.raises(WorkflowDefinitionError, match="#805"):
         workflow_definition_from_yaml_string(draft_yaml)

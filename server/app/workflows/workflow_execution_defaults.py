@@ -21,14 +21,6 @@ from server.app.workflows.schema import (
 from server.app.workflows.workflow_node_profile import validate_agent_runtime
 
 
-def reject_workflow_execution(raw: dict[str, Any]) -> None:
-    """Reject the retired top-level block on every authoring input shape."""
-    if "execution" in raw:
-        raise WorkflowDefinitionError(
-            "Workflow field 'execution' was removed; declare execution on each Agent node"
-        )
-
-
 def load_workflow_execution(raw: dict[str, Any]) -> WorkflowNodeExecution:
     """Read legacy defaults before materializing them into node profiles."""
     raw_execution = raw.get("execution")

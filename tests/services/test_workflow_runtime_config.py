@@ -254,7 +254,7 @@ def test_draft_publish_runtime_only_path_appends_version(job_db) -> None:
 
 
 def test_rollback_appends_new_version_with_target_content(job_db) -> None:
-    workspace, _revision = _publish(job_db)
+    workspace, revision = _publish(job_db)
     save_workflow_runtime_config(
         job_db, workspace["id"], _definition(model="m2"), created_by="user:u1"
     )
@@ -264,10 +264,12 @@ def test_rollback_appends_new_version_with_target_content(job_db) -> None:
     historical = job_db.get_runtime_config_version(workspace["id"], 1)
     legacy_config = json.loads(str(historical["config_json"]))
     legacy_config["execution"] = {"provider": "retired", "model": "retired", "thinking": "high"}
+    legacy_changed_keys = ["execution.model", "nodes.do_thing.model"]
     with job_db.connect() as conn:
         conn.execute(
-            "update workflow_runtime_config_versions set config_json=%s where id=%s",
-            (json.dumps(legacy_config), historical["id"]),
+            "update workflow_runtime_config_versions set config_json=%s, changed_keys_json=%s"
+            " where id=%s",
+            (json.dumps(legacy_config), json.dumps(legacy_changed_keys), historical["id"]),
         )
 
     result = rollback_workflow_runtime_config(job_db, workspace["id"], 1, created_by="user:u3")
@@ -279,10 +281,15 @@ def test_rollback_appends_new_version_with_target_content(job_db) -> None:
     original = json.loads(str(versions[2]["config_json"]))
     # 旧历史原样保留；新行只应用其完整节点切片，不复活退役的顶层副本。
     assert original["execution"] == legacy_config["execution"]
+    assert json.loads(str(versions[2]["changed_keys_json"])) == legacy_changed_keys
     assert newest == {"nodes": original["nodes"]}
     assert json.loads(str(versions[0]["changed_keys_json"])) == ["nodes.do_thing.model"]
     assert versions[0]["created_by"] == "user:u3"
     assert result["runtime_version"]["version"] == 3
+    assert result["revision"]["id"] == revision["id"]
+    assert result["revision"]["version"] == revision["version"] == 1
+    active = job_db.get_active_workflow_revision(workspace["id"], "runtime_channel_flow")
+    assert "execution" not in json.loads(str(active["definition_json"]))
 
 
 def test_rollback_unknown_version_raises_not_found(job_db) -> None:
