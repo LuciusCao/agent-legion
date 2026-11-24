@@ -15,6 +15,7 @@ from server.app.services.job_batch_operations import (
     dispatch_batch_selection,
     dispatch_rerun_by_failure,
 )
+from server.app.services.job_batch_operations.records import operation_record
 from server.app.services.job_batch_operations.selection import (
     load_chunk,
     prepare_batch_selection,
@@ -120,15 +121,19 @@ def test_filter_stream_freezes_late_jobs_and_discovers_total(
     assert spec["stream"]["source"] == "filter"
     assert spec["stream"]["freeze_at"]
     assert len(spec["job_ids"]) == 2
+    assert operation_record(job_db, operation)["selection_complete"] is False
     late = _create_job(job_db, workspace, "S-late")
 
     feeder = _feeder(job_db, settings)
     assert feeder.consume_once() is True
-    assert job_db.get_job_batch_operation(op_id)["items_total"] == 2
+    operation = job_db.get_job_batch_operation(op_id)
+    assert operation["items_total"] == 2
+    assert operation_record(job_db, operation)["selection_complete"] is False
     _drain(feeder)
 
     operation = job_db.get_job_batch_operation(op_id)
     assert operation["status"] == "completed"
+    assert operation_record(job_db, operation)["selection_complete"] is True
     assert operation["items_total"] == operation["next_index"] == 3
     assert set(_result_ids(job_db, op_id)) == {str(job["id"]) for job in original}
     assert str(late["id"]) not in _result_ids(job_db, op_id)
@@ -273,6 +278,7 @@ def test_pause_does_not_refill_and_resume_keeps_frozen_stream_cursor(
     assert paused["status"] == "paused" and paused["next_index"] == 2
     assert paused["items_total"] == 2
     assert str(paused["target_spec_json"]) == frozen_spec
+    assert operation_record(job_db, paused)["selection_complete"] is False
     assert feeder.consume_once() is False
     assert len(calls) == 2
 
@@ -282,6 +288,7 @@ def test_pause_does_not_refill_and_resume_keeps_frozen_stream_cursor(
 
     completed = job_db.get_job_batch_operation(op_id)
     assert completed["status"] == "completed" and completed["next_index"] == 3
+    assert operation_record(job_db, completed)["selection_complete"] is True
     assert len(calls) == len(set(calls)) == 3
     assert set(calls) == {str(job["id"]) for job in jobs}
 

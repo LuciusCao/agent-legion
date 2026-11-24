@@ -143,7 +143,7 @@
   color: #1565c0;
 }
 
-.st.running .dot {
+:is(.st.running .dot, .pbar-selecting .fill) {
   animation: tc-blink 1.1s ease infinite;
 }
 

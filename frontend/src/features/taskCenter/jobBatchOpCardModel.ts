@@ -41,6 +41,7 @@ export function jobBatchOpToCard(
   op: JobBatchOperation | JobBatchOperationListItem
 ): TaskCardModel {
   const meta = JOB_BATCH_OP_META[op.kind]
+  const selectionComplete = op.selection_complete ?? true
   const statusMap: Record<string, TaskCardStatus> = {
     pending: 'queued',
     running: 'running',
@@ -49,16 +50,18 @@ export function jobBatchOpToCard(
     cancelled: 'cancelled',
   }
   const status: TaskCardStatus =
-    op.status === 'completed'
-      ? op.failed_count > 0
-        ? 'partial'
-        : 'done'
-      : // pending 兼具「受理待起步」与「tick 间隙」（feeder 非末次推进回
-        // pending）两义：已有处理量的 pending 实为进行中（否则卡片显示
-        // 「排队中」却带着进度计数，自相矛盾）。
-        op.status === 'pending' && op.processed_count > 0
-        ? 'running'
-        : (statusMap[op.status] ?? 'queued')
+    !selectionComplete && (op.status === 'pending' || op.status === 'running')
+      ? 'running'
+      : op.status === 'completed'
+        ? op.failed_count > 0
+          ? 'partial'
+          : 'done'
+        : // pending 兼具「受理待起步」与「tick 间隙」（feeder 非末次推进回
+          // pending）两义：已有处理量的 pending 实为进行中（否则卡片显示
+          // 「排队中」却带着进度计数，自相矛盾）。
+          op.status === 'pending' && op.processed_count > 0
+          ? 'running'
+          : (statusMap[op.status] ?? 'queued')
   const firstChunkError = (op.chunk_errors ?? [])[0]
   const downloadUrl =
     typeof op.output?.download_url === 'string' ? op.output.download_url : null
@@ -75,6 +78,7 @@ export function jobBatchOpToCard(
     finishedAt: op.finished_at ?? null,
     processed: op.processed_count,
     total: op.items_total,
+    selectionComplete,
     okCount: op.succeeded_count,
     okLabel: meta.okLabel,
     skippedCount: op.skipped_count,

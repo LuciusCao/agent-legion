@@ -22,11 +22,16 @@ function footerLine(card: TaskCardModel, nowMs: number): string {
   switch (card.status) {
     case 'running': {
       const elapsed = startedMs ? (nowMs - startedMs) / 1000 : 0
+      if (card.selectionComplete === false) {
+        return `已进行 ${formatDuration(elapsed)} · 总量确定后显示进度与预计剩余`
+      }
       const eta = estimateRemaining(card.processed, card.total, elapsed)
       return `已进行 ${formatDuration(elapsed)}${eta ? ` · ${eta}` : ''}`
     }
     case 'paused':
-      return '已暂停 · 后台处理已挂起，已处理部分保留'
+      return card.selectionComplete === false
+        ? '已暂停 · 已处理部分保留，选择发现也已挂起'
+        : '已暂停 · 后台处理已挂起，已处理部分保留'
     case 'queued':
       return startedMs
         ? `等待 ${formatDuration((nowMs - startedMs) / 1000)}`

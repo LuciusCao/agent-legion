@@ -13,12 +13,15 @@ def operation_record(
     job_db: JobQueries, row: dict[str, Any], *, reason_counts: dict[str, int] | None = None
 ) -> dict[str, Any]:
     """Public operation handle; target_spec (frozen ids) stays internal."""
+    target_spec = json.loads(str(row["target_spec_json"] or "{}"))
+    stream = target_spec.get("stream")
     return {
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "kind": str(row["kind"]),
         "status": str(row["status"]),
         "items_total": int(row["items_total"]),
+        "selection_complete": stream is None or stream["next_cursor"] is None,
         "processed_count": int(row["next_index"]),
         "succeeded_count": int(row["succeeded_count"]),
         "skipped_count": int(row["skipped_count"]),

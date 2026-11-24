@@ -43,6 +43,8 @@ export type TaskCardModel = FeedingGateCardModel & {
   finishedAt: string | null
   processed: number
   total: number
+  /** 流式选择是否耗尽；缺省表示 run_batches / 显式 IDs 的确定总量。 */
+  selectionComplete?: boolean
   okCount: number
   okLabel: string
   skippedCount: number
@@ -87,10 +89,9 @@ export function runBatchToCard(item: RunBatchListItem): TaskCardModel {
         ? 'partial'
         : 'done'
       : (statusMap[item.status] ?? 'queued')
-  const firstChunkError = chunkErrors > 0 ? item.chunk_errors[0] : null
+  const firstError = chunkErrors > 0 ? item.chunk_errors[0] : null
   const errorMessage =
-    item.error_message ||
-    (firstChunkError ? String(firstChunkError.error ?? firstChunkError) : '')
+    item.error_message || String(firstError?.error ?? firstError ?? '')
   const failedCount = item.failed_item_count ?? 0
   return {
     kind: 'run-batch',

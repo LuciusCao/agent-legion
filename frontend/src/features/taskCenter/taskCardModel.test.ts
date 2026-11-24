@@ -138,6 +138,44 @@ describe('jobBatchOpToCard（#946 / M52）', () => {
     ).toBe('partial')
   })
 
+  it('derives selecting from the frozen stream and returns to running on completion', () => {
+    const selecting = jobBatchOpToCard(
+      op({
+        selection_complete: false,
+        items_total: 2000,
+        processed_count: 1500,
+      })
+    )
+    expect(selecting.status).toBe('running')
+    expect(selecting.selectionComplete).toBe(false)
+    expect(
+      jobBatchOpToCard(
+        op({ status: 'pending', processed_count: 0, selection_complete: false })
+      ).status
+    ).toBe('running')
+
+    const completed = jobBatchOpToCard(
+      op({ selection_complete: true, items_total: 4000, processed_count: 1500 })
+    )
+    expect(completed.status).toBe('running')
+    expect(completed.selectionComplete).toBe(true)
+    expect(completed.total).toBe(4000)
+  })
+
+  it('keeps pause and terminal states primary while selection is incomplete', () => {
+    expect(
+      jobBatchOpToCard(op({ status: 'paused', selection_complete: false }))
+        .status
+    ).toBe('paused')
+    expect(
+      jobBatchOpToCard(
+        op({ status: 'completed', failed_count: 0, selection_complete: false })
+      ).status
+    ).toBe('done')
+    expect(jobBatchOpToCard(op({})).selectionComplete).toBe(true)
+    expect(runBatchToCard(batch({})).selectionComplete ?? true).toBe(true)
+  })
+
   it('uses the per-kind meta（图标/标题/成功计数标签）', () => {
     expect(jobBatchOpToCard(op({})).icon).toBe('restart_alt')
     expect(jobBatchOpToCard(op({})).title).toBe('批量重跑')
