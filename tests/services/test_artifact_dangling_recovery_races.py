@@ -49,14 +49,14 @@ def definition() -> WorkflowDefinition:
         intake=WorkflowIntake(),
         nodes={
             "producer": WorkflowNode(
-                key="producer", label="Producer", capability="produce", outputs=["result.json"]
+                key="producer", label="Producer", capability="produce", outputs=["output.json"]
             ),
             "consumer": WorkflowNode(
                 key="consumer",
                 label="Consumer",
                 capability="consume",
                 after=["producer"],
-                inputs=["result.json"],
+                inputs=["output.json"],
             ),
         },
     )
@@ -99,7 +99,7 @@ def seed_job(
         )
         conn.execute("update jobs set status='completed' where id=%s", (job_id,))
     expected = f"expected:{source_id}".encode()
-    key = f"jobs/ws/{job_id}/.v/attempt/result.json"
+    key = f"jobs/ws/{job_id}/.v/attempt/output.json"
     if healthy:
         storage.objects[key] = expected
     with write_transaction(TEST_DATABASE_URL) as conn:
@@ -108,14 +108,14 @@ def seed_job(
             workspace_id="ws",
             job_id=job_id,
             node_key="producer",
-            name="result.json",
+            name="output.json",
             storage_key=key,
             size_bytes=len(expected),
             content_hash=hashlib.sha256(expected).hexdigest(),
         )
     job_dir = resolve_job_dir(job, settings.jobs_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / "result.json").write_bytes(expected)
+    (job_dir / "output.json").write_bytes(expected)
     return job_db.get_job(job_id), key, expected
 
 
@@ -214,7 +214,7 @@ def _mutate_row(job_id: str, key: str, kind: str) -> None:
                 workspace_id="ws",
                 job_id=job_id,
                 node_key="other_writer",
-                name="result.json",
+                name="output.json",
                 storage_key=key.replace(".v/attempt", ".v/other"),
                 size_bytes=8,
                 content_hash="f" * 64,
@@ -278,7 +278,7 @@ def test_every_db_pin_is_rechecked_after_lock_free_s3_io(
     after = db_state(job_db, job_id)
     assert after["generation"] == before["generation"] + (kind == "generation")
     assert len(after["rows"]) == 1 + (kind == "same_name")
-    assert (resolve_job_dir(candidate, settings.jobs_dir) / "result.json").read_bytes() == expected
+    assert (resolve_job_dir(candidate, settings.jobs_dir) / "output.json").read_bytes() == expected
 
 
 @pytest.mark.parametrize("busy_kind", ["active_lease", "running_node"])
@@ -323,7 +323,7 @@ def test_active_lease_and_running_node_conflict_preserve_the_job(
     after = db_state(job_db, job_id)
     assert after["generation"] == before["generation"]
     assert len(after["rows"]) == 1
-    assert (resolve_job_dir(candidate, settings.jobs_dir) / "result.json").read_bytes() == expected
+    assert (resolve_job_dir(candidate, settings.jobs_dir) / "output.json").read_bytes() == expected
 
 
 def test_concurrent_rerun_is_stale_and_does_not_bump_twice(
@@ -371,7 +371,7 @@ def test_reconciler_insert_before_retire_rolls_back_delete_reset_and_staging(
                     "workspace_id": "ws",
                     "job_id": job_id,
                     "node_key": "reconciler",
-                    "name": "result.json",
+                    "name": "output.json",
                     "storage_key": new_key,
                     "size_bytes": 9,
                     "content_hash": hashlib.sha256(b"new-bytes").hexdigest(),
@@ -390,7 +390,7 @@ def test_reconciler_insert_before_retire_rolls_back_delete_reset_and_staging(
     assert after["nodes"] == before["nodes"]
     assert {row["storage_key"] for row in after["rows"]} == {key, new_key}
     assert storage.objects[new_key] == b"new-bytes"
-    assert (resolve_job_dir(candidate, settings.jobs_dir) / "result.json").read_bytes() == expected
+    assert (resolve_job_dir(candidate, settings.jobs_dir) / "output.json").read_bytes() == expected
 
 
 def test_object_and_positive_control_changes_fail_before_mutation(
@@ -434,7 +434,7 @@ def _register(store: JobArtifactObjectStore, job_id: str, key: str, node_key: st
                 "workspace_id": "ws",
                 "job_id": job_id,
                 "node_key": node_key,
-                "name": "result.json",
+                "name": "output.json",
                 "storage_key": key,
                 "size_bytes": 4,
                 "content_hash": hashlib.sha256(b"new!").hexdigest(),
@@ -456,7 +456,7 @@ def _assert_stale_rollback(
     assert after["status"] == before["status"]
     assert after["nodes"] == before["nodes"]
     assert {row["storage_key"] for row in after["rows"]} == keys
-    assert (resolve_job_dir(candidate, settings.jobs_dir) / "result.json").read_bytes() == expected
+    assert (resolve_job_dir(candidate, settings.jobs_dir) / "output.json").read_bytes() == expected
 
 
 def test_after_delete_registration_is_rejected_by_final_lock_and_read(
@@ -643,22 +643,22 @@ def test_post_commit_legacy_registration_and_upload_keep_default_semantics(
     assert report["jobs"][0]["status"] == "applied"
     assert db_state(job_db, job_id)["rows"] == []
 
-    versioned_key = f"jobs/ws/{job_id}/.v/post-commit/result.json"
+    versioned_key = f"jobs/ws/{job_id}/.v/post-commit/output.json"
     _register(store, job_id, versioned_key, "post_commit_writer")
-    registered = store.lookup(job_id, "result.json")
+    registered = store.lookup(job_id, "output.json")
     assert registered["node_key"] == "post_commit_writer"
     assert registered["storage_key"] == versioned_key
     assert registered["content_hash"] == hashlib.sha256(b"new!").hexdigest()
 
     job_dir = resolve_job_dir(candidate, settings.jobs_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / "result.json").write_bytes(expected)
+    (job_dir / "output.json").write_bytes(expected)
     uploaded = store.upload(
         workspace_id="ws",
         job_id=job_id,
         node_key="producer",
-        name="result.json",
-        local_path=job_dir / "result.json",
+        name="output.json",
+        local_path=job_dir / "output.json",
     )
     assert uploaded["node_key"] == "producer"
     assert uploaded["content_hash"] == hashlib.sha256(expected).hexdigest()

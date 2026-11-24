@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from server.app.services.workflow_output_guard import require_unreserved_workflow_outputs
 from server.app.services.workflow_revision_pipeline import publish_workflow_revision
 from server.app.services.workflow_revision_runtime import save_revision_runtime_or_publish
 from server.app.workflows.definition import WorkflowDefinition
@@ -32,6 +33,9 @@ class WorkflowRevisionService:
         definition: WorkflowDefinition,
         on_commit: Callable[[Any], None] | None = None,
     ) -> dict:
+        # Reject before serialization, pin reads, version allocation or writes;
+        # draft validation exposes the same error without opening a transaction.
+        require_unreserved_workflow_outputs(definition)
         return publish_workflow_revision(
             self.job_db, self.custom_nodes_enabled, workspace_id, definition, on_commit=on_commit
         )
@@ -70,4 +74,7 @@ class WorkflowRevisionService:
         existing = self.job_db.get_active_workflow_revision(workspace_id, definition.key)
         if existing is not None:
             return existing
+        # Only creation needs publish validation; seed-if-absent must remain a
+        # read-only short circuit for revisions published by older versions.
+        require_unreserved_workflow_outputs(definition)
         return self.publish_workspace_revision(workspace_id, definition)

@@ -28,7 +28,7 @@ def _agent_flow_yaml(model: str = "", tools: str = "") -> dict:
         "type": "agent",
         "capability": "do_thing",
         "execution": {"runtime": "velites"},
-        "outputs": ["result.json"],
+        "outputs": ["output.json"],
     }
     if model:
         node["execution"]["model"] = model
@@ -182,7 +182,7 @@ def test_runtime_save_refuses_structural_change(job_db) -> None:
                     "type": "agent",
                     "capability": "do_thing",
                     "execution": {"runtime": "velites", "model": "m2"},
-                    "outputs": ["result.json", "extra.json"],
+                    "outputs": ["output.json", "extra.json"],
                 }
             },
         }
@@ -221,7 +221,7 @@ def test_runtime_save_tools_and_requires_labels_stay_in_place(job_db) -> None:
                     "type": "agent",
                     "capability": "do_thing",
                     "execution": {"runtime": "velites", "model": "m1"},
-                    "outputs": ["result.json"],
+                    "outputs": ["output.json"],
                     "tools": ["bash"],
                     "requires_labels": {"gpu": "true"},
                 }

@@ -47,7 +47,7 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
             "nodes": {
                 "generate": {
                     "capability": "generate",
-                    "outputs": ["result.json"],
+                    "outputs": ["output.json"],
                     "execution": {"provider": "gateway", "model": "old-model"},
                 }
             },
@@ -61,7 +61,7 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
             "nodes": {
                 "generate": {
                     "capability": "generate",
-                    "outputs": ["result.json"],
+                    "outputs": ["output.json"],
                     "execution": {"provider": "gateway", "model": "new-model"},
                 }
             },
@@ -82,7 +82,7 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
             "nodes": {
                 "generate": {
                     "capability": "generate",
-                    "outputs": ["result.json", "metadata.json"],
+                    "outputs": ["output.json", "metadata.json"],
                 }
             },
         }
@@ -106,7 +106,7 @@ def test_config_only_save_creates_new_revision(tmp_path: Path) -> None:
             "nodes": {
                 "generate": {
                     "capability": "generate",
-                    "outputs": ["result.json"],
+                    "outputs": ["output.json"],
                 }
             },
         }
@@ -121,7 +121,7 @@ def test_config_only_save_creates_new_revision(tmp_path: Path) -> None:
             "nodes": {
                 "generate": {
                     "capability": "generate",
-                    "outputs": ["result.json"],
+                    "outputs": ["output.json"],
                     "config": {"sandbox_network": True},
                 }
             },
@@ -142,7 +142,7 @@ def test_config_only_save_creates_new_revision(tmp_path: Path) -> None:
             "nodes": {
                 "generate": {
                     "capability": "generate",
-                    "outputs": ["result.json"],
+                    "outputs": ["output.json"],
                     "config": {"sandbox_network": True},
                     "config_schema": {
                         "type": "object",

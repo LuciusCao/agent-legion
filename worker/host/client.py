@@ -18,6 +18,7 @@ import requests
 
 from shared.protocol import PROTOCOL_VERSION
 from worker import events
+from worker.execution.heartbeat_batch import clamp_batch_interval
 from worker.host.claim_ops import ClaimOperations
 from worker.host.errors import HOST_UNAVAILABLE_ERRORS, TransientHostError, WorkerAuthError
 from worker.host.heartbeat_ops import HeartbeatOperations
@@ -40,11 +41,16 @@ class Client(ClaimOperations, HeartbeatOperations, TransferOperations):
         token: str = "",
         timeout: float = DEFAULT_TIMEOUT,
         transfer_timeout: float = DEFAULT_TRANSFER_TIMEOUT,
+        heartbeat_interval: float = 15.0,
     ) -> None:
         self.host = host.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.configured_transfer_timeout = transfer_timeout
         self.transfer_timeout = transfer_timeout
+        self.heartbeat_interval = clamp_batch_interval(heartbeat_interval)
+        self.transfer_lease_ttl: float | None = None
+        self.transfer_clamp_signature: tuple[float, ...] | None = None
         # Session 复用 TCP 连接：lease 心跳 15s 一次、claim 轮询 2s 一次，
         # keep-alive 避免每次调用都重新握手。
         self.session = requests.Session()

@@ -33,6 +33,7 @@ from worker.executor_reap import reap_completed
 from worker.fd_limits import raise_fd_limit_startup
 from worker.host.client import HOST_UNAVAILABLE_ERRORS, Client, WorkerAuthError
 from worker.host.status_sync import sync_host_status
+from worker.host.transfer_lease import restore_uploads_with_lease_clamp, sync_transfer_heartbeat
 from worker.hot_controls import DynamicControls, reload_controls
 from worker.lease_snapshot import open_lease_channel
 from worker.load_shedding import LoadShedder
@@ -49,7 +50,8 @@ from worker.runtime import controls as runtime_controls
 from worker.runtime.controls import MAX_DYNAMIC_CONCURRENCY
 from worker.runtime.setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
-from worker.state_evidence import configure_evidence_root
+from worker.state_evidence import configure_evidence_root, evidence_root
+from worker.state_evidence_cleanup import sweep_raw_event_copies
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
 from worker.upload.queue import UploadQueue
@@ -98,7 +100,11 @@ def main() -> int:
     except ValueError as exc:
         print(f"Agent Worker 启动预检失败：{exc}", flush=True)
         return 2
-    client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
+    client = Client(
+        str(config["host_url"]),
+        transfer_timeout=transfer.transfer_timeout_seconds,
+        heartbeat_interval=float(config.get("heartbeat_interval_seconds", 15)),
+    )
     stop = threading.Event()
     status = ExecutionStatusReporter.from_env()
     metrics = WorkerMetricsCache.from_env()
@@ -140,9 +146,12 @@ def main() -> int:
     uploads.set_heartbeat_registry(heartbeat_registry)
     # Restore unreported results BEFORE cleaning: their execution dirs carry
     # an upload_pending.json marker and are preserved by clean_work_root.
-    if restored := uploads.restore(work_root):
+    if restored := restore_uploads_with_lease_clamp(client, uploads, work_root):
         print(f"restored {restored} pending result upload(s) from {work_root}", flush=True)
     clean_work_root(work_root)
+    # Only abandoned raw staging is age-reaped; pending restored attempts keep
+    # their evidence, and all processed incident files remain manual-retention.
+    sweep_raw_event_copies(evidence_root(), work_root)
     download_slots = threading.Semaphore(transfer.download_max_concurrency)
     active: set[Future[None]] = set()
     # 双池跟踪（批次 2）：agent/code 各自计数，本地预算防过度 claim（Host
@@ -251,9 +260,11 @@ def main() -> int:
                     )
                     control_error = load_error
             else:
-                # 全部加载成功才统一生效（语义收口在 hot_controls）。
-                controls = reloaded
-                control_error = None
+                # 全部加载成功才统一生效（语义收口在 hot_controls）。relay 的
+                # 实际心跳周期热更也同步进 transfer clamp；裸跑的心跳周期
+                # 仍是启动值，不用新配置冒充已生效的线程周期。
+                sync_transfer_heartbeat(client, reloaded.transfer, lease_snapshot_path is not None)
+                controls, control_error = reloaded, None
             max_concurrency, claim_enabled = controls.max_concurrency, controls.claim_enabled
             max_code_concurrency = controls.max_code_concurrency
             claim_batch_limit = controls.claim_batch_limit

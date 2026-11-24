@@ -241,11 +241,16 @@ mixed-fleet compatibility and upgrade order.
   | #657 concurrency ceiling 1024 → 2048 (`shared/concurrency_limits.py`; registration `max_concurrency` / `max_code_concurrency` and claim limits) | v0.7.12 (88f48f5cf) | worker-v0.7.12 | works (older Workers never declare more than 1024) | **rejected** when the Worker is configured above 1024: an older Host answers registration with 422 (and would reject such a claim body the same way); at ≤ 1024 it works |
   | #211 M3 `workflow_key` removed from claim responses | v0.7.16 | — | works for every `worker-v*` release (no Worker reads it since v0.5.0) | n/a |
   | #748 / #755 `X-Agent-Result` carries raw UTF-8; a direct-upload artifact list over the 14 KiB header budget moves into the result archive (`result-output-artifacts.json` + header flag) — **v1 legacy shape**: workers before worker-v0.7.19 only | v0.7.14 | worker-v0.7.14 | works (older Workers send ASCII-escaped JSON) | degraded: CJK `error_message` / `agent_stderr_tail` arrive as mojibake, and a run whose artifact list overflows the header fails with missing outputs |
-  | #843 result metadata v2: `X-Agent-Result-Format: 2` — the metadata JSON moves into the result-archive member `result.json` (first member; the header budget and the #748/#755 degrade chain do not apply to that shape; the artifact manifest rides `result.json` too, so the v1 `result-output-artifacts.json` switch member is gone) | v0.7.19 (dual-shape read; Host reads both shapes through the same validation) | worker-v0.7.19 | works — older Workers keep sending the v1 header shape and never set the format marker | **not a supported shape**: a pre-v0.7.19 Host finds no v1 `X-Agent-Result` JSON and answers 400; the Worker degrades once into a failed report, that is 400 too, so the result is dropped and the lease expires into a re-run (each re-run fails the same way). The Host-first upgrade order is the guard |
+  | #843 result metadata v2: `X-Agent-Result-Format: 2` — the metadata JSON moves into the result-archive member `result.json` (first member; the header budget and the #748/#755 degrade chain do not apply to that shape; the artifact manifest rides `result.json` too, so the v1 `result-output-artifacts.json` switch member is gone) | v0.7.19 (dual-shape read; Host reads both shapes through the same validation) | worker-v0.7.19 | works — older Workers keep sending the v1 header shape and never set the format marker | **not a supported shape**: a pre-v0.7.19 Host finds no v1 `X-Agent-Result` JSON and answers 400; the Worker degrades once into a failed report, that is 400 too, so the result is dropped and the lease expires into a re-run (each re-run fails the same way). Once `requeue_limit` (default 3) is exhausted, the lease sweeper marks the node and job terminally `failed` with the generic heartbeat-expiry/requeue-limit diagnostic instead of requeueing again. The Host-first upgrade order is the guard |
 
   Additive fields (the batch heartbeat's `settled` list #590, the claim's
-  `execution_generation` #759 and `max_archive_bytes` #959) are tolerated
-  absent in both directions and are not breaking.
+  `execution_generation` #759, `max_archive_bytes` #959 and `lease_ttl_seconds`
+  #1170) are tolerated absent in both directions and are not breaking. A
+  current Worker uses the claim TTL to cap its existing
+  `transfer_timeout_seconds` at `2 * lease_ttl_seconds - heartbeat_interval_seconds`
+  (one-second floor with a loud diagnostic for an extremely short TTL), so one
+  report attempt cannot erase the inter-retry heartbeat window; cancellation and
+  the report-loop heartbeat handoff are unchanged.
 
   Compatibility matrix by release (rows: Host release and its protocol;
   columns: Worker release; `worker-v*` tags declare protocol v4, v5 or v6 —

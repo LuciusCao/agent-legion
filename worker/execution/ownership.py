@@ -37,11 +37,11 @@ from worker.upload.constants import PENDING_FILENAME
 # Sibling of upload_pending.json: which lease the execution dir belongs to.
 OWNER_FILENAME = "execution_owner.json"
 
-# Bound on waiting for a busy execution mutex (#564 P2). The Worker does not
-# know the Host's actual lease TTL (the 90s baseline is a Host-side #349
-# constant); 60s leaves two 30s batch-heartbeat beats inside that baseline —
-# enough for the old attempt to receive its 409 and finish its teardown. If
-# even that is not enough the heartbeat plane is still starved and this
+# Bound on waiting for a busy execution mutex (#564 P2). Claim responses now
+# carry the Host's actual lease TTL for transfer-timeout clamping; this separate
+# 60s bound preserves the original two 30s batch-heartbeat beats inside the 90s
+# baseline — enough for the old attempt to receive its 409 and finish teardown.
+# If even that is not enough the heartbeat plane is still starved and this
 # claim's lease is already dead or dying Host-side, so the caller abandons
 # the claim (no prepare, no report, no heartbeat) and leaves the lease to
 # expire for a Host requeue once the Worker recovers.
@@ -96,9 +96,27 @@ def write_owner_marker(execution_dir: Path, claim: dict[str, Any]) -> None:
             "version": 1,
             "execution_id": str(claim.get("execution_id") or ""),
             "lease_id": str(claim.get("lease_id") or ""),
+            "lease_ttl_seconds": claim.get("lease_ttl_seconds"),
         }
     )
     atomic_write(execution_dir / OWNER_FILENAME, payload)
+
+
+def restored_lease_ttls(work_root: Path) -> list[Any]:
+    """Read claim TTL snapshots for pending uploads; absent = pre-#1170 marker."""
+    ttls = []
+    for owner in work_root.glob(f"*/{OWNER_FILENAME}"):
+        if not (owner.parent / PENDING_FILENAME).is_file():
+            continue
+        try:
+            payload = json.loads(owner.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"invalid restored owner marker: {owner}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(f"invalid restored owner marker: {owner}")
+        if payload.get("lease_ttl_seconds") is not None:
+            ttls.append(payload["lease_ttl_seconds"])
+    return ttls
 
 
 def discard_owned_dir(execution_dir: Path, lease_id: str) -> bool:

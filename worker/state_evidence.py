@@ -32,7 +32,9 @@ state being the more accurate one). Files inside:
   gone is recorded absent; an unreadable one (EACCES family — the agent
   chmod'd its own run dir) records an ``unreadable`` note; a scan failure
   deletes the raw copy (fail-closed — an unprocessed copy never stays
-  behind).
+  behind). Staging is explicitly named ``events.jsonl.raw`` and renamed to
+  ``events.jsonl`` only after successful redaction/compression; an unlink
+  failure can therefore never make a raw survivor look like processed evidence.
 - ``agent-stderr.log`` — the rescued stderr tail (already redacted), same
   rescue and bound as the delivery path (``stderr_tail_for_run``).
 - ``events-emergency.jsonl`` — the pump's diverted stream, redacted per
@@ -72,9 +74,12 @@ state being the more accurate one). Files inside:
   as the stranded archive.
 
 Retention: these incidents are rare by construction (an agent must destroy
-its own working tree, or the events write path must fail); there is no TTL
-sweeper for them — clean up manually after the post-mortem. The evidence
-root is ``<state_dir>/evidence``; the executor derives the state dir from
+its own working tree, or the events write path must fail); processed evidence
+has no TTL sweeper — clean it up manually after the post-mortem. The sole
+exception is an abandoned ``events.jsonl.raw`` staging file: startup examines
+a bounded number of direct incident children and removes only raw regular
+files at least 24h old whose execution has no upload-pending ownership marker.
+The evidence root is ``<state_dir>/evidence``; the executor derives it from
 ``--config``'s parent (the same source as ``WorkerConfigStore`` /
 registration), so no extra wiring exists. Tests configure it via
 ``configure_evidence_root`` / ``reset_evidence_root``.
@@ -92,17 +97,17 @@ from __future__ import annotations
 
 import errno
 import json
-import re
 import shutil
 import time
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from shared.pi_events import scan_and_compress_pi_events
 from shared.stderr_tail import AGENT_STDERR_FILENAME
 from worker._atomic import atomic_write
+from worker.state_evidence_copies import _safe_segment
+from worker.state_evidence_copies import validate_scanned_events as validate_scanned_events
 from worker.state_evidence_sink import EmergencyEventsSink
 from worker.upload.secret_registry import secret_snapshot
 from worker.upload.stderr_evidence import stderr_tail_for_run
@@ -146,13 +151,6 @@ def reset_evidence_root() -> None:
 def evidence_root() -> Path | None:
     """The configured dump root, or None when dumping is disabled."""
     return _evidence_root
-
-
-def _safe_segment(value: str, fallback: str) -> str:
-    """One incident-name segment: execution ids and node keys come from the
-    wire, so path separators and traversal fodder are neutralized."""
-    cleaned = re.sub(r"[^A-Za-z0-9._-]", "_", value).strip("._")
-    return (cleaned or fallback)[:64]
 
 
 def incident_dir(execution_id: str, node_key: str, fallback: str = "") -> Path | None:
@@ -218,18 +216,6 @@ def scan_primary_events(
     return model_error, original, tail, completed or original > 0
 
 
-def validate_scanned_events(events: Path, original: int, completed: bool) -> None:
-    """Fail closed on raw survivors unless a scanned events tree vanished."""
-    try:
-        raw_survived = original == 0 and events.is_file() and events.stat().st_size > 0
-    except OSError as exc:
-        if not completed or not tree_missing_inside(exc, events.parent):
-            raise
-        raw_survived = False
-    if raw_survived:
-        raise RuntimeError(f"pi events scan failed; the raw events file survived: {events}")
-
-
 def dump_prep_evidence(task: UploadTask, exc: BaseException) -> Path | None:
     """Best-effort forensic dump for one failed prepare pass (#1147).
 
@@ -287,31 +273,48 @@ def _dump_events_copy(target: Path, events: Path, redactor: SecretRedactor) -> t
     was chmod'd unreadable) degrades to an ``unreadable`` note with the
     errno — distinct from the ENOENT family's plain ``absent``.
 
-    评审 P3-2（收口轮，防御加固）：两个失败臂的副本删除各自 suppress——
+    评审 P3-2（收口轮，防御加固）：两个失败臂分别记录副本删除 OSError——
     unlink 再抛（同进程相邻 syscall 双 EACCES 的理论形态）时降级为「raw
-    副本滞留 + 状态照常返回」，而不是逃出到 dump_prep_evidence 的 broad
+    副本滞留 + cleanup failed 状态」，而不是逃出到 dump_prep_evidence 的 broad
     except 炸掉其余取证 arm。滞留副本的残留面：``_dump_incident_record``
-    照常落盘（其 error/incident 字段已脱敏），滞留文件本身按无 TTL 证据
-    人工清理路径处置（与 state 目录其余滞留物同一运维语义）。"""
+    照常落盘（其 error/incident 字段已脱敏）；滞留文件有显式 .raw 名，
+    由启动时年龄 + upload-pending 归属双重门槛的有界清扫回收。"""
+    from worker.state_evidence_copies import (
+        RAW_EVENTS_FILENAME,
+        discard_event_copies,
+        with_copy_cleanup_errors,
+    )
+
+    # Every return path starts by invalidating the previous attempt's copies;
+    # otherwise a missing/unreadable source would coexist with stale evidence.
+    cleanup_errors = discard_event_copies(target, include_processed=True)
     try:
         present = events.is_file()
     except OSError as probe_exc:
-        return f"unreadable: {probe_exc}", b""
+        return with_copy_cleanup_errors(f"unreadable: {probe_exc}", cleanup_errors), b""
     if not present:
-        return "absent", b""
+        return with_copy_cleanup_errors("absent", cleanup_errors), b""
+
+    raw_copy = target / RAW_EVENTS_FILENAME
     copy = target / "events.jsonl"
     try:
-        shutil.copyfile(events, copy)
-        size = copy.stat().st_size
-        _, original, _, tail = scan_and_compress_pi_events(copy, redactor=redactor)
+        shutil.copyfile(events, raw_copy)
+        size = raw_copy.stat().st_size
+        _, original, _, tail = scan_and_compress_pi_events(raw_copy, redactor=redactor)
     except OSError as copy_exc:
-        with suppress(OSError):
-            copy.unlink(missing_ok=True)
-        return f"unreadable: {copy_exc}", b""
+        cleanup_errors += discard_event_copies(target, include_processed=False)
+        return with_copy_cleanup_errors(f"unreadable: {copy_exc}", cleanup_errors), b""
     if size > 0 and original == 0:
-        with suppress(OSError):
-            copy.unlink(missing_ok=True)
-        return f"scan failed (source was {size} bytes; raw copy discarded)", b""
+        cleanup_errors += discard_event_copies(target, include_processed=False)
+        state = f"scan failed (source was {size} bytes)"
+        if not cleanup_errors:
+            state = f"{state}; raw copy discarded"
+        return with_copy_cleanup_errors(state, cleanup_errors), b""
+    try:
+        raw_copy.replace(copy)
+    except OSError as rename_exc:
+        cleanup_errors += discard_event_copies(target, include_processed=False)
+        return with_copy_cleanup_errors(f"unreadable: {rename_exc}", cleanup_errors), b""
     return "dumped", tail
 
 

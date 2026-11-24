@@ -57,14 +57,14 @@ def _definition(workspace_id: str) -> WorkflowDefinition:
         intake=WorkflowIntake(),
         nodes={
             "producer": WorkflowNode(
-                key="producer", label="Producer", capability="produce", outputs=["result.json"]
+                key="producer", label="Producer", capability="produce", outputs=["output.json"]
             ),
             "consumer": WorkflowNode(
                 key="consumer",
                 label="Consumer",
                 capability="consume",
                 after=["producer"],
-                inputs=["result.json"],
+                inputs=["output.json"],
             ),
         },
     )
@@ -90,7 +90,7 @@ def _seed_job(
         workflow_definition_hash="job-hash",
         workflow_definition_snapshot_json=serialize_definition(definition),
     )
-    key = f"jobs/ws/{job['id']}/.v/attempt/result.json"
+    key = f"jobs/ws/{job['id']}/.v/attempt/output.json"
     content = f"bytes:{source_id}".encode()
     if with_artifact:
         with write_transaction(TEST_DATABASE_URL) as conn:
@@ -99,7 +99,7 @@ def _seed_job(
                 workspace_id="ws",
                 job_id=str(job["id"]),
                 node_key="producer",
-                name="result.json",
+                name="output.json",
                 storage_key=key,
                 size_bytes=len(content),
                 content_hash=hashlib.sha256(content).hexdigest(),
