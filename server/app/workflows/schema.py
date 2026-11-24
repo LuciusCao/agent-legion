@@ -134,6 +134,8 @@ class WorkflowNode:
     # ``execution.runtime`` may declare them (a half-filled profile is a
     # publish error, ``workflow_node_profile``).
     requires_labels: dict[str, str] = field(default_factory=dict)
+    on_failure: dict[str, str] = field(default_factory=dict)
+    failure_default: str = ""
 
 
 @dataclass(frozen=True)

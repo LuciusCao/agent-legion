@@ -4228,6 +4228,8 @@ export interface components {
     BatchRerunPreviewResponse: {
       /** Eligible Count */
       eligible_count: number
+      /** Plans */
+      plans?: components['schemas']['JobRerunPreviewPlanResponse'][]
       /** Total Count */
       total_count: number
     }
@@ -5085,7 +5087,7 @@ export interface components {
     }
     /**
      * JobBatchRerunPreviewRequest
-     * @description Read-only count for a batch rerun selection (no writes).
+     * @description Read-only plan for a batch rerun selection (no writes).
      *
      *     Exactly one mode: ``node_key`` (from-node rerun), ``from_failed_node``
      *     (failed-node rerun), or ``failure_category`` (category rerun).
@@ -5101,10 +5103,14 @@ export interface components {
        * @default false
        */
       from_failed_node: boolean
+      /** From Node Key */
+      from_node_key?: string | null
       /** Job Ids */
       job_ids?: string[] | null
       /** Node Key */
       node_key?: string | null
+      /** Strategy */
+      strategy?: ('auto' | 'rerun_self' | 'rerun_upstream') | null
     }
     /** JobBatchRerunRequest */
     JobBatchRerunRequest: {
@@ -5359,6 +5365,13 @@ export interface components {
        * @enum {string}
        */
       status: 'succeeded' | 'skipped' | 'failed'
+    }
+    /** JobRerunPreviewPlanResponse */
+    JobRerunPreviewPlanResponse: {
+      /** Job Id */
+      job_id: string
+      /** Planned Targets */
+      planned_targets?: string[]
     }
     /** JobSummaryResponse */
     JobSummaryResponse: {

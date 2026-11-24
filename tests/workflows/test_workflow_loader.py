@@ -11,6 +11,7 @@ import yaml
 from server.app.services.workflow_revision_format import (
     definition_to_yaml,
     serialize_definition,
+    workflow_definition_to_response_payload,
 )
 from server.app.workflows.definition import (
     WorkflowDefinitionError,
@@ -125,3 +126,70 @@ def test_empty_capability_round_trips_through_snapshot_and_yaml() -> None:
     assert restored.nodes["draft"].capability == ""
     assert echoed.nodes["draft"].capability == ""
     assert "capability: ''" in definition_to_yaml(definition)
+
+
+def test_failure_policy_round_trips_through_snapshot_and_yaml() -> None:
+    definition = workflow_definition_from_mapping(
+        _raw(
+            {
+                "type": "code",
+                "failure_default": "business",
+                "on_failure": {
+                    "business": "rerun_upstream",
+                    "technical": "rerun_self",
+                    "unknown": "rerun_upstream",
+                },
+            }
+        )
+    )
+
+    restored = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
+    echoed = workflow_definition_from_mapping(yaml.safe_load(definition_to_yaml(definition)))
+
+    response_node = next(
+        node
+        for node in workflow_definition_to_response_payload(definition)["nodes"]
+        if node["key"] == "draft"
+    )
+    assert response_node["failure_default"] == "business"
+    assert response_node["on_failure"]["unknown"] == "rerun_upstream"
+    for loaded in (definition, restored, echoed):
+        assert loaded.nodes["draft"].failure_default == "business"
+        assert loaded.nodes["draft"].on_failure == {
+            "business": "rerun_upstream",
+            "technical": "rerun_self",
+            "unknown": "rerun_upstream",
+        }
+
+
+def test_legacy_snapshot_without_failure_policy_keeps_empty_defaults() -> None:
+    legacy = _raw({"type": "code"})
+    loaded = workflow_definition_from_dict(legacy)
+
+    assert loaded.nodes["draft"].failure_default == ""
+    assert loaded.nodes["draft"].on_failure == {}
+    response_node = next(
+        node
+        for node in workflow_definition_to_response_payload(loaded)["nodes"]
+        if node["key"] == "draft"
+    )
+    assert "failure_default" not in response_node
+    assert "on_failure" not in response_node
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"failure_default": None},
+        {"failure_default": "declared"},
+        {"failure_default": 1},
+        {"on_failure": None},
+        {"on_failure": []},
+        {"on_failure": {"other": "rerun_self"}},
+        {"on_failure": {"business": "skip"}},
+        {"on_failure": {"business": None}},
+    ],
+)
+def test_failure_policy_rejects_invalid_declarations(fields: dict[str, Any]) -> None:
+    with pytest.raises(WorkflowDefinitionError, match="on_failure|failure_default"):
+        workflow_definition_from_mapping(_raw({"type": "code", **fields}))

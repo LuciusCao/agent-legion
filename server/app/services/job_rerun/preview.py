@@ -1,25 +1,18 @@
-"""Read-only batch-rerun preview: eligible/total counts for a selection.
+"""Read-only batch-rerun preview using the execution target planners.
 
-Set-based, not per-job: the selection is materialized with one page scan,
-then jobs / job nodes / active leases are fetched with one bulk query each
-and joined in memory, so a multi-thousand-job selection costs a constant
-number of round trips instead of several per job. The per-job predicates live
-in ``job_rerun.preview_checks`` (pure bulk-data equivalents of the write
-path's checks). Nothing in this module writes.
+Selections use bulk job/node/lease reads joined in memory; the per-job predicates
+are the same pure checks as execution, so planned targets cannot drift from it.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services.job_operation_error import JobOperationError
-from server.app.services.job_rerun.eligibility import (
-    AUTO_STRATEGIES,
-    failed_nodes_by_job,
-    resolve_failure_rerun_targets,
-)
+from server.app.services.job_rerun.eligibility import failed_nodes_by_job
+from server.app.services.job_rerun.failure_plan import plan_failure_rerun
 from server.app.services.job_rerun.preview_checks import (
     PreviewDefinitions,
     rerun_ineligible_from_nodes,
@@ -39,10 +32,12 @@ def batch_rerun_preview(
     *,
     from_failed_node: bool = False,
     failure_category: str | None = None,
+    strategy: str = "auto",
+    from_node_key: str | None = None,
     job_filter: JobListFilter | None = None,
     exclude_ids: Collection[str] = (),
-) -> dict[str, int]:
-    """Return {"total_count", "eligible_count"} for the selection; no writes."""
+) -> dict[str, Any]:
+    """Return counts and eligible planned targets for every selected job."""
     ids = list(
         dict.fromkeys(
             value.strip()
@@ -53,17 +48,15 @@ def batch_rerun_preview(
         )
     )
     if not ids:
-        return {"total_count": 0, "eligible_count": 0}
+        return {"total_count": 0, "eligible_count": 0, "plans": []}
 
-    # One bulk query per data domain; the per-job checks below join in memory.
-    # Narrow column sets keep row materialization cheap on large selections.
     jobs = service.job_db.list_job_rerun_states_for_jobs(workspace_id, ids)
     nodes_by_job = service.job_db.list_job_node_states_for_jobs(ids)
     busy_pairs = service.lease_repo.active_lease_node_keys_for_jobs(ids, service._now())
     definitions = PreviewDefinitions(service)
 
     if failure_category is not None:
-        eligible = _failure_category_eligible_count(
+        planned = _failure_category_plans(
             service,
             definitions,
             jobs,
@@ -71,32 +64,38 @@ def batch_rerun_preview(
             busy_pairs,
             workspace_id,
             failure_category,
+            strategy,
+            from_node_key,
             ids,
         )
     else:
-        eligible = 0
+        planned = {}
         for job_id in ids:
             job = jobs.get(job_id)
-            if job is None or job["workspace_id"] != workspace_id:
-                continue
-            nodes = nodes_by_job.get(job_id, [])
-            try:
-                actual_node_key = resolve_rerun_node_from_nodes(
-                    job_id, job, nodes, node_key, from_failed_node
-                )
-            except JobOperationError:
-                continue
-            if (
-                rerun_ineligible_from_nodes(
-                    definitions.for_job(job), nodes, busy_pairs, job_id, actual_node_key
-                )
-                is None
-            ):
-                eligible += 1
-    return {"total_count": len(ids), "eligible_count": eligible}
+            targets: list[str] = []
+            if job is not None and job["workspace_id"] == workspace_id:
+                nodes = nodes_by_job.get(job_id, [])
+                try:
+                    actual_node_key = resolve_rerun_node_from_nodes(
+                        job_id, job, nodes, node_key, from_failed_node
+                    )
+                except JobOperationError:
+                    pass
+                else:
+                    if (
+                        rerun_ineligible_from_nodes(
+                            definitions.for_job(job), nodes, busy_pairs, job_id, actual_node_key
+                        )
+                        is None
+                    ):
+                        targets = [actual_node_key]
+            planned[job_id] = targets
+    plans = [{"job_id": job_id, "planned_targets": planned.get(job_id, [])} for job_id in ids]
+    eligible = sum(bool(targets) for targets in planned.values())
+    return {"total_count": len(ids), "eligible_count": eligible, "plans": plans}
 
 
-def _failure_category_eligible_count(
+def _failure_category_plans(
     service: JobRerunService,
     definitions: PreviewDefinitions,
     jobs: dict[str, dict[str, Any]],
@@ -104,28 +103,25 @@ def _failure_category_eligible_count(
     busy_pairs: set[tuple[str, str]],
     workspace_id: str,
     category: str,
-    ids: Sequence[str],
-) -> int:
-    """Jobs whose category rerun would rerun at least one node.
-
-    ``from_node_key`` is not part of the allMatching dialog flow, so it is
-    not modelled here.
-    """
+    strategy: str,
+    from_node_key: str | None,
+    ids: list[str],
+) -> dict[str, list[str]]:
     grouped = failed_nodes_by_job(service, workspace_id, category, ids)
-    strategy = AUTO_STRATEGIES.get(category, "rerun_self")
-    count = 0
+    planned: dict[str, list[str]] = {}
     for job_id, failed_nodes in grouped.items():
         job = jobs.get(job_id)
         if job is None or job["workspace_id"] != workspace_id:
             continue
-        definition = definitions.for_job(job)
-        targets = resolve_failure_rerun_targets(definition, failed_nodes, strategy)
-        if any(
-            rerun_ineligible_from_nodes(
-                definition, nodes_by_job.get(job_id, []), busy_pairs, job_id, target
-            )
-            is None
-            for target in targets
-        ):
-            count += 1
-    return count
+        plan = plan_failure_rerun(
+            definitions.for_job(job),
+            failed_nodes,
+            nodes_by_job.get(job_id, []),
+            busy_pairs,
+            job_id,
+            category,
+            strategy,
+            from_node_key,
+        )
+        planned[job_id] = plan.planned_targets
+    return planned

@@ -1,7 +1,7 @@
 """Read-only rerun eligibility helpers shared by execution and preview.
 
 Everything here is side-effect free: the real rerun paths call these checks
-before mutating, and the batch-rerun preview counts with the same rules, so
+before mutating, and the batch-rerun preview plans with the same rules, so
 the two can never drift apart.
 """
 
@@ -18,18 +18,9 @@ from server.app.services.job_rerun.upstream_guard import (
 from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.start_node import START_NODE_TYPE
-from server.app.workflows.workflow_consumption import dependency_parents
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
-
-# Hard-coded stage-1/2 defaults for strategy="auto"; workflow-declared
-# policies arrive with stage 3.
-AUTO_STRATEGIES = {
-    "technical": "rerun_self",
-    "business": "rerun_upstream",
-    "unknown": "rerun_self",
-}
 
 
 def check_rerun_eligibility(
@@ -115,7 +106,7 @@ def failed_nodes_by_job(
 ) -> dict[str, list[str]]:
     """Group the latest failed node runs of one category by job, restricted to
     ``requested`` (empty = unrestricted). Shared by the real rerun and the
-    preview count so both see the same matching set."""
+    preview planner so both see the same matching set."""
     runs = service.job_db.list_failed_node_runs(
         workspace_id,
         category=category,
@@ -133,22 +124,3 @@ def failed_nodes_by_job(
         if node_key not in nodes:
             nodes.append(node_key)
     return failed_nodes_by_job
-
-
-def resolve_failure_rerun_targets(
-    definition: Any, failed_nodes: list[str], strategy: str
-) -> list[str]:
-    """Target nodes for the category strategy (rerun_self / rerun_upstream).
-
-    合并上游（#759）：隐式生产者也是合法的重跑起点——隐式生产者 failed
-    时若退化成 rerun_self，调度的隐式生产者屏障会永久阻塞下游。
-    """
-    parents = dependency_parents(definition)
-    targets: list[str] = []
-    for node_key in failed_nodes:
-        resolved = parents.get(node_key, []) if strategy == "rerun_upstream" else []
-        # A node without upstreams is rerun itself: it is the root candidate.
-        for target in resolved or [node_key]:
-            if target not in targets:
-                targets.append(target)
-    return targets

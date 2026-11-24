@@ -78,6 +78,8 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": node_execution_payload(node.execution),
+                **({"on_failure": dict(node.on_failure)} if node.on_failure else {}),
+                **({"failure_default": node.failure_default} if node.failure_default else {}),
                 "skill": asdict(node.skill) if node.skill is not None else None,
                 # Omitted when undeclared (empty) so payload/yaml stay clean.
                 **({"tools": list(node.tools)} if node.tools else {}),

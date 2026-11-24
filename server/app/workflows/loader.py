@@ -6,7 +6,10 @@ from typing import Any
 import yaml
 
 from server.app.workflows.approval_node import validate_approval_edges
-from server.app.workflows.node_config_schema import load_node_config_schema
+from server.app.workflows.node_config_schema import (
+    load_node_config,
+    load_node_config_schema,
+)
 from server.app.workflows.schema import (
     WorkflowCondition,
     WorkflowDefinition,
@@ -24,6 +27,7 @@ from server.app.workflows.workflow_execution_defaults import (
     apply_workflow_execution,
     load_workflow_execution,
 )
+from server.app.workflows.workflow_failure_policy import load_failure_policy
 from server.app.workflows.workflow_intake import load_intake
 from server.app.workflows.workflow_node_execution import load_node_execution
 from server.app.workflows.workflow_node_profile import (
@@ -215,13 +219,6 @@ def _load_nodes(
                 "Node field 'resources' was removed; configure CMS access on the "
                 "node's config_schema (workspace node config + vault)."
             )
-        raw_config = raw_node.get("config")
-        if raw_config is None:
-            raw_config = {}
-        if not isinstance(raw_config, dict) or not all(isinstance(key, str) for key in raw_config):
-            raise WorkflowDefinitionError(
-                f"Node {node_key}.config must be a mapping with string keys"
-            )
         node = WorkflowNode(
             key=node_key,
             label=node_label,
@@ -231,11 +228,12 @@ def _load_nodes(
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
             terminal=_load_terminal(raw_node, node_key),
             execution=load_node_execution(raw_node, node_key),
-            config=dict(raw_config),
+            config=load_node_config(raw_node, node_key),
             config_schema=load_node_config_schema(raw_node, node_key),
             skill=load_node_skill(raw_node, node_key),
             tools=tuple(tools),
             requires_labels=load_node_requires_labels(raw_node, node_key),
+            **load_failure_policy(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
             node_type=node_type,

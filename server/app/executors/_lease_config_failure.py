@@ -41,8 +41,15 @@ def fail_without_lease(
             current_generation,
         )
         return None
+    snapshot = conn.execute(
+        "select workflow_definition_snapshot_json from jobs where id=%s", (request.job_id,)
+    ).fetchone()
+    failure_default = failure_classification.node_failure_default(
+        snapshot["workflow_definition_snapshot_json"] if snapshot is not None else "",
+        request.node_key,
+    )
     failure_category, failure_detail = failure_classification.resolve_failure_fields(
-        "failed", None, error_message
+        "failed", None, error_message, failure_default=failure_default
     )
     node_run_id = record_failed_node_without_execution(
         conn,

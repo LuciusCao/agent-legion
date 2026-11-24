@@ -1,4 +1,4 @@
-"""Batch rerun preview route: read-only eligible/total counts."""
+"""Batch rerun preview route: read-only counts and planned targets."""
 
 from __future__ import annotations
 
@@ -38,6 +38,8 @@ def create_batch_rerun_preview_router(
             payload.node_key,
             from_failed_node=payload.from_failed_node,
             failure_category=payload.failure_category,
+            strategy=payload.strategy or "auto",
+            from_node_key=payload.from_node_key,
             job_filter=payload.resolved_filter(),
             exclude_ids=payload.exclude_ids,
         )

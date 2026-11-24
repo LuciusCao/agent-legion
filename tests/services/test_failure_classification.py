@@ -629,3 +629,50 @@ def test_crash_summary_preserves_exit_code_124_timeout_semantics() -> None:
         "unknown",
         "execution_error",
     )
+
+
+def test_failure_default_replaces_only_unknown_category_and_preserves_detail():
+    assert resolve_failure_fields(
+        "failed", 1, "unrecognized content", failure_default="business"
+    ) == ("business", "unknown")
+    assert resolve_failure_fields(
+        "failed", 1, "Agent process exited 3", failure_default="business"
+    ) == ("business", "execution_error")
+    assert resolve_failure_fields(
+        "failed", 1, "unrecognized content", failure_default="unknown"
+    ) == ("unknown", "unknown")
+    assert resolve_failure_fields(
+        "failed", 1, "unrecognized content", failure_default="invalid"
+    ) == ("unknown", "unknown")
+
+
+def test_failure_default_never_overrides_known_rules_or_their_details():
+    cases = [
+        ("review_rejected: wrong answer", ("business", "review_rejected")),
+        ("Output validation failed: bad schema", ("business", "output_invalid")),
+        ("HTTPError: 404 Client Error", ("business", "source_missing")),
+        ("terminated", ("technical", "provider_stream")),
+        ("Missing outputs: report.json", ("technical", "output_missing")),
+    ]
+    for message, expected in cases:
+        assert resolve_failure_fields("failed", 1, message, failure_default="unknown") == expected
+        assert resolve_failure_fields("failed", 1, message, failure_default="business") == expected
+
+
+def test_system_declared_fact_beats_rules_and_failure_default():
+    assert resolve_failure_fields(
+        "failed",
+        1,
+        "terminated",
+        "business",
+        "review_rejected",
+        "technical",
+    ) == ("business", "review_rejected")
+    assert resolve_failure_fields(
+        "failed",
+        1,
+        "unrecognized content",
+        "unknown",
+        "system_observed_unknown",
+        "business",
+    ) == ("unknown", "system_observed_unknown")

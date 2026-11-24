@@ -769,7 +769,7 @@ invariants:
         gate: full
 
   - id: DB-FAILURE-001
-    statement: "node_runs/job_nodes failure_category is restricted to {'', 'technical', 'business', 'unknown'} (empty for non-failures); unrecognized failures classify as unknown and never default to technical; orphan recovery assigns (technical, worker_orphaned) and the stale-definition sweep assigns (technical, stale_definition) directly at their write paths."
+    statement: "node_runs/job_nodes failure_category is restricted to {'', 'technical', 'business', 'unknown'} (empty for non-failures); without a frozen node failure_default, unrecognized failures classify as unknown and never default to technical; orphan recovery assigns (technical, worker_orphaned) and the stale-definition sweep assigns (technical, stale_definition) directly at their write paths."
     owner: jobs
     risk: high
     evidence:
@@ -781,6 +781,27 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
+        gate: quick
+
+  - id: EXEC-FAILURE-POLICY-001
+    statement: "WorkflowNode on_failure/failure_default declarations version with the revision and freeze into each job snapshot; legacy missing fields preserve empty defaults and historical behavior. Lease finish and fail-without-lease read only that frozen snapshot, never the active revision. Classification precedence is system declared category/detail, then every known rule and its detail, then the node failure_default only for an otherwise-unknown category while preserving detail, then unknown; failure_default never occupies declared_category. Auto rerun resolves on_failure[category] independently per failed node with legacy technical=self/business=upstream/unknown=self fallbacks, explicit strategy/from_node overrides, all direct explicit+implicit executable parents (root self), stable dedupe and pre-write eligibility. Preview, synchronous execute and the async feeder share this resolver; preview planned_targets is additive and eligible-only."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workflows/test_workflow_loader.py
+        gate: quick
+      - kind: contract
+        target: tests/services/test_failure_classification.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/leases/test_failure_classification_persistence.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_job_rerun_by_failure.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_job_rerun.py
         gate: quick
 
   - id: DB-FAILURE-002

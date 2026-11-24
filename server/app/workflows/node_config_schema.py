@@ -23,6 +23,15 @@ from server.app.workflows.schema import WorkflowDefinitionError
 RESERVED_EXECUTION_KEYS = frozenset({"timeout_seconds", "sandbox_network"})
 
 
+def load_node_config(raw_node: dict[str, Any], node_key: str) -> dict[str, Any]:
+    raw = raw_node.get("config")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or not all(isinstance(key, str) for key in raw):
+        raise WorkflowDefinitionError(f"Node {node_key}.config must be a mapping with string keys")
+    return dict(raw)
+
+
 def load_node_config_schema(raw_node: dict[str, Any], node_key: str) -> dict[str, Any]:
     """Parse and validate a node's optional ``config_schema:`` block."""
     raw = raw_node.get("config_schema")

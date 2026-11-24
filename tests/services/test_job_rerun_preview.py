@@ -92,7 +92,9 @@ def test_preview_constant_queries_for_large_selection(preview_service, job_db, m
 
     result = batch_rerun_preview(preview_service, workspace_id, ids, "intake_knowledge_points")
 
-    assert result == {"total_count": _JOB_COUNT, "eligible_count": _JOB_COUNT}
+    assert result["total_count"] == result["eligible_count"] == _JOB_COUNT
+    assert len(result["plans"]) == _JOB_COUNT
+    assert all(plan["planned_targets"] == ["intake_knowledge_points"] for plan in result["plans"])
     assert counter["n"] <= _MAX_READ_CONNECTIONS
 
 
@@ -104,5 +106,7 @@ def test_preview_from_failed_node_constant_queries(preview_service, job_db, monk
 
     result = batch_rerun_preview(preview_service, workspace_id, ids, from_failed_node=True)
 
-    assert result == {"total_count": _JOB_COUNT, "eligible_count": _JOB_COUNT}
+    assert result["total_count"] == result["eligible_count"] == _JOB_COUNT
+    assert len(result["plans"]) == _JOB_COUNT
+    assert all(plan["planned_targets"] == ["write_script"] for plan in result["plans"])
     assert counter["n"] <= _MAX_READ_CONNECTIONS

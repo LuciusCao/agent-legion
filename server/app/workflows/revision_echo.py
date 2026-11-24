@@ -88,6 +88,10 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         # the execution block above).
         if node.requires_labels:
             raw_node["requires_labels"] = dict(node.requires_labels)
+        if node.on_failure:
+            raw_node["on_failure"] = dict(node.on_failure)
+        if node.failure_default:
+            raw_node["failure_default"] = node.failure_default
         apply_skill_echo(raw_node, node)
         payload["nodes"][key] = raw_node
     for edge in definition.edges:

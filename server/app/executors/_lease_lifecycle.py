@@ -97,7 +97,7 @@ def finish_lease(
 
     node_run = conn.execute(
         "select n.log_path, j.workspace_id as job_workspace_id,"
-        " j.storage_dir as job_storage_dir"
+        " j.storage_dir as job_storage_dir, j.workflow_definition_snapshot_json"
         " from node_runs n left join jobs j on j.id = n.job_id where n.id=%s",
         (lease["node_run_id"],),
     ).fetchone()
@@ -109,7 +109,13 @@ def finish_lease(
         lease["job_id"],
         finish_job_dir_candidates(data_dir, node_run, str(lease["job_id"])),
     )
-    failure_category, failure_detail = failure_classification.classify_execution_result(result)
+    failure_default = failure_classification.node_failure_default(
+        node_run["workflow_definition_snapshot_json"] if node_run is not None else "",
+        str(lease["node_key"]),
+    )
+    failure_category, failure_detail = failure_classification.classify_execution_result(
+        result, failure_default=failure_default
+    )
     conn.execute(
         """
         update node_runs
