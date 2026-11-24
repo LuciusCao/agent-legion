@@ -172,6 +172,19 @@ describe('jobBatchOpToCard（#946 / M52）', () => {
         op({ status: 'completed', failed_count: 0, selection_complete: false })
       ).status
     ).toBe('done')
+    expect(
+      jobBatchOpToCard(
+        op({ status: 'completed', failed_count: 1, selection_complete: false })
+      ).status
+    ).toBe('partial')
+    expect(
+      jobBatchOpToCard(op({ status: 'failed', selection_complete: false }))
+        .status
+    ).toBe('failed')
+    expect(
+      jobBatchOpToCard(op({ status: 'cancelled', selection_complete: false }))
+        .status
+    ).toBe('cancelled')
     expect(jobBatchOpToCard(op({})).selectionComplete).toBe(true)
     expect(runBatchToCard(batch({})).selectionComplete ?? true).toBe(true)
   })

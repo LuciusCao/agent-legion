@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,13 +17,20 @@ def workspace(client: TestClient) -> str:
     return WORKSPACE
 
 
-def _insert(client: TestClient, workspace_id: str, op_id: str, status: str) -> None:
+def _insert(
+    client: TestClient,
+    workspace_id: str,
+    op_id: str,
+    status: str,
+    target_spec: dict | None = None,
+) -> None:
     job_db = client.app.state.job_db
     with job_db.connect() as conn:
         conn.execute(
-            "insert into job_batch_operations(id, workspace_id, kind, status, items_total)"
-            " values (%s, %s, 'pause', %s, 3)",
-            (op_id, workspace_id, status),
+            "insert into job_batch_operations("
+            " id, workspace_id, kind, status, items_total, target_spec_json)"
+            " values (%s, %s, 'pause', %s, 3, %s)",
+            (op_id, workspace_id, status, json.dumps(target_spec or {})),
         )
 
 
@@ -73,6 +82,22 @@ def test_cancel_success_and_repeat_conflict(
     assert client.post(_url(workspace, "op-cancel", "cancel")).status_code == 409
     assert client.post(_url(workspace, "op-cancel", "pause")).status_code == 409
     assert client.post(_url(workspace, "op-cancel", "resume")).status_code == 409
+
+
+def test_cancel_preserves_incomplete_frozen_stream(client: TestClient, workspace: str) -> None:
+    target_spec = {
+        "job_ids": ["job-0", "job-1"],
+        "stream": {"source": "filter", "next_cursor": "job-2", "freeze_at": "frozen"},
+    }
+    _insert(client, workspace, "op-cancel-stream", "running", target_spec)
+
+    cancelled = client.post(_url(workspace, "op-cancel-stream", "cancel"))
+
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["selection_complete"] is False
+    row = client.app.state.job_db.get_job_batch_operation("op-cancel-stream")
+    assert json.loads(str(row["target_spec_json"])) == target_spec
 
 
 @pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])

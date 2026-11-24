@@ -24,6 +24,11 @@ import {
 import { useUiStore } from '../stores/uiStore'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { TestQueryProvider } from '../testing/testQueryClient'
+import { TaskCard } from '../features/taskCenter/TaskCard'
+import {
+  jobBatchOpToCard,
+  type TaskCardStatus,
+} from '../features/taskCenter/taskCardModel'
 
 vi.mock('../api/runBatchesApi', () => ({
   listRunBatches: vi.fn(),
@@ -534,6 +539,9 @@ describe('TaskCenterPage（#1157 phase3）', () => {
       '暂停前已处理 600 · 已知 1,200+ 条（选择尚未完成）'
     )
     expect(paused).toHaveTextContent('选择发现也已挂起')
+    const pausedProgress = within(paused).getByRole('progressbar')
+    expect(pausedProgress).not.toHaveAttribute('aria-valuenow')
+    expect(pausedProgress).toHaveAttribute('aria-valuetext', '已暂停')
 
     const explicit = screen.getByTestId('task-card-op-explicit')
     expect(explicit).toHaveTextContent('已处理 2 / 4')
@@ -545,6 +553,49 @@ describe('TaskCenterPage（#1157 phase3）', () => {
     expect(screen.getByTestId('task-card-run-explicit')).not.toHaveTextContent(
       '选择计算中'
     )
+  })
+
+  it('keeps every incomplete-selection status free of fixed totals and determinate ARIA', () => {
+    const cases: Array<[TaskCardStatus, string, string, string]> = [
+      ['running', '选择计算中', '已处理', '仍在计算'],
+      ['queued', '排队中', '已处理', '选择尚未完成'],
+      ['paused', '已暂停', '暂停前已处理', '选择尚未完成'],
+      ['done', '已完成', '已处理', '选择尚未完成'],
+      ['partial', '部分完成', '已处理', '选择尚未完成'],
+      ['failed', '失败', '失败前已处理', '选择尚未完成'],
+      ['cancelled', '已取消', '取消前已处理', '选择尚未完成'],
+    ]
+    const base = jobBatchOpToCard(op({ selection_complete: false }) as never)
+    render(
+      <>
+        {cases.map(([status]) => (
+          <TaskCard
+            key={status}
+            card={{ ...base, id: `op-${status}`, status }}
+            nowMs={Date.parse('2026-10-21T02:24:00+00:00')}
+          />
+        ))}
+      </>
+    )
+
+    for (const [status, badge, prefix, suffix] of cases) {
+      const card = screen.getByTestId(`task-card-op-${status}`)
+      expect(
+        within(card).getByText(badge, { selector: 'span[class*="_st_"]' })
+      ).toBeInTheDocument()
+      expect(card).toHaveTextContent(
+        `${prefix} 8,400 · 已知 20,000+ 条（${suffix}）`
+      )
+      expect(card).not.toHaveTextContent('/ 20,000')
+      if (status !== 'running') expect(card).not.toHaveTextContent('仍在计算')
+      const progress = within(card).getByRole('progressbar')
+      expect(progress).not.toHaveAttribute('aria-valuenow')
+      expect(progress.firstElementChild).not.toHaveAttribute('style')
+      expect(progress).toHaveAttribute('aria-valuetext', badge)
+      expect(progress.className).toContain(
+        status === 'running' ? 'pbar-selecting' : `pbar-${status}`
+      )
+    }
   })
 
   it('archives a terminal op card via the op archive endpoint', async () => {
