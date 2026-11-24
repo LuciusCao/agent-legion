@@ -370,8 +370,8 @@ Secret handling for code tasks is summarized in §8 (Worker hygiene).
 `pi` and `velites` are peer runtimes declared per agent node. Since #805 /
 schema v105, a self-contained node's own `execution.runtime` is the only
 authoring source; writing a workflow-root `execution` block fails fast with
-migration guidance. Agent definitions are read-only history (their write API
-is deprecated). The legacy capability resolution only serves job snapshots
+migration guidance. Agent definitions are read-only history (their former
+write surfaces are removed). The legacy capability resolution only serves job snapshots
 frozen before the v93 inlining and the nodes of an active revision that v93
 could not inline: new jobs on such a revision keep resolving those nodes by
 capability until the node declares `execution.runtime` and a new revision is
