@@ -13,7 +13,7 @@ LOCAL text chunks (``emitLocalChunk``), so the markers below are a kimi-0.42
 heuristic: start = "Compacting conversation context" (optionally "with
 instruction: ..."), end = "Compaction completed." / "Compaction cancelled.".
 This module owns the compacting flag (runtime + session row mirror + the
-self-clear timer), the usage_update mirror, the send guard, and the per-turn
+self-clear timer), the ACP usage_update mirror, the send guard, and the per-turn
 content counter; the degenerate-turn verdict that reads that counter lives
 in empty_turn.py (#863).
 """
@@ -157,6 +157,7 @@ def late_gate_blocked(
     if runtime.compacting and not live:
         runtime.compacting = False
         runtime.compacting_since = None
+        runtime.compaction_done = False
         db.update_studio_chat_session(session_id, compacting=False)
     return False
 
@@ -194,6 +195,7 @@ def note_ready(
         runtime.compacting = False
         runtime.compacting_since = None
         runtime.compaction_seen = False
+        runtime.compaction_done = False
 
 
 def send_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -> bool:
@@ -211,5 +213,6 @@ def send_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -
             return False
         runtime.compacting = False
         runtime.compacting_since = None
+        runtime.compaction_done = False
     db.update_studio_chat_session(session_id, compacting=False)
     return False

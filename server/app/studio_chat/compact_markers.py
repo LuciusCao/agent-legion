@@ -9,7 +9,6 @@ timer). Split from compaction.py (file budget).
 
 from __future__ import annotations
 
-import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -18,10 +17,6 @@ from server.app.studio_chat import compact_timer
 if TYPE_CHECKING:
     from server.app.studio_chat.events import ServiceBackend
     from server.app.studio_chat.runtime import SessionRuntime
-
-# kimi's completion notice: "Compaction completed.\n- Messages compacted: N\n
-# - Tokens before: N\n- Tokens after: N" (en-US grouped digits).
-_TOKENS_AFTER = re.compile(r"Tokens after:\s*([\d,]+)")
 
 
 def apply_marker_gated(
@@ -32,6 +27,8 @@ def apply_marker_gated(
     text: str,
     *,
     timeout: float,
+    structured: bool = False,
+    retry: bool = False,
 ) -> bool:
     """Gate + apply in ONE runtime.lock critical section; True = consumed.
 
@@ -43,7 +40,11 @@ def apply_marker_gated(
     exception being a manual /compact turn whose markers are emitted
     in-turn. Anything else (another ACP agent, or agent prose that happens
     to start with the same prefix inside a normal turn) is ordinary stream
-    text and falls through (False), never flipping the flag.
+    text and falls through (False), never flipping the flag. A verified wire
+    CompactionBegin/End is not prose, so ``structured`` exempts only the turn
+    context condition; the kimi identity condition still applies. ``retry``
+    belongs to the watcher's durable backlog: after a partial apply it forces
+    the one missing notice, while ordinary duplicate signals stay coalesced.
 
     #694 review R3-P1 (atomicity): every gate field (kimi_agent /
     turn_open / turn_may_compact / compacting) is written under
@@ -60,15 +61,21 @@ def apply_marker_gated(
     if runtime is None:
         return False
     with runtime.lock:
-        if not runtime.kimi_agent or (runtime.turn_open and not runtime.turn_may_compact):
+        if not runtime.kimi_agent or (
+            runtime.turn_open and not (runtime.turn_may_compact or structured)
+        ):
             return False
         # The marker interrupts prose like a tool call does: close the
         # open stream slots so later chunks start a fresh row.
         runtime.stream.reset()
-        already = runtime.compacting and marker == "start"
+        already = not retry and (
+            (runtime.compacting and marker == "start")
+            or (runtime.compaction_done and marker == "done")
+        )
         runtime.compacting = marker == "start"
         runtime.compacting_since = time.monotonic() if marker == "start" else None
         runtime.compaction_seen = runtime.compaction_seen or marker == "start"
+        runtime.compaction_done = marker == "done"
         since = runtime.compacting_since
     if marker == "start":
         compact_timer.arm_self_clear(backend, session_id, runtime, since, timeout=timeout)
@@ -76,7 +83,7 @@ def apply_marker_gated(
         compact_timer.cancel_self_clear(runtime)
     backend.db.update_studio_chat_session(session_id, compacting=marker == "start")
     if not already:
-        # Duplicate start marker (re-arm only): one timeline notice is enough.
+        # Duplicate lifecycle signal: one timeline notice per transition.
         if marker == "start":
             content: dict[str, Any] = {
                 "event": "compact_start",
@@ -85,28 +92,7 @@ def apply_marker_gated(
         elif text.strip().startswith("Compaction cancelled."):
             content = {"event": "compact_done", "detail": "上下文压缩已取消，可继续发送"}
         else:
-            # kimi's completion chunk carries the token stats lines — keep them.
             content = {"event": "compact_done", "detail": text.strip()}
-            refresh_usage_after_compaction(backend, session_id, text)
         backend.store.append_message(session_id, "status", "system", content)
     backend.store.publish_session(session_id)
     return True
-
-
-def refresh_usage_after_compaction(backend: ServiceBackend, session_id: str, text: str) -> None:
-    """#826: kimi pushes usage_update only when a prompt turn settles, and
-    compaction finishes out-of-turn — so the context ring kept showing the
-    pre-compaction reading until the next turn. The completion notice
-    carries the post-compaction context size ("Tokens after: N"): fold it
-    into the usage mirror (window size unchanged) so the publish_session
-    that follows the marker refreshes the ring immediately. No parsable
-    count or no prior window size → leave the mirror alone; the next turn's
-    usage_update corrects it."""
-    match = _TOKENS_AFTER.search(text)
-    if match is None:
-        return
-    usage = (backend.db.get_studio_chat_session(session_id) or {}).get("usage")
-    if not isinstance(usage, dict) or not isinstance(usage.get("size"), int):
-        return
-    used = int(match.group(1).replace(",", ""))
-    backend.db.update_studio_chat_session(session_id, usage={**usage, "used": used})

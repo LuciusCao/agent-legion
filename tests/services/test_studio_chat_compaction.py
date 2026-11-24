@@ -198,11 +198,8 @@ def test_compact_markers_become_status_messages_and_flag(direct) -> None:
         service.shutdown()
 
 
-def test_compaction_completion_refreshes_context_usage(direct) -> None:
-    """#826: kimi only pushes usage_update when a turn settles and
-    compaction finishes out-of-turn — the completion notice's "Tokens
-    after" must refresh the usage mirror (and its SSE session frame) at
-    once instead of leaving the pre-compaction reading until the next turn."""
+def test_compaction_completion_text_does_not_infer_context_usage(direct) -> None:
+    """#1025: usage comes from StatusUpdate/usage_update, never marker text."""
     service, bus, session_id, _runtime, _workspace_id = direct
     try:
         _ready(service, session_id)
@@ -217,9 +214,9 @@ def test_compaction_completion_refreshes_context_usage(direct) -> None:
                 "- Tokens before: 200,000\n- Tokens after: 31,234"
             ),
         )
-        assert service.get_session(session_id)["usage"] == {"used": 31234, "size": 262144}
+        assert service.get_session(session_id)["usage"] == {"used": 200000, "size": 262144}
         session_payloads = [p for _, p in bus.events if p.get("type") == "session"]
-        assert session_payloads[-1]["session"]["usage"] == {"used": 31234, "size": 262144}
+        assert session_payloads[-1]["session"]["usage"] == {"used": 200000, "size": 262144}
     finally:
         service.shutdown()
 
@@ -396,18 +393,18 @@ def test_compact_timeout_timer_self_clears_and_recovers_input(direct, monkeypatc
 
 
 def test_compact_done_cancels_the_self_clear_timer(direct, monkeypatch) -> None:
-    """A normal completion cancels the timer: no late compact_timeout notice
-    fires into the timeline after the window already closed cleanly."""
-    monkeypatch.setattr(compaction, "COMPACTING_TIMEOUT_SECONDS", 0.3)
+    """A normal completion cancels the timer: even an already-dequeued late
+    firing cannot append compact_timeout after the clean done transition."""
+    monkeypatch.setattr(compaction, "COMPACTING_TIMEOUT_SECONDS", 30)
     service, _bus, session_id, runtime, workspace_id = direct
     try:
         _ready(service, session_id)
         service._on_update(session_id, _chunk("Compacting conversation context\n"))
+        with runtime.lock:
+            armed_since = runtime.compacting_since
         service._on_update(session_id, _chunk("Compaction completed.\n- Tokens after: 80,000"))
         assert runtime.compact_timer is None
-        deadline = time.monotonic() + 1.0
-        while time.monotonic() < deadline:
-            time.sleep(0.05)
+        compact_timer._fire(service, session_id, runtime, armed_since)
         events = [e["event"] for e in _status_events(service, session_id, workspace_id)]
         assert events == ["compact_start", "compact_done"]
     finally:

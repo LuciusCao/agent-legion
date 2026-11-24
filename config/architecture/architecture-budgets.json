@@ -2079,6 +2079,7 @@
     "server/app/studio_chat/compact_timer.py": 44,
     "server/app/studio_chat/compact_timer_fire.py": 71,
     "server/app/studio_chat/compaction.py": 120,
+    "server/app/studio_chat/compaction_wire.py": 105,
     "server/app/studio_chat/completion_cursor.py": 79,
     "server/app/studio_chat/draft_events.py": 71,
     "server/app/studio_chat/empty_turn.py": 76,

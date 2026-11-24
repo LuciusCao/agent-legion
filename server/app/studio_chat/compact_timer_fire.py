@@ -74,6 +74,7 @@ def fire(
             return
         runtime.compacting = False
         runtime.compacting_since = None
+        runtime.compaction_done = False
         runtime.compact_timer = None
         # #694 review R6-P2: the timeout notice also joins this section —
         # appended after release it could land AFTER a re-armed window's

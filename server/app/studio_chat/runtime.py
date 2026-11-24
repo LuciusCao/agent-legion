@@ -107,6 +107,9 @@ class SessionRuntime:
         # process lifetime — the evidence gate for the empty_turn wording
         # (#863); cleared by on_ready like the flag itself.
         self.compaction_seen = False
+        # Coalesces duplicate completion signals across wire and legacy text;
+        # reset by a new window, timeout, or fresh process (never an outcome).
+        self.compaction_done = False
         # Per-turn bookkeeping for the degenerate-turn detector
         # (empty_turn.py): open_turn stamps turn_started_at (also the turn's
         # identity for the deferred verdict) / zeroes turn_update_count /
