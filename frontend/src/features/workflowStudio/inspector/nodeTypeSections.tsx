@@ -36,14 +36,15 @@ export const NODE_TYPE_SECTIONS: Record<SwitchableNodeType, SectionSpec> = {
       DependencySection,
     ],
   },
-  // agent：基本设置 → 执行能力（节点执行档案：runtime / skill，#935——
-  // 结构通道）→ 运行配置（M48 运行通道专区：provider/model/thinking/
-  // prompt/tools/requires_labels 即改即存）→ 节点配置 → 数据契约 →
-  // 依赖 → 结构保存条（props 切片类型兼容，直接注册免适配器）。
+  // agent：基本设置 → 执行能力（runtime / skill）→ 配置 Schema（均为
+  // 节点自含档案，随发布）→ 运行配置（provider/model/thinking/prompt/
+  // tools/requires_labels 即改即存）→ 节点配置 → 数据契约 → 依赖 →
+  // 结构保存条（props 切片类型兼容，直接注册免适配器）。
   agent: {
     sections: [
       EditorSection,
       ExecutionSection,
+      ConfigSchemaSection,
       RuntimeChannelSection,
       NodeConfigSection,
       DataContractSection,

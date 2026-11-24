@@ -22,6 +22,16 @@ export function isConfigValueOfType(
   return type === 'number' || (type === 'integer' && Number.isInteger(value))
 }
 
+/** 仅识别 vault 引用标记；secret 字段的其它 config 值不得写回草稿。 */
+export function isSecretRefConfigValue(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).secret_ref === 'string'
+  )
+}
+
 /** 已 parse 节点上的 node.config 键随 schema 键移动：rename 迁移旧键值
  * （值保留），delete 删除键；全部键清空后整段 config 删除。config 缺失
  * 或无该键时 no-op。 */

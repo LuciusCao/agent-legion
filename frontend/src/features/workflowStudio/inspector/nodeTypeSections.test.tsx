@@ -67,11 +67,14 @@ describe('nodeTypeSections registry (#392 Phase 2)', () => {
     expect(names).not.toContain('ApprovalConfigSection')
   })
 
-  it('composes agent sections without the code-pool section', () => {
+  it('composes agent sections with its node-owned schema and no code pool', () => {
     const names = NODE_TYPE_SECTIONS.agent.sections.map((s) => s.name)
     expect(names).toContain('ExecutionSection')
+    expect(names).toContain('ConfigSchemaSection')
+    expect(names.indexOf('ConfigSchemaSection')).toBeGreaterThan(
+      names.indexOf('ExecutionSection')
+    )
     expect(names).not.toContain('CodeSection')
-    expect(names).not.toContain('ConfigSchemaSection')
     expect(names).not.toContain('ApprovalConfigSection')
   })
 

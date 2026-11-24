@@ -582,7 +582,7 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('keeps Agent schema ownership inside Agent config (#406)', async () => {
+  it('renders the Agent node-owned schema editor (#1135)', async () => {
     const agentYaml = [
       'key: demo',
       'nodes:',
@@ -606,8 +606,11 @@ describe('WorkflowNodeInspector for draft-only (ghost) nodes', () => {
       'Agent 配置'
     )
     expect(
-      screen.queryByLabelText('配置 Schema intake')
-    ).not.toBeInTheDocument()
+      await screen.findByLabelText('配置 Schema intake')
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('属性名 ignored_node_schema')).toHaveValue(
+      'ignored_node_schema'
+    )
   })
 
   it('keeps the read-only entry contract for a ghost start node', () => {

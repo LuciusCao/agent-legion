@@ -3,6 +3,7 @@ import type { SchemaPropertyType } from './workflowStudioYamlDraft.configSchema.
 import { stripTypeIncompatibleConstraints } from './workflowStudioYamlDraft.configSchema.constraints'
 import {
   isConfigValueOfType,
+  isSecretRefConfigValue,
   migrateNodeConfigKey,
 } from './workflowStudioYamlDraft.configSchema.configLink'
 import {
@@ -10,7 +11,7 @@ import {
   parseWorkflowYaml,
 } from './workflowStudioYamlDraft.parse'
 
-// code 节点 config_schema 属性级 CRUD（#418 面板），从
+// code/agent 节点 config_schema 属性级 CRUD（#418 / #1135 面板），从
 // workflowStudioYamlDraft.configSchema 拆出以守单文件预算。读 → 改 →
 // 整体写回；写侧在 parse 成功后 mutate 同一 draft，保持与整体替换
 // patchWorkflowNodeConfigSchema 相同的往返语义（未知键保留）。
@@ -24,6 +25,8 @@ export type SchemaPropertyPatch = {
   type?: SchemaPropertyType
   description?: string
   default?: string | number | boolean | undefined
+  secret?: boolean
+  secretRef?: boolean
   runtimeMutable?: boolean
 }
 
@@ -36,10 +39,10 @@ function draftNodeOf(rawYaml: string, nodeKey: string) {
 }
 
 /**
- * 更新一个已有 schema 属性的 type/description/default/runtime_mutable。
- * default 用 'in' 区分「删除」（{ default: undefined }）与「未提供」——
- * 空串/undefined 都删键（#428 codex P2-A）。type 变化的连带清理在
- * configSchema.typeSwitch（#428 二轮复审 P2-2）。
+ * 更新一个已有 schema 属性的声明。default 用 'in' 区分「删除」
+ * （{ default: undefined }）与「未提供」——空串/undefined 都删键。
+ * secret 属性不保留 default，node.config 也只保留 secret_ref 标记；
+ * plaintext 不得经结构化编辑进入草稿或 revision（VAULT-SECRET-001）。
  */
 export function patchWorkflowNodeSchemaProperty(
   rawYaml: string,
@@ -58,7 +61,9 @@ export function patchWorkflowNodeSchemaProperty(
     if (patch.type !== prop.type) {
       stripTypeIncompatibleConstraints(nextProp, patch.type)
       const configValue = node.config?.[propKey]
+      const keepsSecretRefs = patch.secret ?? prop.secret ?? false
       const stale =
+        !keepsSecretRefs &&
         configValue !== undefined &&
         !isConfigValueOfType(configValue, patch.type)
       if (stale) migrateNodeConfigKey(node, propKey)
@@ -72,6 +77,20 @@ export function patchWorkflowNodeSchemaProperty(
     if (patch.default === undefined || patch.default === '')
       delete nextProp.default
     else nextProp.default = patch.default
+  }
+  if (patch.secret !== undefined) {
+    if (patch.secret) nextProp.secret = true
+    else delete nextProp.secret
+  }
+  if (patch.secretRef !== undefined) {
+    if (patch.secretRef) nextProp.secret_ref = true
+    else delete nextProp.secret_ref
+  }
+  if (nextProp.secret) {
+    delete nextProp.default
+    const configValue = node.config?.[propKey]
+    if (configValue !== undefined && !isSecretRefConfigValue(configValue))
+      migrateNodeConfigKey(node, propKey)
   }
   if (patch.runtimeMutable !== undefined) {
     if (patch.runtimeMutable) nextProp.runtime_mutable = true

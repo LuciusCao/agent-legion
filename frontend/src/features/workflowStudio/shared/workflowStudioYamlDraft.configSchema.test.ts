@@ -463,6 +463,57 @@ describe('add/rename/remove schema properties', () => {
         .nodes?.generate ?? {}
     expect(node).not.toHaveProperty('config_schema')
   })
+  it('drops defaults and plaintext config when a property becomes secret', () => {
+    const next = patchWorkflowNodeSchemaProperty(
+      dagYamlWithConfig,
+      'generate',
+      'bank_version',
+      { secret: true }
+    )
+    const prop = (
+      schemaOf(next).properties as Record<string, Record<string, unknown>>
+    ).bank_version
+    expect(prop.secret).toBe(true)
+    expect(prop).not.toHaveProperty('default')
+    expect(configOf(next)).toEqual({ dry_run: true })
+  })
+
+  it('keeps secret_ref config markers and patches the secret_ref declaration', () => {
+    const withMarker = dagYamlWithConfig.replace(
+      'bank_version: v2',
+      'bank_version: {secret_ref: node:demo:generate:bank_version}'
+    )
+    const next = patchWorkflowNodeSchemaProperty(
+      withMarker,
+      'generate',
+      'bank_version',
+      { secret: true, secretRef: true }
+    )
+    expect(configOf(next).bank_version).toEqual({
+      secret_ref: 'node:demo:generate:bank_version',
+    })
+    expect(
+      (schemaOf(next).properties as Record<string, unknown>).bank_version
+    ).toMatchObject({ secret: true, secret_ref: true })
+  })
+
+  it('never writes a default into an already secret property', () => {
+    const secret = patchWorkflowNodeSchemaProperty(
+      dagYaml,
+      'generate',
+      'bank_version',
+      { secret: true }
+    )
+    const next = patchWorkflowNodeSchemaProperty(
+      secret,
+      'generate',
+      'bank_version',
+      { default: 'plaintext-token' }
+    )
+    expect(
+      (schemaOf(next).properties as Record<string, unknown>).bank_version
+    ).not.toHaveProperty('default')
+  })
 })
 
 describe('patchWorkflowNodeConfigSchema (whole-block replace)', () => {

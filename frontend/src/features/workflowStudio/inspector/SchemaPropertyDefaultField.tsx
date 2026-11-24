@@ -12,7 +12,8 @@ import styles from './WorkflowStructuredEditor.module.css'
 // 类型 → enum/边界，codex 二轮 P2）：非法不落草稿并行内报错——enum 外/
 // 越界的默认值会被 loader 拒绝整份草稿。boolean 的下拉同样受 enum
 // 约束：只展示 enum 允许的选项，从源头杜绝选入后端必拒的值（codex
-// 终轮 P2）。
+// 终轮 P2）。secret 属性只渲染固定掩码，值经 vault 通道设置；
+// secret_ref 属性的默认值是引用名而非密钥明文，可沿用字符串编辑器。
 export function SchemaPropertyDefaultField({
   propKey,
   prop,
@@ -27,18 +28,34 @@ export function SchemaPropertyDefaultField({
   const [defaultError, setDefaultError] = useState('')
   const [draft, setDraft] = useState('')
   const [focused, setFocused] = useState(false)
+  if (prop.secret) {
+    return (
+      <div className={styles.field}>
+        <span className={styles.fieldLabel}>默认值（仅掩码）</span>
+        <input
+          aria-label={`secret 掩码 ${propKey}`}
+          className={styles.fieldInput}
+          value="••••••••••••"
+          readOnly
+        />
+        <span className={styles.fieldHint}>
+          secret 值只能经 vault 运行时覆盖设置；此处不显示、输入或保存明文。
+        </span>
+      </div>
+    )
+  }
   const defaultRaw = prop.default === undefined ? '' : String(prop.default)
   const value = focused ? draft : defaultRaw
   // boolean 下拉只展示 enum 允许的选项（codex 终轮 P2）：YAML 声明
   // enum: [true] 时选 false 会被后端以「默认值不在 enum」拒绝发布。
-  const allowedBooleans = (
-    prop.enum !== undefined
-      ? (prop.enum as unknown[]).filter((item) => typeof item === 'boolean')
-      : [true, false]
-  ).map((item) => String(item))
+  const allowedBooleans = (prop.enum ?? [true, false])
+    .filter((item) => typeof item === 'boolean')
+    .map(String)
   return (
     <div className={styles.field}>
-      <span className={styles.fieldLabel}>默认值</span>
+      <span className={styles.fieldLabel}>
+        {prop.secret_ref ? '默认 secret_ref' : '默认值'}
+      </span>
       {prop.type === 'boolean' ? (
         <select
           aria-label={`默认值 ${propKey}`}
