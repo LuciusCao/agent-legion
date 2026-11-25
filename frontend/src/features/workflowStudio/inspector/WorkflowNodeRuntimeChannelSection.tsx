@@ -215,7 +215,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
   const saveHint = props.readOnly
     ? '只读视图：运行配置区整体禁用。'
     : runtimeChangedKeys.length > 0
-      ? '运行配置有未保存修改：点下方按钮即刻生效，不受结构改动 / 发布流程影响。'
+      ? '运行配置有未保存修改：点保存即刻生效，不受结构改动 / 发布流程影响。'
       : savedKeys.length > 0
         ? '本次运行配置已生效。继续修改后可再次保存，同样不产生版本。'
         : '运行配置独立于草稿 / 发布链路：点保存即刻写入并对新执行生效，不会触发「未发布变更」。'
@@ -491,10 +491,11 @@ export function WorkflowNodeRuntimeChannelSection(props: {
             </div>
             <Button
               className={styles.saveButton}
-              variant="outlined"
+              variant="contained"
               size="small"
               disabled={saveDisabled}
               onClick={() => void studio.saveRuntimeConfig()}
+              sx={{ borderRadius: '8px', ml: 'auto', whiteSpace: 'nowrap' }}
             >
               {studio.runtimeSaving ? '保存中…' : '保存运行配置'}
             </Button>

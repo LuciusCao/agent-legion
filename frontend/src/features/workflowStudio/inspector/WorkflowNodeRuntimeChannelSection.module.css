@@ -95,25 +95,29 @@
 .saveBar {
   margin-top: 2px;
   padding-top: 12px;
+  padding-bottom: 12px;
   border-top: 1px solid #e8eaed;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
 }
 .saveButton {
-  align-self: flex-start;
+  align-self: center;
 }
 .saveHint {
   display: flex;
+  flex: 1 1 260px;
+  min-width: 0;
   gap: 6px;
   font-size: 11.5px;
   color: #687078;
   line-height: 1.55;
-  align-items: flex-start;
+  align-items: center;
 }
 .saveHintIcon {
   flex-shrink: 0;
-  margin-top: 1px;
   color: #9aa0a6;
 }
 .topNote {
