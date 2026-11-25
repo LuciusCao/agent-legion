@@ -1,13 +1,10 @@
-import type {
-  ChatMessage,
-  PermissionView,
-  ToolCallView,
-} from './studioChatMessages'
+import type { ChatMessage, PermissionView } from './studioChatMessages'
 
 const NON_TERMINAL_KINDS = new Set(
   'read edit delete move search fetch think switch_mode'.split(' ')
 )
 const TERMINAL_TITLES = new Set(['bash', 'shell', 'terminal'])
+const GRANT_OFF_NOTE = '终端授权围栏关闭时，不匹配或额外终端仍可执行。'
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -53,7 +50,7 @@ function approvedDecision(text: string | null): boolean {
 
 export function permissionTerminalView(
   toolCall: Record<string, unknown> | null,
-  evidence: ToolCallView | undefined,
+  firstCommand: string | undefined,
   resolved: Record<string, unknown> | undefined,
   toolTitle: string
 ) {
@@ -66,7 +63,7 @@ export function permissionTerminalView(
     summary: terminal ? permissionSummaryText(toolCall?.content) || null : null,
     lateBoundCommand:
       terminal && !command && (!resolved || approved)
-        ? asText(evidence?.rawInput?.command) || null
+        ? firstCommand || null
         : null,
     decisionText: resolved ? decisionText(resolved) : null,
   }
@@ -111,12 +108,12 @@ export function permissionPresentation(permission: PermissionView) {
     permission.terminal && !command && !late && (pending || approved)
   const note = pending
     ? command
-      ? '你批准的就是上方完整命令；不允许追加、删改或替换为另一条命令。'
-      : '批准时无法核对完整命令。主 Agent 批准后晚绑定首条完整命令；子 Agent 未上报事件时，一次批准仅对应一次终端执行，不限定命令。'
+      ? `你批准的就是上方完整命令；终端授权围栏开启时不允许追加、删改或替换为另一条命令。${GRANT_OFF_NOTE}`
+      : `批准时无法核对完整命令。终端授权围栏开启时，主 Agent 批准后晚绑定首条完整命令；子 Agent 未上报事件时，一次批准仅对应一次终端执行，不限定命令。${GRANT_OFF_NOTE}`
     : late
-      ? '完整命令在批准后才出现；晚绑定后不可替换，批准前只看到摘要。'
+      ? `完整命令在批准后才出现；终端授权围栏开启时晚绑定后不可替换，批准前只看到摘要。${GRANT_OFF_NOTE}`
       : unbound
-        ? '没有可展示的完整命令；一次批准仅对应一次终端执行，不能推断实际命令。'
+        ? `没有可展示的完整命令；终端授权围栏开启时一次批准仅对应一次终端执行，不能推断实际命令。${GRANT_OFF_NOTE}`
         : ''
   const state = late
     ? '批准后已晚绑定'
@@ -131,7 +128,7 @@ export function permissionPresentation(permission: PermissionView) {
     ? !permission.terminal
       ? '将要运行的命令'
       : pending
-        ? '完整命令 · 此次授权将精确绑定'
+        ? '完整命令 · 仅在授权围栏开启时精确绑定'
         : '批准时所见 · 完整命令'
     : permission.summary
       ? pending
@@ -151,7 +148,7 @@ export function permissionPresentation(permission: PermissionView) {
     state,
     details,
     lateDetails: late
-      ? `批准后取得 · 现已绑定的完整命令\n${late}\n\n${note}`
+      ? `批准后取得 · 仅在授权围栏开启时绑定的完整命令\n${late}\n\n${note}`
       : '',
     summary: !command && permission.terminal,
     ariaLabel: label || '终端授权说明',

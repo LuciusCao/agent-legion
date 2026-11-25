@@ -45,7 +45,7 @@ export function StudioChatPermission(props: Props) {
       {lateDetails && (
         <pre
           className={styles.permissionCommand}
-          aria-label="批准后取得 · 现已绑定的完整命令"
+          aria-label="批准后取得 · 仅在授权围栏开启时绑定的完整命令"
         >
           {lateDetails}
         </pre>

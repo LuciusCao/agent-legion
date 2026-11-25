@@ -237,7 +237,7 @@ describe('StudioChatPanel', () => {
     expect(alert).toHaveTextContent('Bash')
     // 授权绑定的完整命令随卡展示（#954）：人批准的就是 terminal 要跑的那条。
     expect(
-      screen.getByLabelText('完整命令 · 此次授权将精确绑定')
+      screen.getByLabelText('完整命令 · 仅在授权围栏开启时精确绑定')
     ).toHaveTextContent('rm -rf build')
     expect(alert).toHaveTextContent('命令已精确绑定')
     expect(alert).toHaveTextContent('你批准的就是上方完整命令')
@@ -304,7 +304,9 @@ describe('StudioChatPanel', () => {
       'Requesting approval to Running: git diff…'
     )
 
-    const lateCommand = screen.getByLabelText('批准后取得 · 现已绑定的完整命令')
+    const lateCommand = screen.getByLabelText(
+      '批准后取得 · 仅在授权围栏开启时绑定的完整命令'
+    )
     expect(lateCommand).toHaveTextContent('git status --short')
     const lateCard = lateCommand.closest('[role="group"]') as HTMLElement
     expect(lateCard).toHaveTextContent('已允许 · 批准后已晚绑定')
@@ -319,7 +321,9 @@ describe('StudioChatPanel', () => {
     expect(childCard).toHaveTextContent('已允许 · 命令仍未绑定')
     expect(childCard).toHaveTextContent('没有可展示的完整命令')
     expect(
-      within(childCard).queryByLabelText('批准后取得 · 现已绑定的完整命令')
+      within(childCard).queryByLabelText(
+        '批准后取得 · 仅在授权围栏开启时绑定的完整命令'
+      )
     ).not.toBeInTheDocument()
 
     const readCard = screen

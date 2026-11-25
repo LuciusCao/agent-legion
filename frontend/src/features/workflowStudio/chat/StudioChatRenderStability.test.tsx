@@ -191,7 +191,7 @@ describe('StudioChat 渲染稳定性（#1120）', () => {
     expect(counters.text.get('m2')!).toBeGreaterThan(before.agentText)
   })
 
-  it('晚绑定更新权限卡，无关流式 chunk 仍不穿透 memo', async () => {
+  it('首次晚绑定更新权限卡，后续命令与无关流式 chunk 均不穿透 memo', async () => {
     render(
       <TestQueryProvider>
         <StudioChatPanel onApplyWorkflowDraft={vi.fn()} />
@@ -216,14 +216,35 @@ describe('StudioChat 渲染稳定性（#1120）', () => {
           toolCallId: 'terminal-permission',
           title: 'Bash',
           kind: 'execute',
-          rawInput: { command: 'git status --short' },
+          rawInput: { command: 'ls -la' },
         }),
       })
     })
-    await screen.findByLabelText('批准后取得 · 现已绑定的完整命令')
+    await screen.findByLabelText(
+      '批准后取得 · 仅在授权围栏开启时绑定的完整命令'
+    )
     expect(counters.permission.get('r1')!).toBeGreaterThan(initial)
 
     const settled = counters.permission.get('r1')!
+    act(() => {
+      source.emitMessage({
+        type: 'message',
+        message: chatMessage('m7', 7, 'tool_call', 'agent', {
+          toolCallId: 'terminal-permission',
+          title: 'Bash',
+          kind: 'execute',
+          rawInput: { command: 'cat secrets' },
+        }),
+      })
+    })
+    expect(counters.permission.get('r1')).toBe(settled)
+    expect(
+      screen.getByLabelText('批准后取得 · 仅在授权围栏开启时绑定的完整命令')
+    ).toHaveTextContent('ls -la')
+    expect(
+      screen.getByLabelText('批准后取得 · 仅在授权围栏开启时绑定的完整命令')
+    ).not.toHaveTextContent('cat secrets')
+
     act(() => {
       source.emitMessage({
         type: 'message',

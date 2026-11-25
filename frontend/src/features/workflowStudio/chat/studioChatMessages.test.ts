@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage, PermissionView } from './studioChatMessages'
 import { samePermissionView } from './studioChatViewStability'
+import { permissionPresentation } from './studioChatPermissionPresentation'
 import { lastRunCancelled, stopReason } from './studioChatCancelVisibility'
 import {
   buildPermissionViews,
@@ -520,6 +521,48 @@ describe('buildPermissionViews', () => {
       lateBoundCommand: 'git diff --check',
       summary: unbound.summary,
     })
+  })
+
+  it('uses the first valid rawInput command by seq for pending, human and allow-all views', () => {
+    const invalid = toolCall('3:call_1', { rawInput: { command: '  ' } })
+    const first = toolCall('3:call_1', { rawInput: { command: 'ls -la' } })
+    const duplicate = toolCall('3:call_1', { rawInput: { command: 'ls -la' } })
+    const later = toolCall('3:call_1', { rawInput: { command: 'cat secrets' } })
+    const request = message('permission', 'agent', {
+      request_id: 'r-first',
+      status: 'pending',
+      tool_call: { toolCallId: '3:call_1', title: 'Bash' },
+    })
+    for (const decision of [
+      undefined,
+      { option_id: 'allow' },
+      { option_id: 'allow', via: 'allow_all' },
+    ]) {
+      const resolved = decision
+        ? message('permission', 'user', {
+            request_id: 'r-first',
+            status: 'resolved',
+            decision,
+          })
+        : null
+      const messages = [
+        duplicate,
+        request,
+        invalid,
+        first,
+        ...(resolved ? [resolved] : []),
+        later,
+      ]
+      const [view] = buildPermissionViews(messages)
+      expect(view.command).toBeNull()
+      expect(view.lateBoundCommand).toBe('ls -la')
+      const presentation = permissionPresentation(view)
+      expect(
+        decision ? presentation.lateDetails : presentation.details
+      ).toContain('ls -la')
+      expect(presentation.details).not.toContain('cat secrets')
+      expect(presentation.lateDetails).not.toContain('cat secrets')
+    }
   })
 
   it('uses kind before title and never treats a summary as a bound command', () => {

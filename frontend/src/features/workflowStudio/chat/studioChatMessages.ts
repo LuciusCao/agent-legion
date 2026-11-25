@@ -301,7 +301,7 @@ export function extractNodeCodeDrafts(
   return keepLatestPerEntity(drafts, (draft) => draft.nodeKey)
 }
 
-/** pending 保留批准时快照；同调用的当前 rawInput 只用于补充晚绑定可见性。 */
+/** pending 保留批准时快照；按 seq 取同调用第一条有效命令补充晚绑定可见性。 */
 export function buildPermissionViews(
   messages: ChatMessage[]
 ): PermissionView[] {
@@ -313,9 +313,15 @@ export function buildPermissionViews(
     const requestId = asText(content.request_id)
     if (requestId) resolvedBy.set(requestId, content)
   }
-  const toolCallById = new Map(
-    groupToolCalls(messages).map((call) => [call.toolCallId, call])
-  )
+  const firstCommandBy = new Map<string, string>()
+  for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
+    if (message.kind !== 'tool_call') continue
+    const content = asRecord(message.content)
+    const toolCallId = asText(content?.toolCallId)
+    if (!toolCallId || firstCommandBy.has(toolCallId)) continue
+    const command = asText(asRecord(content?.rawInput)?.command).trim()
+    if (command) firstCommandBy.set(toolCallId, command)
+  }
   const views: PermissionView[] = []
   for (const message of messages) {
     if (message.kind !== 'permission') continue
@@ -327,11 +333,11 @@ export function buildPermissionViews(
     const options = Array.isArray(content.options) ? content.options : []
     const resolved = resolvedBy.get(requestId)
     const toolTitle = asText(toolCall?.title) || '工具调用'
-    const evidence = toolCallById.get(asText(toolCall?.toolCallId))
+    const firstCommand = firstCommandBy.get(asText(toolCall?.toolCallId))
     views.push({
       requestId,
       toolTitle,
-      ...permissionTerminalView(toolCall, evidence, resolved, toolTitle),
+      ...permissionTerminalView(toolCall, firstCommand, resolved, toolTitle),
       options: options
         .map((option) => asRecord(option))
         .filter((option): option is Record<string, unknown> => option !== null)

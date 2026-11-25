@@ -31,7 +31,7 @@ describe('permissionPresentation', () => {
     expect(view.state).toBe('命令已精确绑定')
     expect(view.unbound).toBe(false)
     expect(view.summary).toBe(false)
-    expect(view.details).toContain('完整命令 · 此次授权将精确绑定')
+    expect(view.details).toContain('完整命令 · 仅在授权围栏开启时精确绑定')
     expect(view.details).toContain('git diff --check')
     expect(view.details).toContain('你批准的就是上方完整命令')
     expect(view.details).not.toContain('Running: git diff')
@@ -58,7 +58,7 @@ describe('permissionPresentation', () => {
     expect(view.details).toContain('批准时所见 · 截断摘要')
     expect(view.details).toContain('Requesting approval to Running: git diff…')
     expect(view.lateDetails).toContain(
-      '批准后取得 · 现已绑定的完整命令\ngit diff --check'
+      '批准后取得 · 仅在授权围栏开启时绑定的完整命令\ngit diff --check'
     )
     expect(view.lateDetails).toContain('完整命令在批准后才出现')
     expect(input.command).toBeNull()
@@ -68,13 +68,7 @@ describe('permissionPresentation', () => {
     const resolved = { decision: { option_id: 'allow', via: 'allow_all' } }
     const terminal = permissionTerminalView(
       null,
-      {
-        toolCallId: 'call',
-        title: 'Bash',
-        status: 'in_progress',
-        rawInput: { command: 'git status' },
-        outputText: '',
-      },
+      'git status',
       resolved,
       'Bash'
     )
@@ -120,6 +114,54 @@ describe('permissionPresentation', () => {
     expect(view.state).toBe('')
     expect(view.details).toBe('')
     expect(view.unbound).toBe(false)
+  })
+
+  it.each([
+    [
+      'exact',
+      permission({ command: 'ls -la' }),
+      'details',
+      '不允许追加、删改或替换',
+    ],
+    ['unbound', permission({}), 'details', '一次批准仅对应一次终端执行'],
+    [
+      'late',
+      permission({
+        resolved: true,
+        decisionText: '已允许',
+        lateBoundCommand: 'ls -la',
+      }),
+      'lateDetails',
+      '不可替换',
+    ],
+    [
+      'child',
+      permission({ resolved: true, decisionText: '已允许' }),
+      'details',
+      '一次批准仅对应一次终端执行',
+    ],
+  ] as const)(
+    '%s explains explicit-on restrictions and default-off terminal freedom',
+    (_name, input, field, restriction) => {
+      const text = permissionPresentation(input)[field]
+      expect(text).toContain('围栏开启时')
+      expect(text).toContain(restriction)
+      expect(text).toContain('围栏关闭时')
+      expect(text).toContain('额外终端仍可执行')
+    }
+  )
+
+  it('conditions exact and late binding labels on the terminal fence', () => {
+    const exact = permissionPresentation(permission({ command: 'ls -la' }))
+    expect(exact.ariaLabel).toContain('围栏开启时')
+    const late = permissionPresentation(
+      permission({
+        resolved: true,
+        decisionText: '已允许',
+        lateBoundCommand: 'ls -la',
+      })
+    )
+    expect(late.lateDetails.split('\n')[0]).toContain('围栏开启时')
   })
 })
 
