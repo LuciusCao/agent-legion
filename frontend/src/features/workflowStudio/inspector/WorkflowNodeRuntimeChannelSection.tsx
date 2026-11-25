@@ -495,11 +495,7 @@ export function WorkflowNodeRuntimeChannelSection(props: {
               size="small"
               disabled={saveDisabled}
               onClick={() => void studio.saveRuntimeConfig()}
-              sx={{
-                borderRadius: '8px',
-                marginLeft: 'auto',
-                whiteSpace: 'nowrap',
-              }}
+              sx={{ borderRadius: '8px', ml: 'auto', whiteSpace: 'nowrap' }}
             >
               {studio.runtimeSaving ? '保存中…' : '保存运行配置'}
             </Button>
