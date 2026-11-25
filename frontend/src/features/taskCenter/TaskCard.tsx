@@ -69,9 +69,7 @@ export function TaskCard({
   const selecting =
     card.selectionComplete === false && card.status === 'running'
   const percent =
-    card.total > 0
-      ? Math.min(100, Math.round((card.processed / card.total) * 100))
-      : 0
+    Math.min(100, Math.round((card.processed / card.total) * 100)) || 0
   const terminal = card.status === 'done' || card.status === 'partial'
   const displayStatus = selecting ? 'selecting' : card.status
   const text = selecting ? '选择计算中' : STATUS_LABEL[card.status]
@@ -108,7 +106,9 @@ export function TaskCard({
         aria-valuetext={card.selectionComplete === false ? text : undefined}
         aria-valuenow={card.selectionComplete === false ? undefined : percent}
       >
-        <div className={styles.fill} style={{ width }} />
+        {(card.selectionComplete !== false || selecting) && (
+          <div className={styles.fill} style={{ width }} />
+        )}
       </div>
       <div className={styles.tcCount}>{countLine(card)}</div>
       <div className={styles.tcDetail}>

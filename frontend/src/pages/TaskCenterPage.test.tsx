@@ -590,7 +590,12 @@ describe('TaskCenterPage（#1157 phase3）', () => {
       if (status !== 'running') expect(card).not.toHaveTextContent('仍在计算')
       const progress = within(card).getByRole('progressbar')
       expect(progress).not.toHaveAttribute('aria-valuenow')
-      expect(progress.firstElementChild).not.toHaveAttribute('style')
+      if (status === 'running') {
+        expect(progress.firstElementChild).not.toBeNull()
+        expect(progress.firstElementChild).not.toHaveAttribute('style')
+      } else {
+        expect(progress).toBeEmptyDOMElement()
+      }
       expect(progress).toHaveAttribute('aria-valuetext', badge)
       expect(progress.className).toContain(
         status === 'running' ? 'pbar-selecting' : `pbar-${status}`
