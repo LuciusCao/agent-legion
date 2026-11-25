@@ -16,19 +16,23 @@ the agent reports is held by Studio until the turn's end is written
 (unprompted_queue.py, #1029): sent to ACP meanwhile, the engine would queue it
 and settle the prompt at once with zero content, and its reply would never
 reach the timeline.
+
+The same ordered tail applies verified Kimi 1.52 compaction envelopes through
+the existing compaction flag/send guard (#1025); they share this watcher's
+baseline and durable-backlog semantics rather than creating another state machine.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from server.app.studio_chat import compaction_wire
+from server.app.studio_chat.compaction_wire import usable_baseline
 from server.app.studio_chat.kimi_wire import WireTail
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call
-from server.app.studio_chat.wire_baseline import usable_baseline
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,13 +76,6 @@ def _error_detail(error: Any) -> str:
     code, message = payload.get("code"), payload.get("message")
     parts = [part for part in (f"[{code}]" if code else "", str(message or "")) if part]
     return ("agent 自发回合失败" + ("：" + " ".join(parts) if parts else ""))[:500]
-
-
-def _text_blocks(value: Any) -> list[dict[str, Any]]:
-    if value is None or value == "":
-        return []
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
-    return [{"type": "content", "content": {"type": "text", "text": text}}]
 
 
 class UnpromptedTurnProjector:
@@ -136,7 +133,7 @@ class UnpromptedTurnProjector:
                 "toolCallId": f"{turn}:{call_id}",
                 "status": "failed" if result.get("isError") is True else "completed",
                 "rawOutput": output,
-                "content": _text_blocks(output),
+                "content": compaction_wire.text_blocks(output),
             }
             return [("tool_call", "agent", update)]
         turn = str(event.get("turnId"))
@@ -159,7 +156,7 @@ class UnpromptedTurnProjector:
                 "kind": _TOOL_KINDS.get(name, "other"),
                 "status": "in_progress",
                 "rawInput": event.get("args"),
-                "content": _text_blocks(event.get("args")),
+                "content": compaction_wire.text_blocks(event.get("args")),
             }
             return [("tool_call", "agent", update)]
         return []
@@ -204,6 +201,7 @@ class UnpromptedTurnWatcher:
             # persisted first, so retries never grow it (#1044).
             for record in self.tail.read():
                 self.pending.extend(self.projector.project(record))
+                self.pending.extend(compaction_wire.project(record, self.tail.protocol_version))
         if not self.pending:
             return
         runtime, store = self.runtime, self.service.store
@@ -219,6 +217,8 @@ class UnpromptedTurnWatcher:
                 if kind == "tool_call":
                     # #1120: tool.call/tool.result pairs coalesce into one row.
                     store.append_tool_call(self.session_id, runtime, content)
+                elif compaction_wire.apply(self.service, self.session_id, runtime, kind, content):
+                    pass
                 else:
                     store.append_message(self.session_id, kind, role, content)
                 self.pending.pop(0)

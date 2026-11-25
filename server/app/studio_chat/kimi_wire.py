@@ -32,7 +32,6 @@ R1/R2). Instead:
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -40,6 +39,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.fs_safety import open_dir_nofollow as directory
 from server.app.fs_safety import open_regular_at
+from server.app.studio_chat.compaction_wire import parse_records, read_protocol_version
 
 if TYPE_CHECKING:
     from server.app.studio_chat.wire_baseline import WireBaseline
@@ -99,6 +99,8 @@ class WireTail:
         self.path = path
         self.offset = 0
         self.identity: tuple[int, int] | None = None
+        self.protocol_version: str | None = None
+        self._version_loaded = False
 
     @classmethod
     def from_baseline(cls, baseline: WireBaseline) -> WireTail:
@@ -133,9 +135,20 @@ class WireTail:
                 # journal, so everything in it is ours — read from the start.
                 self.identity, self.offset = identity, 0
             elif identity != self.identity or info.st_size < self.offset:
-                # Replacement or truncation: re-baseline at the new end.
+                # Replacement or truncation: re-baseline at the new end. Its
+                # header is probed on the next call, after this identity settles.
                 self.identity, self.offset = identity, info.st_size
+                self.protocol_version = None
+                self._version_loaded = False
                 return []
+            if not self._version_loaded:
+                # A resumed baseline sits after the metadata line. Probe only
+                # that bounded header through the same safe descriptor; event
+                # offsets and replay suppression are unchanged.
+                self.protocol_version = read_protocol_version(descriptor)
+                # A partial header has no newline yet: retry it next poll
+                # instead of caching neutral versionlessness forever.
+                self._version_loaded = self.protocol_version is not None
             if info.st_size == self.offset:
                 return []
             data = os.pread(
@@ -150,12 +163,4 @@ class WireTail:
                 self.offset += len(data)
             return []
         self.offset += end + 1
-        records: list[dict[str, Any]] = []
-        for line in data[:end].split(b"\n"):
-            try:
-                value = json.loads(line)
-            except (ValueError, RecursionError):
-                continue
-            if isinstance(value, dict):
-                records.append(value)
-        return records
+        return parse_records(data[:end])
