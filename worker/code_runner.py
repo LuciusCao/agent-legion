@@ -22,6 +22,7 @@ Worker.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pickle
 import shutil
@@ -152,6 +153,24 @@ def prepare_code_execution(
     return PreparedCode(manifest=manifest, code_text=code_text, libs_root=extracted)
 
 
+_JSON = {"workflow_definition_snapshot_json", "frozen_pins_json", "source_payload_json"}
+
+
+def _has_shared_resources(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if key == "shared_resources" and nested:
+                return True
+            if key in _JSON and isinstance(nested, str) and nested:
+                nested = json.loads(nested)
+            if _has_shared_resources(nested):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_has_shared_resources(item) for item in value)
+    return False
+
+
 def build_child_payload(
     manifest: dict[str, Any],
     code_text: str,
@@ -168,6 +187,8 @@ def build_child_payload(
     the payload rides stdin and is never written to disk. ``materials`` is
     the local materialization block for a material-input job (design §6.2),
     mirroring the Host-side ``runtime["materials"]``."""
+    if _has_shared_resources(manifest):
+        raise ValueError("shared resources require Host execution; Worker support arrives in M44")
     context = manifest.get("runtime_context")
     context = dict(context) if isinstance(context, Mapping) else {}
     node_config = manifest.get("config")

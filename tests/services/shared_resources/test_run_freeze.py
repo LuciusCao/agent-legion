@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,15 +11,21 @@ from server.app.routes.job_view_contracts import JobDetailResponse
 from server.app.routes.run_contracts import RunDetailResponse
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_queries import JobQueryService
+from server.app.services.node_codes import NodeCodeService
 from server.app.services.quality_replay_setup import QualityReplaySetup
 from server.app.services.run_batch_feeder import RunBatchFeeder
 from server.app.services.run_service import RunService
 from server.app.services.shared_resources.errors import SharedResourceInUseError
+from server.app.services.workflow_draft_publish import publish_workflow_draft
+from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_execution_configuration import (
     WorkspaceExecutionConfigurationService,
 )
-from server.app.workflows.definition import workflow_definition_from_mapping
+from server.app.workflows.definition import (
+    workflow_definition_from_dict,
+    workflow_definition_from_mapping,
+)
 from server.app.workflows.shared_resource_runtime import (
     materialize_resource_pins,
     prefetch_shared_resource_block,
@@ -88,6 +95,54 @@ def _service(job_db, settings, shared_materials) -> RunService:
 def _item(shared_materials, shared_storage) -> dict:
     material_id = ready_material(shared_materials, shared_storage, TARGET_WS, b"item", "item.txt")
     return {"type": "material", "material_id": material_id}
+
+
+def test_draft_unrelated_edit_preserves_declaration_and_run_pin(
+    job_db, settings, shared_service, shared_materials, shared_storage
+) -> None:
+    resource_id = _resource(shared_service, shared_materials, shared_storage)
+    item = _item(shared_materials, shared_storage)
+    codes = NodeCodeService(job_db.dsn_identity)
+    codes.save_draft(
+        TARGET_WS,
+        TARGET_WS,
+        "draft",
+        "def run(job, job_dir, runtime):\n    pass\n",
+        "test seed",
+    )
+    codes.publish(TARGET_WS, TARGET_WS, "draft")
+    definition = workflow_definition_from_mapping(
+        {
+            "key": TARGET_WS,
+            "label": "Target",
+            "nodes": {
+                "draft": {
+                    "type": "code",
+                    "capability": "draft",
+                    "shared_resources": [resource_id],
+                }
+            },
+        }
+    )
+    ok, errors = publish_workflow_draft(job_db, TARGET_WS, definition_to_yaml(definition))
+    assert (ok, errors) == (True, [])
+    active = job_db.get_active_workflow_revision(TARGET_WS, TARGET_WS)
+    edited = replace(
+        workflow_definition_from_dict(json.loads(active["definition_json"])),
+        label="Unrelated label edit",
+    )
+
+    ok, errors = publish_workflow_draft(job_db, TARGET_WS, definition_to_yaml(edited))
+    assert (ok, errors) == (True, [])
+    created = _service(job_db, settings, shared_materials).create_run(
+        TARGET_WS, workflow_key=TARGET_WS, items=[item]
+    )
+    pins = job_db.get_job_shared_resource_pins(created["job_ids"][0])
+    assert [pin["version"] for pin in pins] == [1]
+    active = job_db.get_active_workflow_revision(TARGET_WS, TARGET_WS)
+    republished = workflow_definition_from_dict(json.loads(active["definition_json"]))
+    assert republished.label == "Unrelated label edit"
+    assert republished.nodes["draft"].shared_resources == (resource_id,)
 
 
 def test_sync_upgrade_switchback_dedup_and_detail_contract(
@@ -273,6 +328,65 @@ def test_pin_insert_failure_rolls_back_job_and_empty_run(
         )
     assert service.list_runs(TARGET_WS) == []
     assert job_db.list_jobs(TARGET_WS) == []
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_all_duplicate_resource_resubmission_heals_failed_run_with_pins_digest(
+    mode,
+    job_db,
+    settings,
+    shared_service,
+    shared_materials,
+    shared_storage,
+) -> None:
+    resource_id = _resource(shared_service, shared_materials, shared_storage)
+    _publish(job_db, resource_id)
+    service = _service(job_db, settings, shared_materials)
+    items = []
+    for index in range(2):
+        material_id = ready_material(
+            shared_materials,
+            shared_storage,
+            TARGET_WS,
+            f"item-{index}".encode(),
+            f"item-{index}.txt",
+        )
+        items.append({"type": "material", "material_id": material_id})
+    if mode == "sync":
+        first = service.create_run(TARGET_WS, workflow_key=TARGET_WS, items=items)
+    else:
+        first = service.create_run_async(TARGET_WS, workflow_key=TARGET_WS, items=items)
+        feeder = RunBatchFeeder(job_db, settings=settings, materials_service=shared_materials)
+        while feeder.consume_once():
+            pass
+    run_id = first["run"]["id"]
+    original_freeze = json.loads(job_db.get_run(run_id)["frozen_pins_json"])
+    with job_db.connect() as conn:
+        conn.execute(
+            "update runs set status='failed', error_message='partway', created_count=1 where id=%s",
+            (run_id,),
+        )
+        if mode == "async":
+            conn.execute(
+                "update run_batches set status='failed', error_message='partway' where run_id=%s",
+                (run_id,),
+            )
+
+    if mode == "sync":
+        result = service.create_run(TARGET_WS, workflow_key=TARGET_WS, items=items)
+        assert result["created_count"] == 0 and result["job_ids"] == []
+        assert result["skipped_count"] == 2
+    else:
+        result = service.create_run_async(TARGET_WS, workflow_key=TARGET_WS, items=items)
+        assert result["batch"]["status"] == "pending"
+    assert result["run"]["id"] == run_id
+    assert result["run"]["status"] == "created"
+    assert result["run"]["error_message"] == ""
+    assert result["run"]["created_count"] == 2
+    healed = job_db.get_run(run_id)
+    assert healed["status"] == "created" and healed["error_message"] == ""
+    assert healed["created_count"] == 2
+    assert json.loads(healed["frozen_pins_json"]) == original_freeze
 
 
 def test_public_job_pin_projection_never_leaks_storage_key() -> None:

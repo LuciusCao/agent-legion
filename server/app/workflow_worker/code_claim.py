@@ -94,6 +94,9 @@ def try_claim_code_worker_node(
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False
+    if node.shared_resources:
+        # M43 supports exact-pin materialization only on the Host (M44: Worker protocol).
+        return False
     # #1320 (A4): a job whose material inputs hit the v6 ETag gate predicate is
     # unclaimable by a pre-v6 fleet — hold it off the broker queue when no
     # online >= v6 code Worker exists (semantics in code_dispatch.etag_gate_blocks_remote_enqueue).

@@ -5,10 +5,13 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 
 from server.app.services.job_creation_pipeline import JobCreationPipeline
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.workflow_revision_format import (
+    definition_hash,
+    definition_to_yaml,
     serialize_definition,
     workflow_definition_to_response_payload,
 )
@@ -62,9 +65,26 @@ def _pin(resource_id: str = "resource-1") -> dict:
     }
 
 
-def test_empty_declaration_does_not_change_legacy_snapshot_shape() -> None:
+def _echo_reload(definition):
+    return workflow_definition_from_mapping(yaml.safe_load(definition_to_yaml(definition)))
+
+
+def test_empty_declaration_does_not_change_legacy_snapshot_shape_or_hash() -> None:
     definition = _definition([])
+    baseline = workflow_definition_from_mapping(
+        {
+            "key": "ws",
+            "label": "Workspace",
+            "nodes": {"draft": {"type": "code", "capability": "draft"}},
+        }
+    )
     assert "shared_resources" not in json.loads(serialize_definition(definition))["nodes"]["draft"]
+    assert definition_hash(serialize_definition(definition)) == definition_hash(
+        serialize_definition(baseline)
+    )
+    assert definition_hash(serialize_definition(_echo_reload(definition))) == definition_hash(
+        serialize_definition(_echo_reload(baseline))
+    )
 
 
 def test_stable_ids_round_trip_without_a_version() -> None:
@@ -72,6 +92,8 @@ def test_stable_ids_round_trip_without_a_version() -> None:
     assert definition.nodes["draft"].shared_resources == ("resource-1", "resource_2")
     restored = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
     assert restored.nodes["draft"].shared_resources == definition.nodes["draft"].shared_resources
+    echoed = _echo_reload(definition)
+    assert echoed.nodes["draft"].shared_resources == definition.nodes["draft"].shared_resources
     response_node = next(
         node
         for node in workflow_definition_to_response_payload(definition)["nodes"]

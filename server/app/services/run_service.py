@@ -177,7 +177,14 @@ class RunService:
         if not fresh and accepted is not None:
             assert precreated is not None
             if not created:
-                return create_run_response(_run_record(precreated), [], len(items))
+                healed = self.job_db.heal_failed_run_if_duplicate(
+                    workspace_id,
+                    workflow_key,
+                    ITEMS_SOURCE_KIND,
+                    {**digest_payload, "shared_resource_pins": pins_hash},
+                    align_created_count=True,
+                )
+                return create_run_response(_run_record(healed or precreated), [], len(items))
             self.job_db.delete_run_without_jobs(str(precreated["id"]))
             raise InvalidOperationError("No tasks were resolved from input")
         if not fresh:
