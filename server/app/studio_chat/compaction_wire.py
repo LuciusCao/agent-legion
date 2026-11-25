@@ -52,19 +52,29 @@ def read_protocol_version(descriptor: int) -> str | None:
 
 
 def locate_session_wire(cwd: str, session_id: str) -> Path | None:
-    """Kimi 1.52 canonical-cwd layout, then the Kimi Code legacy layout."""
+    """Default child-home first, backend override second, then legacy layout.
+
+    Production spawns with env=None and the ACP SDK does not forward
+    KIMI_SHARE_DIR, so a plain child writes the default home even when the
+    backend has an override. The override remains a fallback for wrappers.
+    """
     from server.app.studio_chat.kimi_wire import _SESSION_ID, kimi_code_homes, locate_wire
 
     if not _SESSION_ID.fullmatch(session_id):
         return None
     canonical = Path(cwd).resolve()
-    share = Path(os.environ.get("KIMI_SHARE_DIR", str(Path.home() / ".kimi")))
-    if not share.is_absolute():
-        share = canonical / share
+    roots = [(Path.home() / ".kimi").resolve()]
+    if raw := os.environ.get("KIMI_SHARE_DIR"):
+        override = Path(raw)
+        if not override.is_absolute():
+            override = canonical / override
+        if (resolved := override.resolve()) != roots[0]:
+            roots.append(resolved)
     digest = hashlib.md5(str(canonical).encode(), usedforsecurity=False).hexdigest()
-    candidate = share.resolve() / "sessions" / digest / session_id / "wire.jsonl"
-    if candidate.is_file():
-        return candidate
+    for share in roots:
+        candidate = share / "sessions" / digest / session_id / "wire.jsonl"
+        if candidate.is_file():
+            return candidate
     return locate_wire(kimi_code_homes(cwd), session_id)
 
 

@@ -79,9 +79,9 @@ def _new_wire_path(share: Path, cwd: str, session_id: str) -> Path:
     return share / "sessions" / digest / session_id / "wire.jsonl"
 
 
-def _metadata(path: Path) -> None:
+def _metadata(path: Path, version: str = "1.10") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"type": "metadata", "protocol_version": "1.10"}) + "\n")
+    path.write_text(json.dumps({"type": "metadata", "protocol_version": version}) + "\n")
 
 
 @pytest.fixture
@@ -93,6 +93,7 @@ def wire(admission, tmp_path, monkeypatch):
     workdir.mkdir()
     runtime.handle.cwd = str(workdir)
     share = tmp_path / "share"
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("KIMI_SHARE_DIR", str(share))
     watcher = gated_watcher(service, sid, runtime, "acp_152")
     path = _new_wire_path(share, runtime.handle.cwd, "acp_152")
@@ -244,6 +245,54 @@ def test_default_share_home_and_canonical_cwd_hash_drive_production_locator(
     assert watcher.tail.path == path
     assert runtime.compacting is True
     assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+
+
+@pytest.mark.parametrize("present", ["override", "default", "both"])
+def test_share_root_selection_matches_plain_child_and_baseline(wire, tmp_path, present):
+    service, db, sid, _workspace, runtime, watcher, override = wire
+    default = _new_wire_path(tmp_path / "home" / ".kimi", runtime.handle.cwd, "acp_152")
+    if present in ("default", "both"):
+        _metadata(default)
+        _append(default, BEGIN)
+    if present == "default":
+        override.unlink()
+    elif present == "override":
+        _append(override, BEGIN)
+    else:
+        _append(override, END)
+
+    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_152")
+    watcher.step()
+    expected = default if present in ("default", "both") else override
+    assert baseline is not None and baseline.path == expected
+    assert watcher.tail.path == expected
+    assert runtime.compacting is True
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+    if present == "both":
+        # The override's End was not consumed or mixed into the default window.
+        _append(default, END)
+        watcher.step()
+        assert runtime.compacting is False
+        assert [event["event"] for event in _events(db, sid)] == [
+            "compact_start",
+            "compact_done",
+        ]
+
+
+def test_legacy_layout_is_the_fallback_after_both_share_roots(wire, tmp_path, monkeypatch):
+    service, _db, _sid, _workspace, runtime, _watcher, override = wire
+    override.unlink()
+    legacy_home = tmp_path / "legacy-home"
+    monkeypatch.setenv("KIMI_CODE_HOME", str(legacy_home))
+    legacy = (
+        legacy_home / "sessions" / "wd_legacy" / "acp_legacy" / "agents" / "main" / "wire.jsonl"
+    )
+    _metadata(legacy, version="1.5")
+    watcher = gated_watcher(service, _sid, runtime, "acp_legacy")
+    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_legacy")
+    watcher.step()
+    assert baseline is not None and baseline.path == legacy
+    assert watcher.tail.path == legacy
 
 
 def test_new_layout_symlink_is_refused_and_baseline_defers(wire):
