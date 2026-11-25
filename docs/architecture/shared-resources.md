@@ -60,7 +60,17 @@ Host code 节点以 `shared_resources: [<resource_id>, ...]` 声明资源；列�
 
 Host dispatch 只按 job pin 读取精确版本，revoked grant 或已逻辑删除版本仍可物化历史执行；不存在 current/latest 回读。文件经内容寻址缓存和只读目录树提供给 `ctx.shared_resources[resource_id]`，节点只见本节点声明的资源、版本、manifest hash、相对/本地路径与文件 hash，不见 storage key、grant 或 selection revision。共享资源首次下载前即计算整个资源集合的文件与目录地址，并把当前 runtime 的普通 material 文件、bundle 目录及其 entries 的精确 `cache_address`（含无 hash 成员的 `material_id-v2gN` 代次地址）纳入同一联合 pin，后续每次淘汰都保护全部 runtime 输入；普通材料与共享资源复用 `material_cache_address` / `bundle_address`，字节仍按需流式下载，不预读整个集合。下载和缓存命中都复核 size/SHA256，缺失、对象漂移、毒化缓存与跨资源淘汰均 fail-closed。普通 rerun 保留原 job pin，quality replay 从原 run 继承 spec 并给副本写入同一精确 pin。workflow upgrade 在 jobs UPDATE 前逐节点比较旧/新 snapshot 的稳定资源 ID 集合；新增、删除、替换或新节点声明都以 `shared_resource_declaration_changed` fail-closed，job/run/status/pin 不变，只有完全一致的声明可升级并继续使用原 pin，绝不按 current binding 补资源或改写旧 pin。损坏旧快照不直接当空声明：无 pin 且目标无声明时才走既有保守 clean/inherit 修复；已有 pin 或目标新增声明而无法证明一致时同样 skipped 且零变更。
 
-run/job 详情的 `shared_resources` 只投影资源名、来源、版本、manifest hash 与文件 path/SHA256/size/content_type；`binding_revision`、pins hash、grant/version 内部行身份与 storage key 不进入 API，主 UI 不暴露去重 revision。此切片只实现 Host code 物化；带声明的普通/shard 节点在远程 enqueue 前直接回退 Host，Worker 对任何非空资源声明或资源 payload 明确报错，绝不以空 mapping 执行。精确 pin 的 Worker claim/物化与协议支持属于 M44，本切片不提前实现。
+run/job 详情的 `shared_resources` 只投影资源名、来源、版本、manifest hash 与文件 path/SHA256/size/content_type；`binding_revision`、pins hash、grant/version 内部行身份与 storage key 不进入 API，主 UI 不暴露去重 revision。
+
+## Worker 远程执行与 Agent 资源准备（M44）
+
+带资源声明的普通/shard code 节点可远程执行，协议下限为 v7。队列 manifest 只持久化当前节点的稳定资源 ID；没有在线 v7 Worker 时仍回退 Host，纯远程部署保持 pending。claim admission 同时核对 manifest 与 job 冻结快照中的当前节点声明，旧 Worker 得到 `shared_resource_protocol_too_old` 并保持 queued，而不是失败后重试或忽略资源执行；描述符组装在同一声明快照上再次拒绝旧 Worker。混合 workflow 中未声明资源的节点不受该协议门影响。
+
+claim 响应只从 `shared_resource_job_pins` 重建当前节点的精确版本，绝不回读 current selection/latest。非空 manifest 声明必须与有效冻结快照中当前节点的资源集合完全相等；快照缺失、空 mapping 或类型无效时不能用 manifest 自称的 ID 降级执行，只有快照自身有声明时才允许 manifest 字段被删除后以快照为准，普通无资源 legacy manifest 不受影响。每个描述符携带 `resource_id / version / manifest_hash` 与逐文件 `path / sha256 / size_bytes / content_type / download_url`；临时 GET 按目标 storage key 现场签发，但 key、grant、selection revision 和内部 version id 不上线，描述符与 URL 只存在于 claim 响应内存。revoke 或逻辑删除版本后，历史 job 仍按原 pin 生成相同描述符。文件集合与 canonical manifest hash 在签发前全部复核，pin 缺失、声明不符、描述符删除或格式降级均 fail-closed。
+
+Worker 在开始下载前验证全部描述符、URL、路径和 manifest hash，再按文件流式物化到与 Host 相同的内容寻址缓存。下载、缓存命中与最终目录树中的每个文件都重新计算 SHA256/size；目录只接受 manifest 精确列出的常规文件，拒绝 symlink、额外/缺失文件和不安全路径。普通 material、bundle 成员及全部资源文件和目录树联合 pin，避免后续文件的 LRU 淘汰破坏本次执行。三个 presigned 下载面共用异常边界，连接打开和流式读取中的 requests/urllib3/OSError 只保留异常类型名并抑制原异常链，traceback、`execution.failed`、rolling log 与结果 `error_message` 均不得携带签名 URL 或凭据。节点 runtime 只得到与 Host 相同的只读资源视图，临时 URL 和描述符不会进入沙箱。
+
+标准 code 节点 `workflow_nodes/shared_resource_prepare.py` 把该视图写成普通产物 `shared_resources.json`，下游 Agent 继续通过现有 `input_artifacts` 获得文件，不需要资源 descriptor、Worker 协议或 Agent 专用 JSON 配置。JSON 的 `resources` 数组保留资源 ID、版本、manifest hash 和逐文件公开元数据：`text/*`、JSON/XML/YAML 等文本类型必须严格按 UTF-8 解码，其他类型使用 base64，统一放在 `encoding + content` 字段。准备节点再次核验本地文件 hash/size，单文件最大 1 MiB、原始字节总量最大 4 MiB、编码后 JSON 最大 8 MiB；声明总量在读取前检查，实际字节与最终文档也分别检查，任一超限或无效 UTF-8 都不写产物。产物不包含本地路径、storage key 或下载 URL，普通 UI 仍只呈现资源已添加和可运行。
 
 ## 精确读取、revoke 与删除
 
@@ -80,4 +90,5 @@ revoke 不修改 selection、版本、对象或既有 job pin，只停止新任�
 - PostgreSQL fresh/v106→v107 upgrade/catalog parity、触发器不可变、授权可见性、源读目标写与 scoped-token 权限矩阵。
 - 第 k 文件复制失败、目标核验失败、缺 hash 补算、复制后来源漂移、同 token 重试与伪造 helper 成功的独立 mutation。
 - 重复 Share 零复制、目标独立选择、并发 CAS 单一赢家、升级/切回、revoke 新旧 pin 分界、来源删除、selection/job pin 零引用保护与 GC 前缀排除。
-- 对象 I/O 不持数据库事务；发布、选择与删除的状态判定和写操作在同一短事务内完成。M43 的 sync/async accept、升级/切回去重、revoke 后旧 pin、replay、缺失/hash/缓存毒化与 pin 故障回滚由 `tests/services/shared_resources/test_run_freeze.py` 覆盖；声明、脱敏与 SDK 只读视图由 `tests/workflows/test_shared_resource_declarations.py` 覆盖。Worker 物化与生产 UI 属于后续任务。
+- 对象 I/O 不持数据库事务；发布、选择与删除的状态判定和写操作在同一短事务内完成。M43 的 sync/async accept、升级/切回去重、revoke 后旧 pin、replay、缺失/hash/缓存毒化与 pin 故障回滚由 `tests/services/shared_resources/test_run_freeze.py` 覆盖；声明、脱敏与 SDK 只读视图由 `tests/workflows/test_shared_resource_declarations.py` 覆盖。
+- M44 的真实 pin/selection/revoke claim、同快照旧 Worker 准入由 `tests/services/shared_resources/test_worker_claim.py` 覆盖；描述符删除/降级、对象缺失/hash 错误、文件与目录缓存毒化、Host/Worker 字节一致性由 `tests/workers/test_shared_resource_materialize.py` 覆盖；UTF-8/base64 与三类上限由 `tests/workers/test_shared_resource_prepare.py` 覆盖。`tests/full/test_shared_resource_worker_e2e.py` 走真实 Host dispatch → 旧/新 Worker claim → Worker 子进程 → Agent input artifact 全链路；另以准入、空快照注入、缓存复核和读取前总量预检 mutation 验证测试有效性。R1 增加 `tests/workers/test_download_url_scrubbing.py`，用真实 requests/urllib3 异常验证单 material、bundle、共享资源三条路径及 run/event/rolling-log 边界的签名脱敏，并以 None/空字符串/空 mapping/多节点注入和异常链、ProtocolError、缺失快照 mutation 复验。

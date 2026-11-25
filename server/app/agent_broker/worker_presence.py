@@ -45,14 +45,9 @@ def touch_worker(conn: Any, worker_id: str, *, min_interval_seconds: float = 0.0
     )
 
 
-def has_online_etag_capable_code_worker(database_dsn: ConnectSource, workspace_id: str) -> bool:
-    """#1320: True when an online >= v6 code Worker can claim in *workspace_id*.
-
-    Mirrors ``code_dispatch.has_online_code_worker`` (code capacity + workspace
-    ACL, fresh heartbeat) with the protocol floor raised to the v6 material-ETag
-    protocol: a pre-v6 Worker skips gate-hit requests at admission forever, so
-    against a pre-v6-only fleet the enqueue path must not ship them at all.
-    """
+def _has_online_code_worker_at_protocol(
+    database_dsn: ConnectSource, workspace_id: str, protocol_version: int
+) -> bool:
     with read_connection(database_dsn) as conn:
         row = conn.execute(
             "select 1 from agent_workers where revoked_at is null"
@@ -60,6 +55,13 @@ def has_online_etag_capable_code_worker(database_dsn: ConnectSource, workspace_i
             " and last_seen_at > now() - make_interval(secs => %s)"
             " and (allowed_workspaces_json::jsonb = '[]'::jsonb or allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text))"
             " limit 1",
-            (MATERIAL_ETAG_PROTOCOL_VERSION, ONLINE_THRESHOLD_SECONDS, workspace_id),
+            (protocol_version, ONLINE_THRESHOLD_SECONDS, workspace_id),
         ).fetchone()
     return row is not None
+
+
+def has_online_etag_capable_code_worker(database_dsn: ConnectSource, workspace_id: str) -> bool:
+    """#1320: True when an online >= v6 code Worker can claim in *workspace_id*."""
+    return _has_online_code_worker_at_protocol(
+        database_dsn, workspace_id, MATERIAL_ETAG_PROTOCOL_VERSION
+    )

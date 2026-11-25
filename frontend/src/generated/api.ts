@@ -6661,7 +6661,7 @@ export interface components {
       allowed_workspaces: string[]
       /**
        * Host Protocol Version
-       * @default 6
+       * @default 7
        */
       host_protocol_version: number
       /** Worker Token */

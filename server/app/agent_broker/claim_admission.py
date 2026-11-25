@@ -31,7 +31,8 @@ from server.app.agent_control.registry import CODE_PROTOCOL_VERSION
 from server.app.jobs.queries.material_claim_gate import (
     material_inputs_require_etag_protocol,
 )
-from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION
+from shared.protocol import MATERIAL_ETAG_PROTOCOL_VERSION, SHARED_RESOURCE_PROTOCOL_VERSION
+from shared.resource_manifest import claim_resource_ids
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -88,6 +89,16 @@ def admit_candidate(
         # no cancel body, and old binaries cannot unpack code bundles).
         if view.protocol_version < CODE_PROTOCOL_VERSION:
             state.skip_reasons["protocol_version_too_old"] += 1
+            return None
+        try:
+            resource_ids = claim_resource_ids(
+                manifest, selected.get("job_definition_snapshot_json")
+            )
+        except ValueError:
+            state.skip_reasons["shared_resource_declaration_invalid"] += 1
+            return None
+        if resource_ids and view.protocol_version < SHARED_RESOURCE_PROTOCOL_VERSION:
+            state.skip_reasons["shared_resource_protocol_too_old"] += 1
             return None
         # #1279 材料 ETag 门禁（协议 v6）：旧 Worker 忽略 claim 描述符的
         # object_etag、对 presigned GET 无条件下载——complete 后同尺寸覆盖

@@ -53,6 +53,12 @@ Version history:
   repair / failed-retry TOCTOU (admission → complete → new etag) cannot
   leak either: a pre-v6 claim containing such a row is dropped and
   requeued after lease expiry instead of being answered with a new ETag.
+- 7 (SHARED_RESOURCE_PROTOCOL_VERSION, #1553 M44): exact-pinned shared-resource
+  descriptors and verified Worker materialization. Resource-bearing code claims
+  carry per-file SHA256/size plus a claim-time presigned GET rebuilt from the
+  job pin. Pre-v7 Workers would ignore that block and run with empty resources,
+  so both enqueue admission and the descriptor's own snapshot reject them;
+  requests stay queued until a capable Worker (or the Host) executes them.
 
 Field-level deprecations ride without a version bump while the wire shape is
 unchanged; a deprecated field's removal rides without one too once no
@@ -93,7 +99,8 @@ MODEL_RUNTIME_PROTOCOL_VERSION = 3
 ARTIFACT_GZIP_PROTOCOL_VERSION = 4
 HEARTBEAT_BATCH_PROTOCOL_VERSION = 5
 MATERIAL_ETAG_PROTOCOL_VERSION = 6
+SHARED_RESOURCE_PROTOCOL_VERSION = 7
 
 # The protocol version this software declares at registration. Equals the
 # latest feature version above.
-PROTOCOL_VERSION = MATERIAL_ETAG_PROTOCOL_VERSION
+PROTOCOL_VERSION = SHARED_RESOURCE_PROTOCOL_VERSION

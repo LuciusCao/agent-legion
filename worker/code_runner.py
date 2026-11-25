@@ -22,7 +22,6 @@ Worker.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import pickle
 import shutil
@@ -51,6 +50,7 @@ from worker.execution.ownership import write_owner_marker
 from worker.execution.pending import refuse_if_pending_upload
 from worker.material_fetch import materialize_claim_material
 from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate
+from worker.resource_fetch import child_resource_ids, materialize_claim_shared_resources
 from worker.upload.queue import UploadTask
 
 if TYPE_CHECKING:
@@ -153,28 +153,13 @@ def prepare_code_execution(
     return PreparedCode(manifest=manifest, code_text=code_text, libs_root=extracted)
 
 
-def _has_shared_resources(manifest: Mapping[str, Any]) -> bool:
-    context = manifest.get("runtime_context")
-    if not isinstance(context, Mapping):
-        return bool(manifest.get("shared_resources"))
-    if manifest.get("shared_resources") or context.get("shared_resources"):
-        return True
-    job = context.get("job")
-    snapshot = job.get("workflow_definition_snapshot_json") if isinstance(job, Mapping) else None
-    if not snapshot:
-        return False
-    definition = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
-    nodes = definition.get("nodes") if isinstance(definition, Mapping) else None
-    node = nodes.get(str(manifest.get("node_key") or "")) if isinstance(nodes, Mapping) else None
-    return bool(node.get("shared_resources")) if isinstance(node, Mapping) else False
-
-
 def build_child_payload(
     manifest: dict[str, Any],
     code_text: str,
     job_dir: Path,
     *,
     materials: dict[str, Any] | None = None,
+    shared_resources: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Stdin pickle payload for ``workspace_libs.code_child`` (memory only).
 
@@ -185,8 +170,7 @@ def build_child_payload(
     the payload rides stdin and is never written to disk. ``materials`` is
     the local materialization block for a material-input job (design §6.2),
     mirroring the Host-side ``runtime["materials"]``."""
-    if _has_shared_resources(manifest):
-        raise ValueError("shared resources require Host execution; Worker support arrives in M44")
+    resource_ids = child_resource_ids(manifest, shared_resources)
     context = manifest.get("runtime_context")
     context = dict(context) if isinstance(context, Mapping) else {}
     node_config = manifest.get("config")
@@ -214,6 +198,8 @@ def build_child_payload(
         runtime["job_batch"] = context["job_batch"]
     if materials is not None:
         runtime["materials"] = materials
+    if resource_ids:
+        runtime["shared_resources"] = shared_resources
     # Shard executions (#389): the manifest carries the shard payload the
     # Host-side local executor would inject via context.runtime; the child
     # runtime dict is the same loose contract surface either way.
@@ -351,6 +337,9 @@ def execute_code(
         # before spawning — the sandboxed child only ever reads the local
         # path through the static allow-read grant (MATERIAL-ACCESS-001).
         materials = materialize_claim_material(manifest, execution_dir)
+        shared_resources = materialize_claim_shared_resources(
+            manifest, execution_dir, materials=materials
+        )
         command = build_sandbox_argv(
             velites,
             job_dir,
@@ -361,7 +350,13 @@ def execute_code(
             marker=f"agent-legion-{execution_id}",
         )
         payload = pickle.dumps(
-            build_child_payload(manifest, prepared.code_text, job_dir, materials=materials)
+            build_child_payload(
+                manifest,
+                prepared.code_text,
+                job_dir,
+                materials=materials,
+                shared_resources=shared_resources,
+            )
         )
         # Materialization and payload construction can outlive the lease too;
         # revalidate immediately before the sandbox process gains side effects.

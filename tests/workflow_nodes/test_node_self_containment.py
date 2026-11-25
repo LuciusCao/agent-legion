@@ -25,6 +25,7 @@ SELF_CONTAINED_NODES = (
     # Demo workflow nodes: pure stdlib + node SDK.
     "example_intake",
     "example_publish",
+    "shared_resource_prepare",
 )
 
 # No Host-only exemptions remain: legacy business nodes were extracted.
