@@ -1,7 +1,7 @@
 import type { ConfigSchemaProperty } from '../../../types'
 import { defaultValueMatchesType } from './workflowStudioYamlDraft.configSchema.helpers'
 
-// code 节点 config_schema 的约束语义（enum/minimum/maximum/secret，#428
+// code/agent 节点 config_schema 的约束语义（enum/minimum/maximum/secret，#428
 // codex 二轮），从 configSchema.helpers 拆出守单文件预算。四类消费方：
 // - schema 编辑器：类型切换时清理不再可信的约束（P2-B）；
 // - 版本值表单：secret 属性排除出表单（P1-A）、约束值校验（P1-B，

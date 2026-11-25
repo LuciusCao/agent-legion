@@ -15,7 +15,7 @@ type Props = {
   setDefinitionYaml: (value: string) => void
 }
 
-// 节点 config_schema 的属性列表（#418 后半）：每属性一行完整可编辑
+// code/agent 节点 config_schema 的属性列表：每属性一行完整可编辑
 // （行编辑器在 WorkflowNodeSchemaPropertyRow）。patch 直写草稿，失败
 // 静默回弹。从 WorkflowNodeConfigSchemaSection 拆出以守单文件预算。
 export function WorkflowNodeConfigSchemaProperties({

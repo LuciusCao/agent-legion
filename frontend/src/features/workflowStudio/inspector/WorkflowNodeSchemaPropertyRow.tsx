@@ -6,6 +6,12 @@ import { validateSchemaPropertyRename } from '../shared/workflowStudioYamlDraft.
 import { SchemaPropertyDefaultField } from './SchemaPropertyDefaultField'
 import styles from './WorkflowStructuredEditor.module.css'
 
+const FLAG_DEFINITIONS = [
+  ['敏感参数', 'secret', 'secret'],
+  ['Vault 引用', 'secret_ref', 'secretRef'],
+  ['运行开关', 'runtime_mutable', 'runtimeMutable'],
+] as const
+
 type Props = {
   propKey: string
   prop: ConfigSchemaProperty
@@ -17,8 +23,8 @@ type Props = {
   onRemove: (propKey: string) => void
 }
 
-// config_schema 单属性的编辑行（#418 面板）：名称、类型、描述、默认值、
-// runtime_mutable 开关、删除。全部经 patch 回调写回草稿。从
+// config_schema 单属性的编辑行：名称、类型、描述、默认值、secret /
+// secret_ref / runtime_mutable 开关、删除。全部经 patch 回调写回草稿。从
 // WorkflowNodeConfigSchemaProperties 拆出以守单文件预算。
 // 改名先过 validateSchemaPropertyRename：重名静默覆盖、保留键、含空白
 // 名都不落草稿，行内报错（与 Adder 的错误显示模式一致）；默认值类型
@@ -90,18 +96,25 @@ export function WorkflowNodeSchemaPropertyRow({
         readOnly={readOnly}
         onPatch={onPatch}
       />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <input
-          type="checkbox"
-          aria-label={`运行开关 ${propKey}`}
-          checked={prop.runtime_mutable === true}
-          disabled={readOnly}
-          onChange={(event) =>
-            onPatch(propKey, { runtimeMutable: event.target.checked })
-          }
-        />{' '}
-        运行开关（runtime_mutable）
-      </label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
+        {FLAG_DEFINITIONS.map(([name, propertyKey, patchKey]) => (
+          <label
+            key={patchKey}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <input
+              type="checkbox"
+              aria-label={`${name} ${propKey}`}
+              checked={prop[propertyKey] === true}
+              disabled={readOnly}
+              onChange={(event) =>
+                onPatch(propKey, { [patchKey]: event.target.checked })
+              }
+            />
+            {name}（{propertyKey}）
+          </label>
+        ))}
+      </div>
       {!readOnly && (
         <button
           type="button"

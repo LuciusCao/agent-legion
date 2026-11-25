@@ -541,6 +541,12 @@ nodes:
     expect(
       screen.getByRole('checkbox', { name: '运行开关 bank_version' })
     ).toBeDisabled()
+    expect(
+      screen.getByRole('checkbox', { name: '敏感参数 bank_version' })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole('checkbox', { name: 'Vault 引用 bank_version' })
+    ).toBeDisabled()
     // 新增/删除入口整体不渲染。
     expect(screen.queryByLabelText('新增属性名')).not.toBeInTheDocument()
     expect(
@@ -573,11 +579,186 @@ nodes:
     expect(screen.queryByLabelText('属性名 dry_run')).not.toBeInTheDocument()
   })
 
-  it('does not render a node-owned schema section for agent nodes (#406)', () => {
-    renderSection({ node: { ...node, node_type: 'agent' } })
+  it('edits an Agent schema while preserving its runtime, skill, tools and labels', () => {
+    const setDefinitionYaml = vi.fn()
+    const agentYaml = yamlText.replace(
+      '    capability: generate_questions',
+      `    type: agent
+    capability: generate_questions
+    execution:
+      runtime: pi
+      provider: deepseek
+      model: your-model-b
+    skill: {key: education/generate, ref: v1.2.0}
+    tools: [read_file]
+    requires_labels: {sandbox: required}`
+    )
+    renderSection({
+      node: { ...node, node_type: 'agent' },
+      definitionYaml: agentYaml,
+      setDefinitionYaml,
+    })
 
-    expect(
-      screen.queryByLabelText('配置 Schema generate')
-    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: '运行开关 dry_run' }))
+
+    const next = yaml.load(String(setDefinitionYaml.mock.calls[0][0])) as {
+      nodes?: Record<string, Record<string, unknown>>
+    }
+    const nextNode = next.nodes?.generate ?? {}
+    expect(nextNode.execution).toEqual({
+      runtime: 'pi',
+      provider: 'deepseek',
+      model: 'your-model-b',
+    })
+    expect(nextNode.skill).toEqual({
+      key: 'education/generate',
+      ref: 'v1.2.0',
+    })
+    expect(nextNode.tools).toEqual(['read_file'])
+    expect(nextNode.requires_labels).toEqual({ sandbox: 'required' })
+    expect(nextNode.config_schema).toMatchObject({
+      properties: { dry_run: { runtime_mutable: true } },
+    })
   })
+
+  it('masks secret defaults and edits only secret_ref values', () => {
+    const secretYaml = yamlText.replace(
+      '        bank_version:\n          type: string\n          default: v1',
+      `        api_token:
+          type: string
+          secret: true
+          default: plaintext-token
+        api_ref:
+          type: string
+          secret_ref: true
+          default: node:demo:generate:api_ref`
+    )
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      node: { ...node, node_type: 'agent' },
+      definitionYaml: secretYaml,
+      setDefinitionYaml,
+    })
+
+    expect(screen.getByLabelText('secret 掩码 api_token')).toHaveValue(
+      '••••••••••••'
+    )
+    expect(screen.getByLabelText('secret 掩码 api_token')).toHaveAttribute(
+      'readonly'
+    )
+    expect(screen.queryByLabelText('默认值 api_token')).not.toBeInTheDocument()
+    expect(
+      screen.queryByDisplayValue('plaintext-token')
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText('默认值 api_ref')).toHaveValue(
+      'node:demo:generate:api_ref'
+    )
+    expect(
+      screen.getByRole('checkbox', { name: '敏感参数 api_token' })
+    ).toBeChecked()
+    expect(
+      screen.getByRole('checkbox', { name: 'Vault 引用 api_ref' })
+    ).toBeChecked()
+
+    fireEvent.change(screen.getByLabelText('默认值 api_ref'), {
+      target: { value: 'node:demo:generate:new_ref' },
+    })
+    fireEvent.blur(screen.getByLabelText('默认值 api_ref'))
+    expect(patchedSchema(setDefinitionYaml.mock.calls[0][0])).toMatchObject({
+      properties: {
+        api_ref: { default: 'node:demo:generate:new_ref', secret_ref: true },
+      },
+    })
+  })
+
+  it('marks an Agent property secret without retaining its plaintext default', () => {
+    const setDefinitionYaml = vi.fn()
+    renderSection({
+      node: { ...node, node_type: 'agent' },
+      setDefinitionYaml,
+    })
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '敏感参数 bank_version' })
+    )
+
+    const schema = patchedSchema(setDefinitionYaml.mock.calls[0][0])
+    const bankVersion = (
+      schema.properties as Record<string, Record<string, unknown>>
+    ).bank_version
+    expect(bankVersion.secret).toBe(true)
+    expect(bankVersion).not.toHaveProperty('default')
+  })
+
+  it('unchecks Agent secret and removes only the Vault dict from YAML', () => {
+    const setDefinitionYaml = vi.fn()
+    const agentYaml = `key: demo
+nodes:
+  generate:
+    type: agent
+    execution: {runtime: pi, provider: deepseek, model: your-model-b}
+    skill: {key: education/generate, ref: latest}
+    config_schema:
+      properties:
+        api_token: {type: string, secret: true}
+        page_size: {type: integer}
+    config:
+      api_token: {secret_ref: node:demo:generate:api_token}
+      page_size: 3
+`
+    renderSection({
+      node: { ...node, node_type: 'agent' },
+      definitionYaml: agentYaml,
+      setDefinitionYaml,
+    })
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '敏感参数 api_token' })
+    )
+
+    const next = yaml.load(String(setDefinitionYaml.mock.calls[0][0])) as {
+      nodes?: Record<string, Record<string, unknown>>
+    }
+    const nextNode = next.nodes?.generate ?? {}
+    expect(nextNode.config).toEqual({ page_size: 3 })
+    expect(nextNode.execution).toEqual({
+      runtime: 'pi',
+      provider: 'deepseek',
+      model: 'your-model-b',
+    })
+    expect(nextNode.skill).toEqual({
+      key: 'education/generate',
+      ref: 'latest',
+    })
+    expect(String(setDefinitionYaml.mock.calls[0][0])).not.toContain('••••')
+  })
+
+  it.each([1440, 390])(
+    'keeps Agent schema controls addressable at %ipx',
+    (width) => {
+      const originalWidth = window.innerWidth
+      try {
+        Object.defineProperty(window, 'innerWidth', {
+          configurable: true,
+          value: width,
+        })
+        renderSection({ node: { ...node, node_type: 'agent' } })
+        expect(
+          screen.getByLabelText('配置 Schema generate')
+        ).toBeInTheDocument()
+        expect(screen.getByLabelText('属性名 bank_version')).toHaveValue(
+          'bank_version'
+        )
+        expect(screen.getByLabelText('新增属性名')).toBeEnabled()
+        expect(
+          screen.getByRole('checkbox', { name: '敏感参数 bank_version' })
+        ).toBeEnabled()
+      } finally {
+        Object.defineProperty(window, 'innerWidth', {
+          configurable: true,
+          value: originalWidth,
+        })
+      }
+    }
+  )
 })

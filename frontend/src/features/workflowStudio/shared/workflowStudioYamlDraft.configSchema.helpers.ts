@@ -1,4 +1,4 @@
-// code 节点 config_schema 结构化编辑的校验与类型转换（#418 面板），从
+// code/agent 节点 config_schema 结构化编辑的校验与类型转换，从
 // workflowStudioYamlDraft.configSchema 拆出以守单文件预算。后端子集
 // （server/app/config_schema.py）：属性键白名单
 // type/description/default/enum/minimum/maximum/secret/secret_ref/
