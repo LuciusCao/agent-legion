@@ -55,7 +55,7 @@ export function permissionTerminalView(
   toolTitle: string
 ) {
   const terminal = isTerminalPermission(toolTitle, asText(toolCall?.kind))
-  const command = asText(asRecord(toolCall?.rawInput)?.command) || null
+  const command = asText(asRecord(toolCall?.rawInput)?.command).trim() || null
   const approved = resolved ? approvedDecision(decisionText(resolved)) : false
   return {
     command,

@@ -84,6 +84,35 @@ describe('permissionPresentation', () => {
     expect(view.lateDetails).toContain('git status')
   })
 
+  it.each([
+    ['pending', undefined],
+    ['human approval', { option_id: 'allow' }],
+    ['allow-all', { option_id: 'allow', via: 'allow_all' }],
+  ])(
+    '%s ignores a blank snapshot and keeps the first valid late command',
+    (_name, decision) => {
+      const terminal = permissionTerminalView(
+        { title: 'Bash', rawInput: { command: '   ' } },
+        'ls -la',
+        decision ? { decision } : undefined,
+        'Bash'
+      )
+      expect(terminal.command).toBeNull()
+      expect(terminal.lateBoundCommand).toBe('ls -la')
+      const view = permissionPresentation(
+        permission({
+          resolved: decision !== undefined,
+          decisionText: terminal.decisionText,
+          command: terminal.command,
+          lateBoundCommand: terminal.lateBoundCommand,
+        })
+      )
+      expect(decision ? view.lateDetails : view.details).toContain('ls -la')
+      expect(view.details).not.toContain('cat secrets')
+      expect(view.lateDetails).not.toContain('cat secrets')
+    }
+  )
+
   it('keeps an approved child-agent request honestly unbound', () => {
     const view = permissionPresentation(
       permission({ resolved: true, decisionText: '已允许' })
