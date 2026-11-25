@@ -272,6 +272,106 @@ describe('permission turn evidence', () => {
     }
   )
 
+  it.each([
+    ['pending', undefined],
+    ['human approval', { option_id: 'allow' }],
+    ['allow-all', { option_id: 'allow', via: 'allow_all' }],
+  ])(
+    '%s preserves ordinary and queued same-turn late binding',
+    (_name, decision) => {
+      const request = permissionRequest(1, 'legacy-call')
+      const first = command(2, 'legacy-call', 'printf same-turn')
+      const later = command(3, 'legacy-call', 'cat secrets')
+      const resolved = decision
+        ? event(
+            4,
+            'permission',
+            { request_id: 'request-1', status: 'resolved', decision },
+            'user'
+          )
+        : null
+      const [ordinary] = buildPermissionViews([
+        request,
+        later,
+        first,
+        ...(resolved ? [resolved] : []),
+      ])
+      expect(ordinary.lateBoundCommand).toBe('printf same-turn')
+
+      const queued = event(
+        2,
+        'text',
+        { text: 'follow up later', queued: true },
+        'user'
+      )
+      const [afterQueue] = buildPermissionViews([
+        request,
+        queued,
+        later,
+        first,
+        ...(resolved ? [resolved] : []),
+      ])
+      expect(afterQueue.lateBoundCommand).toBe('printf same-turn')
+      const view = permissionPresentation(afterQueue)
+      expect(decision ? view.lateDetails : view.details).toContain(
+        'printf same-turn'
+      )
+      expect(view.details).not.toContain('cat secrets')
+      expect(view.lateDetails).not.toContain('cat secrets')
+    }
+  )
+
+  it.each([
+    ['pending', undefined],
+    ['human approval', { option_id: 'allow' }],
+    ['allow-all', { option_id: 'allow', via: 'allow_all' }],
+  ])(
+    '%s isolates an opaque toolCallId after queued_delivered',
+    (_name, decision) => {
+      const old = command(1, 'legacy-call', 'ls -la')
+      const queued = event(
+        2,
+        'text',
+        { text: 'follow up later', queued: true },
+        'user'
+      )
+      const delivered = event(
+        3,
+        'status',
+        { event: 'queued_delivered', message_id: 'queued-message' },
+        'system'
+      )
+      const request = permissionRequest(4, 'legacy-call')
+      const resolved = decision
+        ? event(
+            5,
+            'permission',
+            { request_id: 'request-4', status: 'resolved', decision },
+            'user'
+          )
+        : null
+      const history = [
+        old,
+        queued,
+        delivered,
+        request,
+        ...(resolved ? [resolved] : []),
+      ]
+      const [before] = buildPermissionViews(history)
+      expect(before.lateBoundCommand).toBeNull()
+      expect(permissionPresentation(before).details).not.toContain('ls -la')
+
+      const first = command(6, 'legacy-call', 'printf new')
+      const later = command(7, 'legacy-call', 'cat secrets')
+      const [after] = buildPermissionViews([...history, later, first])
+      expect(after.lateBoundCommand).toBe('printf new')
+      const view = permissionPresentation(after)
+      expect(decision ? view.lateDetails : view.details).toContain('printf new')
+      expect(view.details).not.toContain('cat secrets')
+      expect(view.lateDetails).not.toContain('cat secrets')
+    }
+  )
+
   it('uses the structured turn id in toolCallId before timeline boundaries', () => {
     const old = command(1, '1:tc', 'ls -la')
     const request = permissionRequest(2, '2:tc')

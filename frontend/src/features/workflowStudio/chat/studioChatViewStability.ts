@@ -23,10 +23,12 @@ export function permissionTurnKey(
 }
 
 function isPermissionTurnBoundary(message: ChatMessage): boolean {
-  if (message.kind === 'text' && message.role === 'user') return true
+  if (message.kind === 'text')
+    return message.role === 'user' && message.content.queued !== true
   if (message.kind !== 'status') return false
-  const event = message.content.event
-  return event === 'turn_end' || event === 'turn_timeout' || event === 'error'
+  return ['turn_end', 'turn_timeout', 'error', 'queued_delivered'].includes(
+    message.content.event as string
+  )
 }
 
 export type DraftViews = {
