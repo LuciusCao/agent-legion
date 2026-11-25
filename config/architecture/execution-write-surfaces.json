@@ -253,6 +253,12 @@
         "restore_authority_backups"
       ],
       "note": "_artifact_promotion 的补偿原语叶子模块（体积预算拆分）：恢复 copy（rollback→authority）只经 promote 的失败臂调用，沿用同一套删除前提纪律"
+    },
+    "server/app/services/verified_object_copy.py": {
+      "via": [
+        "copy_objects_verified"
+      ],
+      "note": "#1553/#1548 共用的非 artifact-promote 对象复制 primitive：调用方持有一次性目标 key 与 intent；CopySourceIfMatch 防源漂移，复制后 HEAD + 条件 GET 流式核验 raw size/SHA256，失败按本次尝试目标集补偿"
     }
   },
   "manifest_row_write_sites": {

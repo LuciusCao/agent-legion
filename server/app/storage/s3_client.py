@@ -108,8 +108,13 @@ class ObjectStorage(Protocol):
         """Delete the object; missing objects are not an error."""
         ...
 
-    def copy_object(self, source_key: str, destination_key: str) -> None:
-        """Server-side copy within the bucket (Worker staging → authority key)."""
+    def copy_object(self, source_key: str, destination_key: str, *, source_etag: str = "") -> None:
+        """Server-side copy within the bucket, optionally pinned to a source ETag.
+
+        ``source_etag`` is the unquoted value returned by ``head_object``. A
+        non-empty value maps to S3 ``CopySourceIfMatch`` and fails with 412 if
+        the source changes before the copy. Empty preserves unconditional copy.
+        """
         ...
 
 
@@ -231,11 +236,13 @@ class S3StorageClient:
     def delete_object(self, storage_key: str) -> None:
         self._client.delete_object(Bucket=self._settings.bucket, Key=storage_key)
 
-    def copy_object(self, source_key: str, destination_key: str) -> None:
+    def copy_object(self, source_key: str, destination_key: str, *, source_etag: str = "") -> None:
+        extra = {"CopySourceIfMatch": f'"{source_etag}"'} if source_etag else {}
         self._client.copy_object(
             Bucket=self._settings.bucket,
             CopySource={"Bucket": self._settings.bucket, "Key": source_key},
             Key=destination_key,
+            **extra,
         )
 
 

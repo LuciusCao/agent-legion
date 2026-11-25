@@ -215,6 +215,15 @@ def test_current_repo_registry_matches_scan() -> None:
     assert check_execution_write_surfaces(PROJECT_ROOT) == []
 
 
+def test_verified_object_copy_is_a_separate_registered_primitive() -> None:
+    registry = load_write_surface_registry(PROJECT_ROOT)
+
+    entry = registry["artifact_byte_write_sites"]["server/app/services/verified_object_copy.py"]
+
+    assert entry["via"] == ["copy_objects_verified"]
+    assert "promote_to_authority_guarded" not in entry["via"]
+
+
 def test_registry_via_helpers_exist() -> None:
     # 注册表 via 引用的 helper 名必须在 server/app 里真实存在
     # （def / class / 模块级赋值任一形态），防止注册表指向已退役的符号。
