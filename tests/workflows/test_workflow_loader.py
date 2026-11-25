@@ -9,6 +9,7 @@ import pytest
 import yaml
 
 from server.app.services.workflow_revision_format import (
+    definition_hash,
     definition_to_yaml,
     serialize_definition,
     workflow_definition_to_response_payload,
@@ -175,6 +176,19 @@ def test_legacy_snapshot_without_failure_policy_keeps_empty_defaults() -> None:
     )
     assert "failure_default" not in response_node
     assert "on_failure" not in response_node
+
+
+def test_undeclared_failure_policy_preserves_legacy_serialization_and_hash() -> None:
+    definition = workflow_definition_from_mapping(_raw({"type": "code"}))
+
+    serialized = serialize_definition(definition)
+    payload = json.loads(serialized)
+
+    assert all("on_failure" not in node for node in payload["nodes"].values())
+    assert all("failure_default" not in node for node in payload["nodes"].values())
+    restored = workflow_definition_from_dict(payload)
+    assert serialize_definition(restored) == serialized
+    assert definition_hash(serialized) == definition_hash(serialize_definition(restored))
 
 
 @pytest.mark.parametrize(

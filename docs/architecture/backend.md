@@ -837,7 +837,8 @@ review:
 `on_failure` 的键限上述三类，值限 `rerun_self | rerun_upstream`。loader 拒绝未知类别、
 策略及错误类型。两个字段随 revision 定义序列化，并在 intake 时冻结进
 `jobs.workflow_definition_snapshot_json`；不需要新增数据库列或迁移。YAML echo、snapshot
-round-trip 与 workflow response 保留声明。旧 snapshot 缺字段时得到 `failure_default=''`、
+round-trip 与 workflow response 保留声明。未声明字段在 `serialize_definition` 中省略，保持
+既有 snapshot JSON 与 definition hash；旧 snapshot 缺字段时得到 `failure_default=''`、
 `on_failure={}`，行为保持原样。
 
 ### 持久化分类优先级

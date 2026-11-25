@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 def serialize_definition(definition: WorkflowDefinition) -> str:
     payload = asdict(definition)
+    for node in payload["nodes"].values():
+        if not node["on_failure"]:
+            node.pop("on_failure")
+        if not node["failure_default"]:
+            node.pop("failure_default")
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
