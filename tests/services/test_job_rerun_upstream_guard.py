@@ -180,7 +180,14 @@ def test_preview_excludes_failed_upstream(rerun_service, job_db):
         "review_script",
     )
 
-    assert preview == {"total_count": 2, "eligible_count": 1}
+    assert preview == {
+        "total_count": 2,
+        "eligible_count": 1,
+        "plans": [
+            {"job_id": str(stuck["id"]), "planned_targets": []},
+            {"job_id": str(healthy["id"]), "planned_targets": ["review_script"]},
+        ],
+    }
 
 
 def _seed_implicit_job(job_db):

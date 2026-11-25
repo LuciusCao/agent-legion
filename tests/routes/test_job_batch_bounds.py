@@ -85,7 +85,7 @@ def test_explicit_job_ids_empty_list_is_a_noop(client) -> None:
 
     assert rerun.status_code == 200
     assert rerun.json()["results"] == []
-    assert preview.json() == {"total_count": 0, "eligible_count": 0}
+    assert preview.json() == {"total_count": 0, "eligible_count": 0, "plans": []}
 
 
 def test_explicit_ids_over_retired_limit_are_accepted(client, monkeypatch) -> None:
@@ -107,7 +107,14 @@ def test_explicit_ids_over_retired_limit_are_accepted(client, monkeypatch) -> No
     )
 
     assert preview.status_code == 200
-    assert preview.json() == {"total_count": RETIRED_LIMIT + 1, "eligible_count": 1}
+    body = preview.json()
+    assert body["total_count"] == RETIRED_LIMIT + 1
+    assert body["eligible_count"] == 1
+    plans = body["plans"]
+    assert len(plans) == RETIRED_LIMIT + 1
+    assert all(plan["job_id"] == expected for plan, expected in zip(plans, ids, strict=True))
+    assert all(not plan["planned_targets"] for plan in plans[:-1])
+    assert plans[-1] == {"job_id": real_job, "planned_targets": [NODE_KEY]}
     assert rerun.status_code == 200
     results = rerun.json()["results"]
     assert len(results) == RETIRED_LIMIT + 1
