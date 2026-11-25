@@ -11,6 +11,7 @@ from typing import Any, BinaryIO
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.material_bundles import MAX_BUNDLE_MEMBERS, validate_member_path
 from server.app.storage import ObjectStorage
+from shared.resource_manifest import resource_manifest_hash
 
 _SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
@@ -46,16 +47,7 @@ def request_fingerprint(
 
 
 def manifest_hash(files: list[dict[str, Any]]) -> str:
-    canonical = [
-        {
-            "path": str(file["path"]),
-            "sha256": str(file["sha256"]),
-            "size_bytes": int(file["size_bytes"]),
-            "content_type": str(file["content_type"]),
-        }
-        for file in sorted(files, key=lambda item: str(item["path"]))
-    ]
-    return _digest({"format": "shared-resource-manifest-v1", "files": canonical})
+    return resource_manifest_hash(files)
 
 
 def prepare_source_snapshot(

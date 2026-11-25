@@ -192,7 +192,7 @@ class NodeContext:
 
     @property
     def shared_resources(self) -> Mapping[str, Mapping[str, Any]]:
-        """Exact pinned, Host-materialized resources declared by this node.
+        """Exact pinned resources materialized by the Host or Worker for this node.
 
         Each value carries ``version`` / ``manifest_hash`` / directory ``path``
         and a read-only ``files`` sequence with safe relative and local paths.

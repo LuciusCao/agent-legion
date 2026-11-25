@@ -34,6 +34,7 @@ from server.app.services.vault import VaultError, VaultService
 from server.app.workflow_worker.agent_claim import cached_run_payload, fail_node_config
 from server.app.workflow_worker.code_dispatch import etag_gate_blocks_remote_enqueue
 from server.app.workflows.definition import WorkflowNode
+from shared.protocol import SHARED_RESOURCE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -94,8 +95,9 @@ def try_claim_code_worker_node(
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False
-    if node.shared_resources:
-        # M43 supports exact-pin materialization only on the Host (M44: Worker protocol).
+    if node.shared_resources and not dispatch.online_etag_capable_code_worker_available(
+        workspace_id, SHARED_RESOURCE_PROTOCOL_VERSION
+    ):
         return False
     # #1320 (A4): a job whose material inputs hit the v6 ETag gate predicate is
     # unclaimable by a pre-v6 fleet — hold it off the broker queue when no

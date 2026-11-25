@@ -29,6 +29,7 @@ from shared.protocol import (
     MATERIAL_ETAG_PROTOCOL_VERSION,
     MODEL_RUNTIME_PROTOCOL_VERSION,
     PROTOCOL_VERSION,
+    SHARED_RESOURCE_PROTOCOL_VERSION,
 )
 from worker.host.client import Client
 
@@ -40,7 +41,8 @@ def test_worker_declared_version_is_latest_shared() -> None:
     from worker.host.client import PROTOCOL_VERSION as worker_declared
 
     assert worker_declared is PROTOCOL_VERSION
-    assert PROTOCOL_VERSION == MATERIAL_ETAG_PROTOCOL_VERSION
+    assert PROTOCOL_VERSION == SHARED_RESOURCE_PROTOCOL_VERSION
+    assert SHARED_RESOURCE_PROTOCOL_VERSION > MATERIAL_ETAG_PROTOCOL_VERSION
 
 
 def test_batch_heartbeat_limit_mirrors_host_contract() -> None:

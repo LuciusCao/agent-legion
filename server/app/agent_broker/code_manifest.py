@@ -25,6 +25,7 @@ import logging
 from typing import Any
 
 from server.app.agent_broker.artifact_object_block import inject_artifact_object_block
+from server.app.agent_broker.shared_resource_claim import shared_resource_claim_block
 from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
 from server.app.services.job_artifact_objects import JobArtifactObjectStore
@@ -144,6 +145,14 @@ def resolve_code_runtime_context(
                 job or {},
                 storage=object_store.storage if object_store is not None else None,
                 # #1316 R12：描述符层按同一行快照复判旧 Worker 门禁。
+                worker_protocol_version=worker_protocol_version,
+            ),
+            "shared_resources": shared_resource_claim_block(
+                database_dsn,
+                workspace_id,
+                job or {},
+                manifest,
+                storage=object_store.storage if object_store is not None else None,
                 worker_protocol_version=worker_protocol_version,
             ),
         },

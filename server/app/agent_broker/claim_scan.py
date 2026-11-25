@@ -176,6 +176,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> l
                     ) < coalesce(w.max_concurrency, 2147483647))
         )
         select r.*, wr.definition_json as revision_definition_json,
+               j.workflow_definition_snapshot_json as job_definition_snapshot_json,
                case when jsonb_typeof(ws.workflow_node_config
                                       #> array[r.node_key, 'timeout_seconds'])
                          in ('object', 'array') then '"<non-scalar>"'::jsonb

@@ -27,7 +27,9 @@ class _Vault:
         return dict(values)
 
 
-def _route(monkeypatch, tmp_path: Path, node: WorkflowNode, shard_runtime):
+def _route(
+    monkeypatch, tmp_path: Path, node: WorkflowNode, shard_runtime, *, shared_capable: bool = True
+):
     enqueued = []
     online_calls = []
     dispatch = SimpleNamespace(
@@ -35,6 +37,9 @@ def _route(monkeypatch, tmp_path: Path, node: WorkflowNode, shard_runtime):
         is_in_flight=lambda job_id, key: False,
         online_code_worker_available=lambda capability, workspace_id: (
             online_calls.append((capability, workspace_id)) or True
+        ),
+        online_etag_capable_code_worker_available=lambda workspace_id, minimum_protocol: (
+            shared_capable
         ),
         try_mark_in_flight=lambda job_id, key: True,
         discard_in_flight=lambda job_id, key: None,
@@ -85,7 +90,7 @@ def _node(*, shared_resources=()) -> WorkflowNode:
     "shard_runtime",
     [None, {"shard_index": 0, "shard_input": {"value": 1}}],
 )
-def test_remote_enqueue_falls_back_to_host_for_shared_resources(
+def test_remote_enqueue_supports_shared_resources_for_current_worker(
     monkeypatch, tmp_path: Path, shard_runtime
 ) -> None:
     handled, enqueued, online_calls = _route(
@@ -94,8 +99,23 @@ def test_remote_enqueue_falls_back_to_host_for_shared_resources(
         _node(shared_resources=("resource-1",)),
         shard_runtime,
     )
-    assert handled is False
+    assert handled is True
     assert online_calls == [("", "ws")]
+    assert len(enqueued) == 1
+    assert enqueued[0]["node"].shared_resources == ("resource-1",)
+
+
+def test_shared_resources_fall_back_to_host_when_only_old_workers_are_online(
+    monkeypatch, tmp_path: Path
+) -> None:
+    handled, enqueued, _ = _route(
+        monkeypatch,
+        tmp_path,
+        _node(shared_resources=("resource-1",)),
+        None,
+        shared_capable=False,
+    )
+    assert handled is False
     assert enqueued == []
 
 
@@ -137,7 +157,9 @@ def _mixed_snapshot() -> str:
 
 
 @pytest.mark.parametrize("shard", [False, True])
-def test_worker_mixed_snapshot_rejects_only_the_declared_node(tmp_path: Path, shard: bool) -> None:
+def test_worker_mixed_snapshot_materializes_only_the_declared_node(
+    tmp_path: Path, shard: bool
+) -> None:
     plain = _manifest("plain")
     plain["runtime_context"]["job"]["workflow_definition_snapshot_json"] = _mixed_snapshot()
     if shard:
@@ -148,8 +170,12 @@ def test_worker_mixed_snapshot_rejects_only_the_declared_node(tmp_path: Path, sh
 
     declared = _manifest("draft")
     declared["runtime_context"]["job"]["workflow_definition_snapshot_json"] = _mixed_snapshot()
-    with pytest.raises(ValueError, match="require Host execution"):
-        build_child_payload(declared, "def run(): pass", tmp_path)
+    resources = {"resource-1": {"version": 1, "files": []}}
+    payload = build_child_payload(declared, "def run(): pass", tmp_path, shared_resources=resources)
+    assert payload["runtime"]["shared_resources"] == resources
+    assert (
+        "shared_resources" not in build_child_payload(plain, "def run(): pass", tmp_path)["runtime"]
+    )
 
 
 def test_worker_allows_business_keys_and_run_level_pins(tmp_path: Path) -> None:
@@ -181,16 +207,16 @@ def test_worker_rejects_platform_resource_payload(tmp_path: Path, payload_locati
     manifest = _manifest("plain")
     target = manifest if payload_location == "manifest" else manifest["runtime_context"]
     target["shared_resources"] = {"resource-1": {"version": 1}}
-    with pytest.raises(ValueError, match="require Host execution"):
+    with pytest.raises(ValueError, match="shared resource"):
         build_child_payload(manifest, "def run(): pass", tmp_path)
 
 
-def test_worker_rejects_current_node_declaration(tmp_path: Path) -> None:
+def test_worker_rejects_current_node_declaration_without_materialization(tmp_path: Path) -> None:
     manifest = _manifest("draft")
     manifest["runtime_context"]["job"]["workflow_definition_snapshot_json"] = json.dumps(
         {"nodes": {"draft": {"shared_resources": ["resource-1"]}}}
     )
-    with pytest.raises(ValueError, match="require Host execution"):
+    with pytest.raises(ValueError, match="missing or do not match"):
         build_child_payload(manifest, "def run(): pass", tmp_path)
 
 
