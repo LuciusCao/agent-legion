@@ -153,22 +153,20 @@ def prepare_code_execution(
     return PreparedCode(manifest=manifest, code_text=code_text, libs_root=extracted)
 
 
-_JSON = {"workflow_definition_snapshot_json", "frozen_pins_json", "source_payload_json"}
-
-
-def _has_shared_resources(value: Any) -> bool:
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            if key == "shared_resources" and nested:
-                return True
-            if key in _JSON and isinstance(nested, str) and nested:
-                nested = json.loads(nested)
-            if _has_shared_resources(nested):
-                return True
+def _has_shared_resources(manifest: Mapping[str, Any]) -> bool:
+    context = manifest.get("runtime_context")
+    if not isinstance(context, Mapping):
+        return bool(manifest.get("shared_resources"))
+    if manifest.get("shared_resources") or context.get("shared_resources"):
+        return True
+    job = context.get("job")
+    snapshot = job.get("workflow_definition_snapshot_json") if isinstance(job, Mapping) else None
+    if not snapshot:
         return False
-    if isinstance(value, list):
-        return any(_has_shared_resources(item) for item in value)
-    return False
+    definition = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    nodes = definition.get("nodes") if isinstance(definition, Mapping) else None
+    node = nodes.get(str(manifest.get("node_key") or "")) if isinstance(nodes, Mapping) else None
+    return bool(node.get("shared_resources")) if isinstance(node, Mapping) else False
 
 
 def build_child_payload(

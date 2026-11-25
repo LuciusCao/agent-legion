@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import copy
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,13 +27,7 @@ class _Vault:
         return dict(values)
 
 
-@pytest.mark.parametrize(
-    "shard_runtime",
-    [None, {"shard_index": 0, "shard_input": {"value": 1}}],
-)
-def test_remote_enqueue_falls_back_to_host_for_shared_resources(
-    monkeypatch, tmp_path: Path, shard_runtime
-) -> None:
+def _route(monkeypatch, tmp_path: Path, node: WorkflowNode, shard_runtime):
     enqueued = []
     online_calls = []
     dispatch = SimpleNamespace(
@@ -65,13 +58,6 @@ def test_remote_enqueue_falls_back_to_host_for_shared_resources(
     monkeypatch.setattr(code_claim, "is_worker_eligible", lambda *args: True)
     monkeypatch.setattr(code_claim, "VaultService", _Vault)
     monkeypatch.setattr(code_claim, "inject_connection_config", lambda *args: None)
-    node = WorkflowNode(
-        key="draft",
-        label="Draft",
-        capability="",
-        shared_resources=("resource-1",),
-    )
-
     handled = code_claim.try_claim_code_worker_node(
         worker,
         {"id": "ws"},
@@ -83,63 +69,127 @@ def test_remote_enqueue_falls_back_to_host_for_shared_resources(
         "ws",
         shard_runtime=shard_runtime,
     )
+    return handled, enqueued, online_calls
 
+
+def _node(*, shared_resources=()) -> WorkflowNode:
+    return WorkflowNode(
+        key="draft",
+        label="Draft",
+        capability="",
+        shared_resources=shared_resources,
+    )
+
+
+@pytest.mark.parametrize(
+    "shard_runtime",
+    [None, {"shard_index": 0, "shard_input": {"value": 1}}],
+)
+def test_remote_enqueue_falls_back_to_host_for_shared_resources(
+    monkeypatch, tmp_path: Path, shard_runtime
+) -> None:
+    handled, enqueued, online_calls = _route(
+        monkeypatch,
+        tmp_path,
+        _node(shared_resources=("resource-1",)),
+        shard_runtime,
+    )
     assert handled is False
     assert online_calls == [("", "ws")]
     assert enqueued == []
 
 
-def _manifest() -> dict:
+@pytest.mark.parametrize(
+    "shard_runtime",
+    [None, {"shard_index": 0, "shard_input": {"value": 1}}],
+)
+def test_mixed_workflow_plain_node_still_executes_remotely(
+    monkeypatch, tmp_path: Path, shard_runtime
+) -> None:
+    handled, enqueued, online_calls = _route(monkeypatch, tmp_path, _node(), shard_runtime)
+    assert handled is True
+    assert online_calls == [("", "ws")]
+    assert len(enqueued) == 1
+
+
+def _manifest(node_key: str = "draft") -> dict:
     return {
+        "node_key": node_key,
         "runtime_context": {
             "job": {"id": "job-1"},
             "workspace": {},
             "settings_config": {},
             "job_batch": None,
             "skill_versions": {},
-        }
+        },
     }
 
 
-@pytest.mark.parametrize(
-    "resource_patch",
-    [
-        {"shared_resources": {"resource-1": {"version": 1}}},
+def _mixed_snapshot() -> str:
+    return json.dumps(
         {
-            "runtime_context": {
-                "shared_resources": {"resource-1": {"version": 1}},
+            "nodes": {
+                "draft": {"shared_resources": ["resource-1"]},
+                "plain": {"shared_resources": []},
             }
-        },
-        {
-            "runtime_context": {
-                "job": {
-                    "workflow_definition_snapshot_json": json.dumps(
-                        {"nodes": {"draft": {"shared_resources": ["resource-1"]}}}
-                    )
-                }
-            }
-        },
-        {
-            "runtime_context": {
-                "job_batch": {
-                    "frozen_pins_json": json.dumps(
-                        {"shared_resources": {"pins": [{"resource_id": "resource-1"}]}}
-                    )
-                }
-            }
-        },
-    ],
-)
-def test_worker_rejects_shared_resource_declarations_and_payloads(
-    tmp_path: Path, resource_patch
-) -> None:
-    manifest = _manifest()
-    for key, value in resource_patch.items():
-        if key == "runtime_context":
-            manifest[key].update(copy.deepcopy(value))
-        else:
-            manifest[key] = copy.deepcopy(value)
+        }
+    )
 
+
+@pytest.mark.parametrize("shard", [False, True])
+def test_worker_mixed_snapshot_rejects_only_the_declared_node(tmp_path: Path, shard: bool) -> None:
+    plain = _manifest("plain")
+    plain["runtime_context"]["job"]["workflow_definition_snapshot_json"] = _mixed_snapshot()
+    if shard:
+        plain.update({"shard_index": 0, "shard_input": {"value": 1}})
+    payload = build_child_payload(plain, "def run(): pass", tmp_path)
+    assert payload["runtime"]["node_key"] == "plain"
+    assert ("shard_index" in payload["runtime"]) is shard
+
+    declared = _manifest("draft")
+    declared["runtime_context"]["job"]["workflow_definition_snapshot_json"] = _mixed_snapshot()
+    with pytest.raises(ValueError, match="require Host execution"):
+        build_child_payload(declared, "def run(): pass", tmp_path)
+
+
+def test_worker_allows_business_keys_and_run_level_pins(tmp_path: Path) -> None:
+    manifest = _manifest("plain")
+    manifest["config"] = {"shared_resources": {"custom": "value"}}
+    manifest["runtime_context"]["job"].update(
+        {
+            "workflow_definition_snapshot_json": _mixed_snapshot(),
+            "input_json": json.dumps({"shared_resources": {"custom": "item"}}),
+        }
+    )
+    manifest["runtime_context"]["job_batch"] = {
+        "frozen_pins_json": json.dumps(
+            {"shared_resources": {"pins": [{"resource_id": "resource-1"}]}}
+        ),
+        "source_payload_json": json.dumps(
+            {"task_candidates": [{"shared_resources": {"custom": "payload"}}]}
+        ),
+    }
+    payload = build_child_payload(manifest, "def run(): pass", tmp_path)
+    assert payload["runtime"]["node_config"] == {"shared_resources": {"custom": "value"}}
+
+
+@pytest.mark.parametrize(
+    "payload_location",
+    ["manifest", "runtime_context"],
+)
+def test_worker_rejects_platform_resource_payload(tmp_path: Path, payload_location: str) -> None:
+    manifest = _manifest("plain")
+    target = manifest if payload_location == "manifest" else manifest["runtime_context"]
+    target["shared_resources"] = {"resource-1": {"version": 1}}
+    with pytest.raises(ValueError, match="require Host execution"):
+        build_child_payload(manifest, "def run(): pass", tmp_path)
+
+
+def test_worker_rejects_current_node_declaration(tmp_path: Path) -> None:
+    manifest = _manifest("draft")
+    manifest["runtime_context"]["job"]["workflow_definition_snapshot_json"] = json.dumps(
+        {"nodes": {"draft": {"shared_resources": ["resource-1"]}}}
+    )
     with pytest.raises(ValueError, match="require Host execution"):
         build_child_payload(manifest, "def run(): pass", tmp_path)
 
