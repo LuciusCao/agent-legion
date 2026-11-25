@@ -10,6 +10,7 @@ import pytest
 
 from server.app.executors._code_runtime import build_runtime
 from server.app.executors.cancellation import CancellationToken
+from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext
 from server.app.jobs.job_id_encoding import encode_job_id, encode_resource_job_id
 from server.app.jobs.storage_layout import job_storage_dir
@@ -17,6 +18,7 @@ from server.app.routes.job_view_contracts import JobDetailResponse
 from server.app.routes.run_contracts import RunDetailResponse
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_queries import JobQueryService
+from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.quality_replay_setup import QualityReplaySetup
 from server.app.services.run_batch_feeder import RunBatchFeeder
@@ -58,6 +60,24 @@ def _publish(job_db, resource_id: str, workspace_id: str = TARGET_WS):
     )
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
     return definition
+
+
+def _definition_with_resources(resource_ids=(), *, label="Target", new_node=False):
+    nodes = {
+        "draft": {
+            "type": "code",
+            "capability": "draft",
+            "shared_resources": list(resource_ids),
+        }
+    }
+    if new_node:
+        nodes["other"] = {
+            "type": "code",
+            "capability": "other",
+            "after": ["draft"],
+            "shared_resources": list(resource_ids),
+        }
+    return workflow_definition_from_mapping({"key": TARGET_WS, "label": label, "nodes": nodes})
 
 
 def _resource(shared_service, shared_materials, shared_storage) -> str:
@@ -196,6 +216,108 @@ def test_sync_upgrade_switchback_dedup_and_detail_contract(
     job_detail = JobDetailResponse(**query.detail(first["job_ids"][0]))
     assert job_detail.shared_resources[0].version == 1
     assert "storage_key" not in job_detail.model_dump_json()
+
+
+def _create_upgrade_job(job_db, settings, shared_materials, shared_storage, resource_id: str):
+    definition = _definition_with_resources([resource_id] if resource_id else [])
+    WorkflowRevisionService(job_db).ensure_active_revision(TARGET_WS, definition)
+    created = _service(job_db, settings, shared_materials).create_run(
+        TARGET_WS,
+        workflow_key=TARGET_WS,
+        items=[_item(shared_materials, shared_storage)],
+    )
+    return job_db.get_job(created["job_ids"][0])
+
+
+@pytest.mark.parametrize(
+    ("initial", "target", "new_node"),
+    [
+        ("A", "B", False),
+        ("none", "A", False),
+        ("A", "none", False),
+        ("A", "A", True),
+    ],
+)
+def test_workflow_upgrade_rejects_shared_resource_declaration_changes_without_mutation(
+    initial,
+    target,
+    new_node,
+    job_db,
+    settings,
+    shared_service,
+    shared_materials,
+    shared_storage,
+    tmp_path,
+) -> None:
+    resource_id = _resource(shared_service, shared_materials, shared_storage)
+    job = _create_upgrade_job(
+        job_db,
+        settings,
+        shared_materials,
+        shared_storage,
+        resource_id if initial == "A" else "",
+    )
+    target_ids = {
+        "A": [resource_id],
+        "B": ["other-resource"],
+        "none": [],
+    }[target]
+    active = WorkflowRevisionService(job_db).publish_workspace_revision(
+        TARGET_WS,
+        _definition_with_resources(target_ids, label="Changed", new_node=new_node),
+    )
+    before_job = job_db.get_job(str(job["id"]))
+    before_run = job_db.get_run(str(job["run_id"]))
+    before_nodes = job_db.list_job_nodes(str(job["id"]))
+    before_pins = job_db.get_job_shared_resource_pins(str(job["id"]))
+
+    result = JobWorkflowUpgradeService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+    ).upgrade(TARGET_WS, str(job["id"]), mode="clean")
+
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "shared_resource_declaration_changed"
+    assert active["id"] != before_job["workflow_revision_id"]
+    assert job_db.get_job(str(job["id"])) == before_job
+    assert job_db.get_run(str(job["run_id"])) == before_run
+    assert job_db.list_job_nodes(str(job["id"])) == before_nodes
+    assert job_db.get_job_shared_resource_pins(str(job["id"])) == before_pins
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_workflow_upgrade_allows_identical_resource_declarations(
+    declared,
+    job_db,
+    settings,
+    shared_service,
+    shared_materials,
+    shared_storage,
+    tmp_path,
+) -> None:
+    resource_id = _resource(shared_service, shared_materials, shared_storage)
+    job = _create_upgrade_job(
+        job_db,
+        settings,
+        shared_materials,
+        shared_storage,
+        resource_id if declared else "",
+    )
+    before_pins = job_db.get_job_shared_resource_pins(str(job["id"]))
+    before_run = job_db.get_run(str(job["run_id"]))
+    active = WorkflowRevisionService(job_db).publish_workspace_revision(
+        TARGET_WS,
+        _definition_with_resources([resource_id] if declared else [], label="Unrelated edit"),
+    )
+
+    result = JobWorkflowUpgradeService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+    ).upgrade(TARGET_WS, str(job["id"]), mode="clean")
+
+    assert result["status"] == "succeeded"
+    upgraded = job_db.get_job(str(job["id"]))
+    assert upgraded["workflow_revision_id"] == active["id"]
+    assert job_db.get_job_shared_resource_pins(str(job["id"])) == before_pins
+    assert job_db.get_run(str(job["run_id"])) == before_run
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])
