@@ -11,8 +11,10 @@ test_material_gc_write_protocol.py 的交错用例），而不是绕过协议。
   内派生 key 并提交后才签 URL）与 ``remote_artifact_support.py``
   （``jobs-staging/`` 前缀的产物直传，不在材料前缀）。
 
-产物侧 ``put_stream`` / ``copy_object`` 由 scripts/architecture/
-execution_write_surfaces.py 另行治理（jobs/ 前缀）。
+产物侧 ``put_stream`` 由 scripts/architecture/execution_write_surfaces.py
+另行治理（jobs/ 前缀）；``copy_object`` 同时在这里钉住既有 artifact
+promote/restore、跨 workspace 共享的 verified-copy primitive 及既有
+seed-from-prod 跨 bucket 运维通道，禁止业务 service 自行散写。
 """
 
 from __future__ import annotations
@@ -31,6 +33,12 @@ _ALLOWED = {
     "presign_put": {
         "server/app/services/materials.py",
         "server/app/agent_broker/remote_artifact_support.py",
+    },
+    "copy_object": {
+        "server/app/executors/_artifact_promotion.py",
+        "server/app/executors/_artifact_restore.py",
+        "server/app/services/verified_object_copy.py",
+        "scripts/seed_from_prod_objects.py",
     },
 }
 # 存储适配层自身（协议定义与 boto3 转发），不是写入入口。

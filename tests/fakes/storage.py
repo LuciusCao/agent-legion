@@ -12,8 +12,9 @@
   Worker 产物暂存恒 ""）。
 * ``presigned_gets``     — presign_get 的 key 记录（claim block 断言）。
 * ``get_response_headers`` — presign_get 签入的响应头覆盖（#739 直连头语义断言）。
-* ``opened``             — open_stream 调用计数（缓存命中断言）。
+* ``opened`` / ``stream_if_match`` — open_stream 计数与条件 GET 参数。
 * ``put_calls``          — put_object/put_stream 计数（“不做镜像重传”断言）。
+* ``copy_calls``         — copy_object 的源/目标/source_etag 记录。
 * ``fail_deletes``       — delete_object 抛 botocore ClientError（#204 故障族）。
 * ``fail_put``/``fail_put_with`` — put_object 抛 ConnectionError / 指定异常。
 """
@@ -65,7 +66,9 @@ class FakeObjectStorage:
         self.presigned_gets: list[str] = []
         self.get_response_headers: list[dict[str, str]] = []
         self.opened = 0
+        self.stream_if_match: list[str] = []
         self.put_calls = 0
+        self.copy_calls: list[tuple[str, str, str]] = []
 
     # ---- presign ----------------------------------------------------------
 
@@ -102,6 +105,7 @@ class FakeObjectStorage:
 
     def open_stream(self, storage_key: str, *, if_match: str = "") -> io.BytesIO:
         self.opened += 1
+        self.stream_if_match.append(if_match)
         payload = self.objects[storage_key]
         if if_match and if_match != etag_of(payload):
             # 与 S3 的 If-Match 不一致响应同形：412 PreconditionFailed。
@@ -148,5 +152,18 @@ class FakeObjectStorage:
             self.deleted.append(storage_key)
         self.objects.pop(storage_key, None)
 
-    def copy_object(self, source_key: str, destination_key: str) -> None:
-        self.objects[destination_key] = self.objects[source_key]
+    def copy_object(self, source_key: str, destination_key: str, *, source_etag: str = "") -> None:
+        self.copy_calls.append((source_key, destination_key, source_etag))
+        payload = self.objects.get(source_key)
+        if payload is None:
+            from botocore.exceptions import ClientError
+
+            raise ClientError({"Error": {"Code": "404", "Message": "NoSuchKey"}}, "CopyObject")
+        if source_etag and source_etag != etag_of(payload):
+            from botocore.exceptions import ClientError
+
+            raise ClientError(
+                {"Error": {"Code": "412", "Message": "PreconditionFailed"}},
+                "CopyObject",
+            )
+        self.objects[destination_key] = payload

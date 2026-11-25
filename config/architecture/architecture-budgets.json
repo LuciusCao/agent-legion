@@ -1989,6 +1989,7 @@
     "server/app/services/token_usage_response.py": 143,
     "server/app/services/token_usage_workspace.py": 370,
     "server/app/services/vault.py": 171,
+    "server/app/services/verified_object_copy.py": 220,
     "server/app/services/versioned_entities.py": 301,
     "server/app/services/workflow_definitions.py": 52,
     "server/app/services/workflow_draft_cas.py": 44,
