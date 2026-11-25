@@ -2405,6 +2405,7 @@
     "worker/metrics_cache.py": 84,
     "worker/metrics_proxy.py": 28,
     "worker/orphan_reaper.py": 50,
+    "worker/presigned_download.py": 63,
     "worker/proc_groups.py": 92,
     "worker/process_lifecycle.py": 53,
     "worker/procfs.py": 85,

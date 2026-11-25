@@ -23,9 +23,9 @@ from shared.material_cache import (
     MaterializeError,
     cache_file_path,
     material_cache_address,
-    materialize_stream,
 )
 from worker.material_fetch import _open_download
+from worker.presigned_download import materialize_presigned_stream
 
 
 def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -> dict[str, Any]:
@@ -62,10 +62,11 @@ def materialize_claim_bundle(material: Mapping[str, Any], execution_dir: Path) -
     pin.add(cache_file_path(cache_root, tree_address))
     materialized: list[tuple[Path, str]] = []
     for address, url, relpath, content_hash, object_etag, expected_size in parsed:
-        path = materialize_stream(
+        path = materialize_presigned_stream(
             cache_root,
             address,
             partial(_open_download, url, if_match=object_etag),
+            label=f"bundle member {relpath}",
             expected_sha256=content_hash,
             expected_size=expected_size,
             pin=pin,

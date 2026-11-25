@@ -67,11 +67,9 @@ def claim_resource_ids(manifest: Mapping[str, Any], job_snapshot: Any) -> tuple[
     node_key = str(manifest.get("node_key") or "")
     snapshot_ids = snapshot_resource_ids(job_snapshot, node_key)
     manifest_ids = normalize_resource_ids(manifest.get("shared_resources"), "code manifest")
-    if snapshot_ids and manifest_ids and set(snapshot_ids) != set(manifest_ids):
+    if manifest_ids and set(snapshot_ids) != set(manifest_ids):
         raise ValueError("shared resource declaration differs from the job snapshot")
-    if job_snapshot and not snapshot_ids and manifest_ids:
-        raise ValueError("shared resource declaration differs from the job snapshot")
-    ids = snapshot_ids or manifest_ids
+    ids = snapshot_ids
     context = manifest.get("runtime_context")
     descriptor = context.get("shared_resources") if isinstance(context, Mapping) else None
     if descriptor and not ids:

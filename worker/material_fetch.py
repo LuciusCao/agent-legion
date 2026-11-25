@@ -15,50 +15,22 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, BinaryIO, cast
-
-import requests
+from typing import Any, BinaryIO
 
 from shared.material_cache import (
     MATERIALS_CACHE_DIRNAME,
     MaterializeError,
     material_cache_address,
-    materialize_stream,
 )
-
-# Single socket timeout for the material download; aligned with the
-# transfer-timeout default of the bundle/artifact channel.
-_DOWNLOAD_TIMEOUT_SECONDS = 120
+from worker.presigned_download import (
+    materialize_presigned_stream,
+    open_presigned_download,
+)
 
 
 def _open_download(url: str, *, if_match: str = "") -> BinaryIO:
-    """Open a streaming reader for the presigned GET URL.
-
-    Module-level seam: tests monkeypatch this instead of touching the
-    network. The URL comes from the authenticated claim channel, so no
-    SSRF guard applies here (unlike node-originated downloads).
-
-    ``if_match`` (#1279) carries the claim descriptor's ``object_etag``:
-    If-Match is not a signed header, so attaching it to the presigned GET
-    is allowed, and a same-size overwrite after complete() answers 412
-    instead of silently serving poisoned bytes. Empty (older servers,
-    pre-v98 rows) = unconditional.（协议 < v6 的旧 Worker 领不到命中门禁
-    的材料任务——claim admission 跳过，不存在「忽略该字段仍执行」的
-    窗口；见 shared/protocol.py v6 条目。）
-    """
-    headers = {"If-Match": f'"{if_match}"'} if if_match else {}
-    response = requests.get(url, stream=True, timeout=_DOWNLOAD_TIMEOUT_SECONDS, headers=headers)
-    if response.status_code == 412:
-        response.close()
-        raise MaterializeError(
-            "material bytes changed after the server's completion check "
-            "(ETag mismatch); an operator must repair the row with "
-            "scripts/request_material_reupload.py, then re-upload the material"
-        )
-    if response.status_code != 200:
-        response.close()
-        raise MaterializeError(f"material download failed with HTTP {response.status_code}")
-    return cast(BinaryIO, response.raw)
+    """Compatibility seam for material, bundle and shared-resource callers."""
+    return open_presigned_download(url, if_match=if_match)
 
 
 def materialize_claim_material(
@@ -90,10 +62,11 @@ def materialize_claim_material(
     size = material.get("size_bytes")
     expected_size = int(size) if isinstance(size, (int, float)) else None
     cache_root = Path(execution_dir).parent / MATERIALS_CACHE_DIRNAME
-    path = materialize_stream(
+    path = materialize_presigned_stream(
         cache_root,
         material_cache_address(material_id, content_hash, generation),
         lambda: _open_download(url, if_match=object_etag),
+        label=f"material {material_id}",
         expected_sha256=content_hash,
         expected_size=expected_size,
     )

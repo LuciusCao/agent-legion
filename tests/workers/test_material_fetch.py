@@ -160,7 +160,7 @@ def test_open_download_sends_if_match_header_and_maps_412(monkeypatch: pytest.Mo
         if_match = (kwargs.get("headers") or {}).get("If-Match", "")
         return _Response(412 if if_match and if_match != '"etag-1"' else 200)
 
-    monkeypatch.setattr(material_fetch.requests, "get", _get)
+    monkeypatch.setattr("worker.presigned_download.requests.get", _get)
 
     stream = material_fetch._open_download("https://s3.test/x", if_match="etag-1")
     assert sent[0]["headers"] == {"If-Match": '"etag-1"'}

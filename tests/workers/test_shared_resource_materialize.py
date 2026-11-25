@@ -247,3 +247,42 @@ def test_deleted_manifest_declaration_still_uses_the_frozen_job_snapshot(
     manifest["shared_resources"] = []
     result = materialize_claim_shared_resources(manifest, tmp_path / "work" / "exec")
     assert Path(result["rules"]["files"][0]["local_path"]).read_bytes() == b"expected"
+
+
+@pytest.mark.parametrize("snapshot", [None, "", {}, []])
+def test_nonempty_manifest_never_substitutes_itself_for_a_missing_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, snapshot
+) -> None:
+    resources = {"rules": [("rules.txt", b"expected", "text/plain")]}
+    manifest = _with_payloads(_manifest(resources), resources)
+    opened = _install_downloads(monkeypatch, _objects(manifest))
+    manifest["runtime_context"]["job"]["workflow_definition_snapshot_json"] = snapshot
+    with pytest.raises(ValueError, match="differs from the job snapshot|snapshot is invalid"):
+        materialize_claim_shared_resources(manifest, tmp_path / "work" / "exec")
+    assert opened == []
+
+
+def test_manifest_cannot_inject_the_other_nodes_resource_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    resources = {"rules": [("rules.txt", b"expected", "text/plain")]}
+    manifest = _with_payloads(_manifest(resources), resources)
+    opened = _install_downloads(monkeypatch, _objects(manifest))
+    manifest["runtime_context"]["job"]["workflow_definition_snapshot_json"] = json.dumps(
+        {
+            "nodes": {
+                "prepare": {"shared_resources": ["other-resource"]},
+                "other": {"shared_resources": ["rules"]},
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="differs from the job snapshot"):
+        materialize_claim_shared_resources(manifest, tmp_path / "work" / "exec")
+    assert opened == []
+
+
+def test_legacy_plain_manifest_does_not_require_a_snapshot() -> None:
+    from shared.resource_manifest import claim_resource_ids
+
+    assert claim_resource_ids({"node_key": "plain"}, None) == ()
+    assert claim_resource_ids({"node_key": "plain", "shared_resources": []}, {}) == ()

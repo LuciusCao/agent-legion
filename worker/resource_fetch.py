@@ -15,7 +15,6 @@ from shared.material_cache import (
     MaterializeError,
     cache_file_path,
     material_cache_address,
-    materialize_stream,
 )
 from shared.resource_manifest import (
     SHARED_RESOURCE_CLAIM_FORMAT,
@@ -23,6 +22,7 @@ from shared.resource_manifest import (
     validated_pin_files,
 )
 from worker.material_fetch import _open_download
+from worker.presigned_download import materialize_presigned_stream
 
 
 def _job_snapshot(manifest: Mapping[str, Any]) -> Any:
@@ -178,10 +178,11 @@ def materialize_claim_shared_resources(
         materialized: list[tuple[Path, str]] = []
         for file in files:
             try:
-                path = materialize_stream(
+                path = materialize_presigned_stream(
                     cache_root,
                     file["sha256"],
                     partial(_open_download, file["download_url"]),
+                    label=f"shared resource file {file['path']}",
                     expected_sha256=file["sha256"],
                     expected_size=file["size_bytes"],
                     pin=pinned,
@@ -189,10 +190,6 @@ def materialize_claim_shared_resources(
                 _verify_file(path, file)
             except MaterializeError:
                 raise
-            except OSError as exc:
-                raise MaterializeError(
-                    f"failed to materialize shared resource file {file['path']}"
-                ) from exc
             materialized.append((path, file["path"]))
         try:
             tree = assemble_bundle_tree(cache_root, address, materialized)
