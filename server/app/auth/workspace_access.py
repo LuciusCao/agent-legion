@@ -52,6 +52,21 @@ def require_workspace_access(request: Request, user: auth.CurrentUser) -> dict[s
     return auth.require_workspace_role(request, user, workspace_id)
 
 
+def require_workspace_read_access(request: Request, user: auth.CurrentUser) -> dict[str, Any]:
+    """Source-read arm of the full-session cross-workspace Share guard."""
+    workspace_id = api_scope.api_scope_route_scope(request)
+    scope_binding.refuse_foreign_binding(user, workspace_id)
+    return auth.require_workspace_role(request, user, workspace_id, minimum_role="viewer")
+
+
+def require_additional_workspace_editor(
+    workspace_id: str, request: Request, user: dict[str, Any]
+) -> dict[str, Any]:
+    """Require editor on a second workspace not present in the route scope."""
+    scope_binding.refuse_foreign_binding(user, workspace_id)
+    return auth.require_workspace_role(request, user, workspace_id, minimum_role="editor")
+
+
 def require_job_workspace_access(
     request: Request,
     user: auth.CurrentUser,

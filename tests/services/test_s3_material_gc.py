@@ -193,6 +193,28 @@ def test_collect_gc_report_longer_staging_window_does_not_delay_material_orphans
     assert report.count == 0
 
 
+def test_shared_resource_prefix_never_enters_material_orphan_candidates() -> None:
+    """#1553：版本对象与失败残留均不经材料 GC 自动物理删除。"""
+    from server.app.services.shared_resources.keys import KEY_PREFIX
+
+    assert s3_material_gc.SHARED_RESOURCES_PREFIX == KEY_PREFIX
+    shared_key = "shared-resources/resource-1/version-1/g3/file-1"
+    entries = [_entry(shared_key), _entry(_NEW)]
+
+    orphans = s3_material_gc.scan_material_root_orphans(_lister(entries), lambda keys: set(), 0.0)
+
+    assert [entry.key for entry in orphans] == [_NEW]
+    report, split = s3_material_gc.collect_gc_report(
+        _lister(entries), lambda keys: set(), grace_hours=0.0, staging_grace_hours=0.0
+    )
+    assert shared_key not in {
+        entry.key for lane in (report.authority_orphans, report.staging_orphans) for entry in lane
+    }
+    assert shared_key not in {
+        entry.key for lane in (split.deletable, split.deferred, split.report_only) for entry in lane
+    }
+
+
 def test_material_root_scan_pages_key_existence(monkeypatch) -> None:
     """#1287：根前缀扫描按 KEY_PAGE_SIZE 分页判定——多页输入的孤儿归并正确，
     且 key_exists 按页分批调用（全量对象清单不驻留内存）。"""

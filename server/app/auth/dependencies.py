@@ -123,6 +123,7 @@ def require_workspace_role(
     workspace_id: str | None,
     not_found: str = "Workspace not found",
     membership_only: bool = False,
+    minimum_role: str | None = None,
 ) -> dict[str, Any]:
     """Apply the shared admin/membership/role arm after route-specific scope checks."""
     if user.get("role") == "admin" or not workspace_id:
@@ -130,7 +131,7 @@ def require_workspace_role(
     role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
     if role is None:
         raise HTTPException(status_code=404, detail=not_found)
-    minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
+    minimum = minimum_role or ("viewer" if request.method in _SAFE_METHODS else "editor")
     if not membership_only and _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
         raise HTTPException(status_code=403, detail="Insufficient workspace role")
     return user

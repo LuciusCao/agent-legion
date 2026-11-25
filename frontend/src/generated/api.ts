@@ -3091,6 +3091,129 @@ export interface paths {
     patch: operations['update_workspace_settings_section_api_workspaces__workspace_id__settings__section__patch']
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/shared-resources': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Resources */
+    get: operations['list_resources_api_workspaces__workspace_id__shared_resources_get']
+    put?: never
+    /** Create Resource */
+    post: operations['create_resource_api_workspaces__workspace_id__shared_resources_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/shared-resources/{resource_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Resource */
+    get: operations['get_resource_api_workspaces__workspace_id__shared_resources__resource_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/shared-resources/{resource_id}/selection': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Select Version */
+    put: operations['select_version_api_workspaces__workspace_id__shared_resources__resource_id__selection_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/shared-resources/{resource_id}/shares': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Grants */
+    get: operations['list_grants_api_workspaces__workspace_id__shared_resources__resource_id__shares_get']
+    put?: never
+    /** Share Resource */
+    post: operations['share_resource_api_workspaces__workspace_id__shared_resources__resource_id__shares_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/shared-resources/{resource_id}/shares/{target_workspace_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Revoke Share */
+    delete: operations['revoke_share_api_workspaces__workspace_id__shared_resources__resource_id__shares__target_workspace_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/shared-resources/{resource_id}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Versions */
+    get: operations['list_versions_api_workspaces__workspace_id__shared_resources__resource_id__versions_get']
+    put?: never
+    /** Create Version */
+    post: operations['create_version_api_workspaces__workspace_id__shared_resources__resource_id__versions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/shared-resources/{resource_id}/versions/{version}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Version */
+    get: operations['get_version_api_workspaces__workspace_id__shared_resources__resource_id__versions__version__get']
+    put?: never
+    post?: never
+    /** Delete Version */
+    delete: operations['delete_version_api_workspaces__workspace_id__shared_resources__resource_id__versions__version__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/skills-shared': {
     parameters: {
       query?: never
@@ -7095,6 +7218,232 @@ export interface components {
     SharedMaterialsSaveRequest: {
       /** Files */
       files: components['schemas']['SharedMaterialFileWrite'][]
+    }
+    /** SharedResourceCreateRequest */
+    SharedResourceCreateRequest: {
+      /** Idempotency Key */
+      idempotency_key: string
+      /** Name */
+      name: string
+      source: components['schemas']['SharedResourceSourceInput']
+    }
+    /** SharedResourceCurrentSelectionRecord */
+    SharedResourceCurrentSelectionRecord: {
+      /** Manifest Hash */
+      manifest_hash: string
+      /** Revision */
+      revision: number
+      /** Selected By */
+      selected_by: string
+      /** Updated At */
+      updated_at: string | null
+      /** Version */
+      version: number
+      /** Version Id */
+      version_id: string
+    }
+    /** SharedResourceDeleteVersionResponse */
+    SharedResourceDeleteVersionResponse: {
+      /** Deleted */
+      deleted: string
+      /** Physical Objects Deleted */
+      physical_objects_deleted: boolean
+      /** Version */
+      version: number
+      /** Version Id */
+      version_id: string
+    }
+    /** SharedResourceFileRecord */
+    SharedResourceFileRecord: {
+      /** Content Type */
+      content_type: string
+      /** Path */
+      path: string
+      /** Sha256 */
+      sha256: string
+      /** Size Bytes */
+      size_bytes: number
+    }
+    /** SharedResourceGrantListResponse */
+    SharedResourceGrantListResponse: {
+      /** Grants */
+      grants: components['schemas']['SharedResourceGrantRecord'][]
+    }
+    /** SharedResourceGrantRecord */
+    SharedResourceGrantRecord: {
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Id */
+      id: string
+      /** Resource Id */
+      resource_id: string
+      /** Revoked At */
+      revoked_at: string | null
+      /** Revoked By */
+      revoked_by: string
+      /** Status */
+      status: string
+      /** Workspace Id */
+      workspace_id: string
+      /** Workspace Name */
+      workspace_name: string
+    }
+    /** SharedResourceGrantResponse */
+    SharedResourceGrantResponse: {
+      grant: components['schemas']['SharedResourceGrantRecord']
+    }
+    /** SharedResourceListResponse */
+    SharedResourceListResponse: {
+      /** Limit */
+      limit: number
+      /** Offset */
+      offset: number
+      /** Resources */
+      resources: components['schemas']['SharedResourceRecord'][]
+      /** Total */
+      total: number
+    }
+    /** SharedResourceRecord */
+    SharedResourceRecord: {
+      /** Access Status */
+      access_status: string
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      current_selection:
+        | components['schemas']['SharedResourceCurrentSelectionRecord']
+        | null
+      /** Id */
+      id: string
+      /** Is Owner */
+      is_owner: boolean
+      /** Name */
+      name: string
+      /** Owner Workspace Id */
+      owner_workspace_id: string
+      /** Version Count */
+      version_count: number
+    }
+    /** SharedResourceResponse */
+    SharedResourceResponse: {
+      resource: components['schemas']['SharedResourceRecord']
+    }
+    /** SharedResourceSelectionRecord */
+    SharedResourceSelectionRecord: {
+      /** Manifest Hash */
+      manifest_hash: string
+      /** Resource Id */
+      resource_id: string
+      /** Revision */
+      revision: number
+      /** Selected By */
+      selected_by: string
+      /** Updated At */
+      updated_at: string | null
+      /** Version */
+      version: number
+      /** Version Id */
+      version_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** SharedResourceSelectionRequest */
+    SharedResourceSelectionRequest: {
+      /** Expected Revision */
+      expected_revision: number
+      /** Version */
+      version: number
+    }
+    /** SharedResourceSelectionResponse */
+    SharedResourceSelectionResponse: {
+      selection: components['schemas']['SharedResourceSelectionRecord']
+    }
+    /** SharedResourceShareRequest */
+    SharedResourceShareRequest: {
+      /** Target Workspace Id */
+      target_workspace_id: string
+    }
+    /** SharedResourceShareResponse */
+    SharedResourceShareResponse: {
+      /** Duplicate */
+      duplicate: boolean
+      grant: components['schemas']['SharedResourceGrantRecord']
+    }
+    /** SharedResourceSourceInput */
+    SharedResourceSourceInput: {
+      /** Id */
+      id: string
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: 'material' | 'bundle'
+    }
+    /** SharedResourceSourceMaterialRecord */
+    SharedResourceSourceMaterialRecord: {
+      /** Material Id */
+      material_id: string
+      /** Path */
+      path: string
+      /** Sha256 */
+      sha256: string
+      /** Size Bytes */
+      size_bytes: number
+      /** Upload Generation */
+      upload_generation: number
+    }
+    /** SharedResourceSourceRecord */
+    SharedResourceSourceRecord: {
+      /** Id */
+      id: string
+      /** Materials */
+      materials: components['schemas']['SharedResourceSourceMaterialRecord'][]
+      /** Type */
+      type: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** SharedResourceVersionCreateRequest */
+    SharedResourceVersionCreateRequest: {
+      /** Idempotency Key */
+      idempotency_key: string
+      source: components['schemas']['SharedResourceSourceInput']
+    }
+    /** SharedResourceVersionListResponse */
+    SharedResourceVersionListResponse: {
+      /** Versions */
+      versions: components['schemas']['SharedResourceVersionRecord'][]
+    }
+    /** SharedResourceVersionRecord */
+    SharedResourceVersionRecord: {
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** File Count */
+      file_count: number
+      /** Files */
+      files?: components['schemas']['SharedResourceFileRecord'][] | null
+      /** Id */
+      id: string
+      /** Manifest Hash */
+      manifest_hash: string
+      /** Ready At */
+      ready_at: string | null
+      /** Resource Id */
+      resource_id: string
+      source: components['schemas']['SharedResourceSourceRecord']
+      /** Total Size Bytes */
+      total_size_bytes: number
+      /** Version */
+      version: number
+    }
+    /** SharedResourceVersionResponse */
+    SharedResourceVersionResponse: {
+      version: components['schemas']['SharedResourceVersionRecord']
     }
     /**
      * SkillCreateRequest
@@ -15904,6 +16253,378 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceSettingsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_resources_api_workspaces__workspace_id__shared_resources_get: {
+    parameters: {
+      query?: {
+        limit?: number
+        offset?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_resource_api_workspaces__workspace_id__shared_resources_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedResourceCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_resource_api_workspaces__workspace_id__shared_resources__resource_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  select_version_api_workspaces__workspace_id__shared_resources__resource_id__selection_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedResourceSelectionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceSelectionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_grants_api_workspaces__workspace_id__shared_resources__resource_id__shares_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceGrantListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  share_resource_api_workspaces__workspace_id__shared_resources__resource_id__shares_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedResourceShareRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceShareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_share_api_workspaces__workspace_id__shared_resources__resource_id__shares__target_workspace_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+        target_workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceGrantResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_versions_api_workspaces__workspace_id__shared_resources__resource_id__versions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceVersionListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_version_api_workspaces__workspace_id__shared_resources__resource_id__versions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SharedResourceVersionCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_version_api_workspaces__workspace_id__shared_resources__resource_id__versions__version__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_version_api_workspaces__workspace_id__shared_resources__resource_id__versions__version__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        resource_id: string
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceDeleteVersionResponse']
         }
       }
       /** @description Validation Error */

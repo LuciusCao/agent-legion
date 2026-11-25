@@ -43,17 +43,25 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v106, job_node_needs_capacity) must leave
-# behind so the undo step rewinds a current-shape database to exactly v105.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("job_nodes", "needs_capacity", "boolean"),
+# Effects the newest migration (v107, shared_resources) must leave behind so
+# the undo step rewinds a current-shape database to exactly v106.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = (
+    "shared_resource_job_pins",
+    "shared_resource_selections",
+    "shared_resource_files",
+    "shared_resource_grants",
+    "shared_resource_versions",
+    "shared_resources",
 )
-_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ("idx_job_nodes_approval_park_candidates",)
-_NEWEST_MIGRATION_NAME = "job_node_needs_capacity"
+_NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
+_NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
+_NEWEST_MIGRATION_NAME = "shared_resources"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
-_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = ()
+_NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
+    "drop function if exists shared_resource_ready_files_immutable()",
+    "drop function if exists shared_resource_ready_version_immutable()",
+)
 
 # (table, column, data_type) and (table, index, indexdef) triples.
 _CatalogColumns = set[tuple[str, str, str]]

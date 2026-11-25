@@ -219,6 +219,17 @@ server/app/
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
 | GET | `/metrics/runtime-profile` | `get_runtime_profile` | routes/runtime_profile.py |
+| POST | `/workspaces/{workspace_id}/shared-resources` | `create_resource` | routes/shared_resources.py |
+| GET | `/workspaces/{workspace_id}/shared-resources` | `list_resources` | routes/shared_resources.py |
+| GET | `/workspaces/{workspace_id}/shared-resources/{resource_id}` | `get_resource` | routes/shared_resources.py |
+| POST | `/workspaces/{workspace_id}/shared-resources/{resource_id}/versions` | `create_version` | routes/shared_resources.py |
+| GET | `/workspaces/{workspace_id}/shared-resources/{resource_id}/versions` | `list_versions` | routes/shared_resources.py |
+| GET | `/workspaces/{workspace_id}/shared-resources/{resource_id}/versions/{version}` | `get_version` | routes/shared_resources.py |
+| PUT | `/workspaces/{workspace_id}/shared-resources/{resource_id}/selection` | `select_version` | routes/shared_resources.py |
+| GET | `/workspaces/{workspace_id}/shared-resources/{resource_id}/shares` | `list_grants` | routes/shared_resources.py |
+| DELETE | `/workspaces/{workspace_id}/shared-resources/{resource_id}/shares/{target_workspace_id}` | `revoke_share` | routes/shared_resources.py |
+| DELETE | `/workspaces/{workspace_id}/shared-resources/{resource_id}/versions/{version}` | `delete_version` | routes/shared_resources.py |
+| POST | `/workspaces/{workspace_id}/shared-resources/{resource_id}/shares` | `share_resource` | routes/shared_resources.py |
 | GET | `/agent-catalog/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/skills/directories` | `list_skill_directories` | routes/skill_directories.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
@@ -548,6 +559,28 @@ server/app/
 | ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_bucket.py |
 | ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
 | RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |
+| SharedResourceSourceInput | BaseModel | type: Literal['material', 'bundle'], id: str | app/routes/shared_resource_contracts.py |
+| SharedResourceCreateRequest | BaseModel | name: str, source: SharedResourceSourceInput, idempotency_key: str | app/routes/shared_resource_contracts.py |
+| SharedResourceVersionCreateRequest | BaseModel | source: SharedResourceSourceInput, idempotency_key: str | app/routes/shared_resource_contracts.py |
+| SharedResourceShareRequest | BaseModel | target_workspace_id: str | app/routes/shared_resource_contracts.py |
+| SharedResourceSelectionRequest | BaseModel | version: int, expected_revision: int | app/routes/shared_resource_contracts.py |
+| SharedResourceSourceMaterialRecord | BaseModel | material_id: str, path: str, upload_generation: int, sha256: str, size_bytes:... | app/routes/shared_resource_contracts.py |
+| SharedResourceSourceRecord | BaseModel | type: str, id: str, workspace_id: str, materials: list[SharedResourceSourceMa... | app/routes/shared_resource_contracts.py |
+| SharedResourceFileRecord | BaseModel | path: str, sha256: str, size_bytes: int, content_type: str | app/routes/shared_resource_contracts.py |
+| SharedResourceVersionRecord | BaseModel | id: str, resource_id: str, version: int, manifest_hash: str, source: SharedRe... | app/routes/shared_resource_contracts.py |
+| SharedResourceCurrentSelectionRecord | BaseModel | version_id: str, version: int, manifest_hash: str, revision: int, selected_by... | app/routes/shared_resource_contracts.py |
+| SharedResourceRecord | BaseModel | id: str, name: str, owner_workspace_id: str, is_owner: bool, access_status: s... | app/routes/shared_resource_contracts.py |
+| SharedResourceGrantRecord | BaseModel | id: str, resource_id: str, workspace_id: str, workspace_name: str, status: st... | app/routes/shared_resource_contracts.py |
+| SharedResourceSelectionRecord | BaseModel | workspace_id: str, resource_id: str, version_id: str, version: int, manifest_... | app/routes/shared_resource_contracts.py |
+| SharedResourceResponse | BaseModel | resource: SharedResourceRecord | app/routes/shared_resource_contracts.py |
+| SharedResourceListResponse | BaseModel | resources: list[SharedResourceRecord], total: int, limit: int, offset: int | app/routes/shared_resource_contracts.py |
+| SharedResourceVersionResponse | BaseModel | version: SharedResourceVersionRecord | app/routes/shared_resource_contracts.py |
+| SharedResourceVersionListResponse | BaseModel | versions: list[SharedResourceVersionRecord] | app/routes/shared_resource_contracts.py |
+| SharedResourceShareResponse | BaseModel | grant: SharedResourceGrantRecord, duplicate: bool | app/routes/shared_resource_contracts.py |
+| SharedResourceGrantResponse | BaseModel | grant: SharedResourceGrantRecord | app/routes/shared_resource_contracts.py |
+| SharedResourceGrantListResponse | BaseModel | grants: list[SharedResourceGrantRecord] | app/routes/shared_resource_contracts.py |
+| SharedResourceSelectionResponse | BaseModel | selection: SharedResourceSelectionRecord | app/routes/shared_resource_contracts.py |
+| SharedResourceDeleteVersionResponse | BaseModel | deleted: str, version: int, version_id: str, physical_objects_deleted: bool | app/routes/shared_resource_contracts.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, tags: list[str], files: lis... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |

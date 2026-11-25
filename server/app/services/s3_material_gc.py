@@ -39,6 +39,9 @@ from server.app.services.s3_jobs_gc import (
 )
 
 MATERIAL_MIN_GRACE_HOURS = 1.0
+# Keep in sync with shared_resources.keys.KEY_PREFIX. The GC CLI's isolated
+# stub copies this module without the shared-resources package.
+SHARED_RESOURCES_PREFIX = "shared-resources/"
 
 
 @dataclass
@@ -74,7 +77,7 @@ def scan_material_root_orphans(
     内存；页内判定复用 ``s3_jobs_gc.orphans_in_page``。
     """
     cutoff = datetime.now(UTC) - timedelta(hours=grace_hours)
-    prefixes = (s3_jobs_gc.JOBS_PREFIX, s3_jobs_gc.STAGING_PREFIX)
+    prefixes = (s3_jobs_gc.JOBS_PREFIX, s3_jobs_gc.STAGING_PREFIX, SHARED_RESOURCES_PREFIX)
     orphans: list[ObjectEntry] = []
     pending: list[ObjectEntry] = []
     for entry in entry_lister(""):

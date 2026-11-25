@@ -299,6 +299,11 @@ class WorkspaceQueriesMixin(ConnectionQueriesMixin):
                 "delete from jobs where workspace_id = %s",
                 (workspace_id,),
             )
+            conn.execute(
+                "update shared_resources set owner_deleted_at=current_timestamp"
+                " where owner_workspace_id=%s and owner_deleted_at is null",
+                (workspace_id,),
+            )
             cursor = conn.execute(
                 "delete from workspaces where id = %s",
                 (workspace_id,),
