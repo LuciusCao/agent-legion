@@ -22,13 +22,16 @@ export function isConfigValueOfType(
   return type === 'number' || (type === 'integer' && Number.isInteger(value))
 }
 
-/** 仅识别 vault 引用标记；secret 字段的其它 config 值不得写回草稿。 */
+/** 与后端发布门禁一致：单键、非空且 node: 前缀的 Vault 引用标记。 */
 export function isSecretRefConfigValue(value: unknown): boolean {
   return (
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
-    typeof (value as Record<string, unknown>).secret_ref === 'string'
+    Object.keys(value).join() === 'secret_ref' &&
+    typeof (value as Record<string, unknown>).secret_ref === 'string' &&
+    (value as Record<string, string>).secret_ref.startsWith('node:') &&
+    (value as Record<string, string>).secret_ref.slice(5).trim().length > 0
   )
 }
 

@@ -690,6 +690,49 @@ nodes:
     expect(bankVersion).not.toHaveProperty('default')
   })
 
+  it('unchecks Agent secret and removes only the Vault dict from YAML', () => {
+    const setDefinitionYaml = vi.fn()
+    const agentYaml = `key: demo
+nodes:
+  generate:
+    type: agent
+    execution: {runtime: pi, provider: deepseek, model: your-model-b}
+    skill: {key: education/generate, ref: latest}
+    config_schema:
+      properties:
+        api_token: {type: string, secret: true}
+        page_size: {type: integer}
+    config:
+      api_token: {secret_ref: node:demo:generate:api_token}
+      page_size: 3
+`
+    renderSection({
+      node: { ...node, node_type: 'agent' },
+      definitionYaml: agentYaml,
+      setDefinitionYaml,
+    })
+
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: '敏感参数 api_token' })
+    )
+
+    const next = yaml.load(String(setDefinitionYaml.mock.calls[0][0])) as {
+      nodes?: Record<string, Record<string, unknown>>
+    }
+    const nextNode = next.nodes?.generate ?? {}
+    expect(nextNode.config).toEqual({ page_size: 3 })
+    expect(nextNode.execution).toEqual({
+      runtime: 'pi',
+      provider: 'deepseek',
+      model: 'your-model-b',
+    })
+    expect(nextNode.skill).toEqual({
+      key: 'education/generate',
+      ref: 'latest',
+    })
+    expect(String(setDefinitionYaml.mock.calls[0][0])).not.toContain('••••')
+  })
+
   it.each([1440, 390])(
     'keeps Agent schema controls addressable at %ipx',
     (width) => {

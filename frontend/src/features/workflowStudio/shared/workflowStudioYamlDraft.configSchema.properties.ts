@@ -41,7 +41,8 @@ function draftNodeOf(rawYaml: string, nodeKey: string) {
 /**
  * 更新一个已有 schema 属性的声明。default 用 'in' 区分「删除」
  * （{ default: undefined }）与「未提供」——空串/undefined 都删键。
- * secret 属性不保留 default，node.config 也只保留 secret_ref 标记；
+ * secret 属性不保留 default，node.config 也只保留精确 secret_ref 标记；
+ * 取消 secret 时按目标 scalar 类型重检 config，合法标量保留、字典删除。
  * plaintext 不得经结构化编辑进入草稿或 revision（VAULT-SECRET-001）。
  */
 export function patchWorkflowNodeSchemaProperty(
@@ -58,17 +59,19 @@ export function patchWorkflowNodeSchemaProperty(
   const nextProp = next.properties![propKey] as ConfigSchemaProperty
   if (patch.type) {
     nextProp.type = patch.type
-    if (patch.type !== prop.type) {
+    if (patch.type !== prop.type)
       stripTypeIncompatibleConstraints(nextProp, patch.type)
-      const configValue = node.config?.[propKey]
-      const keepsSecretRefs = patch.secret ?? prop.secret ?? false
-      const stale =
-        !keepsSecretRefs &&
-        configValue !== undefined &&
-        !isConfigValueOfType(configValue, patch.type)
-      if (stale) migrateNodeConfigKey(node, propKey)
-    }
   }
+  const typeChanged = patch.type !== undefined && patch.type !== prop.type
+  const secretDisabled = prop.secret === true && patch.secret === false
+  const keepsSecretRefs = patch.secret ?? prop.secret ?? false
+  const configValue = node.config?.[propKey]
+  const stale =
+    (typeChanged || secretDisabled) &&
+    !keepsSecretRefs &&
+    configValue !== undefined &&
+    !isConfigValueOfType(configValue, patch.type ?? prop.type)
+  if (stale) migrateNodeConfigKey(node, propKey)
   if (patch.description !== undefined) {
     if (patch.description.trim()) nextProp.description = patch.description
     else delete nextProp.description
