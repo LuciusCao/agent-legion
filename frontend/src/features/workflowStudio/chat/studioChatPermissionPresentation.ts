@@ -1,4 +1,5 @@
 import type { ChatMessage, PermissionView } from './studioChatMessages'
+import { permissionTurnKey } from './studioChatViewStability'
 
 const NON_TERMINAL_KINDS = new Set(
   'read edit delete move search fetch think switch_mode'.split(' ')
@@ -46,6 +47,23 @@ export function decisionText(resolved: Record<string, unknown>): string {
 
 function approvedDecision(text: string | null): boolean {
   return text === '已允许' || text === '已自动允许（本次全部允许）'
+}
+
+export function firstPermissionCommands(
+  messages: readonly ChatMessage[]
+): Map<string, string> {
+  const firstCommandBy = new Map<string, string>()
+  const sortedMessages = [...messages].sort((a, b) => a.seq - b.seq)
+  for (const [index, message] of sortedMessages.entries()) {
+    if (message.kind !== 'tool_call') continue
+    const content = asRecord(message.content)
+    const toolCallId = asText(content?.toolCallId)
+    const turnKey = permissionTurnKey(toolCallId, sortedMessages, index)
+    if (!toolCallId || firstCommandBy.has(turnKey)) continue
+    const command = asText(asRecord(content?.rawInput)?.command).trim()
+    if (command) firstCommandBy.set(turnKey, command)
+  }
+  return firstCommandBy
 }
 
 export function permissionTerminalView(

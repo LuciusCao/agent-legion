@@ -1,5 +1,9 @@
 import type { StudioChatMessageRecord } from './studioChatApi'
-import { permissionTerminalView } from './studioChatPermissionPresentation'
+import {
+  firstPermissionCommands,
+  permissionTerminalView,
+} from './studioChatPermissionPresentation'
+import { permissionTurnKey } from './studioChatViewStability'
 
 export { permissionResolutionText } from './studioChatPermissionPresentation'
 
@@ -313,15 +317,7 @@ export function buildPermissionViews(
     const requestId = asText(content.request_id)
     if (requestId) resolvedBy.set(requestId, content)
   }
-  const firstCommandBy = new Map<string, string>()
-  for (const message of [...messages].sort((a, b) => a.seq - b.seq)) {
-    if (message.kind !== 'tool_call') continue
-    const content = asRecord(message.content)
-    const toolCallId = asText(content?.toolCallId)
-    if (!toolCallId || firstCommandBy.has(toolCallId)) continue
-    const command = asText(asRecord(content?.rawInput)?.command).trim()
-    if (command) firstCommandBy.set(toolCallId, command)
-  }
+  const firstCommandBy = firstPermissionCommands(messages)
   const views: PermissionView[] = []
   for (const message of messages) {
     if (message.kind !== 'permission') continue
@@ -333,7 +329,13 @@ export function buildPermissionViews(
     const options = Array.isArray(content.options) ? content.options : []
     const resolved = resolvedBy.get(requestId)
     const toolTitle = asText(toolCall?.title) || '工具调用'
-    const firstCommand = firstCommandBy.get(asText(toolCall?.toolCallId))
+    const firstCommand = firstCommandBy.get(
+      permissionTurnKey(
+        asText(toolCall?.toolCallId),
+        messages,
+        messages.indexOf(message)
+      )
+    )
     views.push({
       requestId,
       toolTitle,

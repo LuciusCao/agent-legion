@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ChatMessage, PermissionView } from './studioChatMessages'
+import { buildPermissionViews } from './studioChatMessages'
 import {
   isTerminalPermission,
   permissionPresentation,
@@ -21,6 +22,41 @@ function permission(overrides: Partial<PermissionView>): PermissionView {
     decisionText: null,
     ...overrides,
   }
+}
+
+function event(
+  seq: number,
+  kind: ChatMessage['kind'],
+  content: Record<string, unknown>,
+  role: ChatMessage['role'] = 'agent'
+): ChatMessage {
+  return {
+    id: `event-${seq}`,
+    session_id: 's1',
+    kind,
+    role,
+    seq,
+    created_at: '2026-01-01T00:00:00Z',
+    content,
+  }
+}
+
+function command(seq: number, toolCallId: string, value: string): ChatMessage {
+  return event(seq, 'tool_call', {
+    toolCallId,
+    title: 'Bash',
+    kind: 'execute',
+    rawInput: { command: value },
+  })
+}
+
+function permissionRequest(seq: number, toolCallId: string): ChatMessage {
+  return event(seq, 'permission', {
+    request_id: `request-${seq}`,
+    status: 'pending',
+    tool_call: { toolCallId, title: 'Bash' },
+    options: [{ optionId: 'allow', name: '允许一次', kind: 'allow_once' }],
+  })
 }
 
 describe('permissionPresentation', () => {
@@ -191,6 +227,60 @@ describe('permissionPresentation', () => {
       })
     )
     expect(late.lateDetails.split('\n')[0]).toContain('围栏开启时')
+  })
+})
+
+describe('permission turn evidence', () => {
+  it.each([
+    ['pending', undefined],
+    ['human approval', { option_id: 'allow' }],
+    ['allow-all', { option_id: 'allow', via: 'allow_all' }],
+  ])(
+    '%s does not borrow an opaque toolCallId command across turns',
+    (_name, decision) => {
+      const old = command(1, 'tc-1', 'ls -la')
+      const turnEnd = event(2, 'status', { event: 'turn_end' }, 'system')
+      const nextTurn = event(3, 'text', { text: 'next turn' }, 'user')
+      const request = permissionRequest(4, 'tc-1')
+      const resolved = decision
+        ? event(
+            5,
+            'permission',
+            { request_id: 'request-4', status: 'resolved', decision },
+            'user'
+          )
+        : null
+      const history = [
+        old,
+        turnEnd,
+        nextTurn,
+        request,
+        ...(resolved ? [resolved] : []),
+      ]
+      const [before] = buildPermissionViews(history)
+      expect(before.lateBoundCommand).toBeNull()
+      expect(permissionPresentation(before).details).not.toContain('ls -la')
+
+      const first = command(10, 'tc-1', 'printf new')
+      const later = command(11, 'tc-1', 'cat secrets')
+      const [after] = buildPermissionViews([later, ...history, first])
+      expect(after.lateBoundCommand).toBe('printf new')
+      const view = permissionPresentation(after)
+      expect(decision ? view.lateDetails : view.details).toContain('printf new')
+      expect(view.details).not.toContain('cat secrets')
+      expect(view.lateDetails).not.toContain('cat secrets')
+    }
+  )
+
+  it('uses the structured turn id in toolCallId before timeline boundaries', () => {
+    const old = command(1, '1:tc', 'ls -la')
+    const request = permissionRequest(2, '2:tc')
+    expect(buildPermissionViews([old, request])[0].lateBoundCommand).toBeNull()
+    const first = command(3, '2:tc', 'printf new')
+    const later = command(4, '2:tc', 'cat secrets')
+    const [after] = buildPermissionViews([old, request, later, first])
+    expect(after.lateBoundCommand).toBe('printf new')
+    expect(permissionPresentation(after).details).not.toContain('cat secrets')
   })
 })
 
