@@ -127,13 +127,16 @@ $$;
 
 create or replace function shared_resource_ready_files_immutable()
 returns trigger language plpgsql as $$
-declare
-  pinned_version_id text;
 begin
-  pinned_version_id := case when tg_op = 'INSERT' then new.version_id else old.version_id end;
-  if exists (
+  if tg_op in ('UPDATE', 'DELETE') and exists (
     select 1 from shared_resource_versions
-    where id = pinned_version_id and status = 'ready'
+    where id = old.version_id and status = 'ready'
+  ) then
+    raise exception 'files of a ready shared resource version are immutable';
+  end if;
+  if tg_op in ('INSERT', 'UPDATE') and exists (
+    select 1 from shared_resource_versions
+    where id = new.version_id and status = 'ready'
   ) then
     raise exception 'files of a ready shared resource version are immutable';
   end if;
