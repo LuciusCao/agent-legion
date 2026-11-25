@@ -6,13 +6,17 @@ All journals are synthetic protocol-1.10 records with the upstream
 
 from __future__ import annotations
 
+import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
 from server.app.services.job_errors import ConflictError
-from server.app.studio_chat import compaction
-from server.app.studio_chat.unprompted_queue import GatedUnpromptedWatcher
+from server.app.studio_chat import compact_timer, compaction
+from server.app.studio_chat.kimi_wire import WireTail
+from server.app.studio_chat.unprompted_queue import gated_watcher
+from server.app.studio_chat.wire_baseline import capture_wire_baseline
 from tests.helpers import studio_chat_fixtures as fixtures
 
 admission = fixtures.admission
@@ -70,14 +74,29 @@ def _events(db, sid: str) -> list[dict]:
     ]
 
 
+def _new_wire_path(share: Path, cwd: str, session_id: str) -> Path:
+    digest = hashlib.md5(str(Path(cwd).resolve()).encode(), usedforsecurity=False).hexdigest()
+    return share / "sessions" / digest / session_id / "wire.jsonl"
+
+
+def _metadata(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"type": "metadata", "protocol_version": "1.10"}) + "\n")
+
+
 @pytest.fixture
-def wire(admission, tmp_path):
+def wire(admission, tmp_path, monkeypatch):
     service, db, sid, workspace, runtime = admission
     runtime.kimi_agent = True
     runtime.loading = False
-    path = tmp_path / "wire.jsonl"
-    path.write_text(json.dumps({"type": "metadata", "protocol_version": "1.10"}) + "\n")
-    watcher = GatedUnpromptedWatcher(service, sid, runtime, lambda: path)
+    workdir = tmp_path / "frozen-workdir"
+    workdir.mkdir()
+    runtime.handle.cwd = str(workdir)
+    share = tmp_path / "share"
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(share))
+    watcher = gated_watcher(service, sid, runtime, "acp_152")
+    path = _new_wire_path(share, runtime.handle.cwd, "acp_152")
+    _metadata(path)
     return service, db, sid, workspace, runtime, watcher, path
 
 
@@ -194,7 +213,9 @@ def test_partial_metadata_is_retried_before_the_first_live_begin(wire):
 def test_loaded_baseline_skips_history_but_loads_header_and_sees_live_begin(wire):
     _service, db, sid, _workspace, runtime, watcher, path = wire
     _append(path, BEGIN, END)
-    watcher.baseline_on_locate = True
+    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_152")
+    assert baseline is not None and baseline.path == path
+    watcher.tail = WireTail.from_baseline(baseline)
     watcher.step()
     assert watcher.tail.protocol_version == "1.10"
     assert runtime.compacting is False and _events(db, sid) == []
@@ -202,6 +223,41 @@ def test_loaded_baseline_skips_history_but_loads_header_and_sees_live_begin(wire
     watcher.step()
     assert runtime.compacting is True
     assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+
+
+def test_default_share_home_and_canonical_cwd_hash_drive_production_locator(
+    wire, tmp_path, monkeypatch
+):
+    service, db, sid, _workspace, runtime, _watcher, _path = wire
+    monkeypatch.delenv("KIMI_SHARE_DIR")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    canonical = tmp_path / "canonical-workdir"
+    canonical.mkdir()
+    alias = tmp_path / "cwd-alias"
+    alias.symlink_to(canonical, target_is_directory=True)
+    runtime.handle.cwd = str(alias)
+    watcher = gated_watcher(service, sid, runtime, "acp_default")
+    path = _new_wire_path(tmp_path / "home" / ".kimi", str(canonical), "acp_default")
+    _metadata(path)
+    _append(path, BEGIN)
+    watcher.step()
+    assert watcher.tail.path == path
+    assert runtime.compacting is True
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+
+
+def test_new_layout_symlink_is_refused_and_baseline_defers(wire):
+    _service, _db, _sid, _workspace, runtime, watcher, path = wire
+    target = path.with_name("target.jsonl")
+    _metadata(target)
+    _append(target, BEGIN)
+    path.unlink()
+    path.symlink_to(target)
+    with pytest.raises((OSError, ValueError)):
+        watcher.step()
+    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_152")
+    assert baseline is not None and baseline.identity is None
+    assert runtime.compacting is False
 
 
 @pytest.mark.parametrize("mode", ["truncate", "replace"])
@@ -258,6 +314,68 @@ def test_db_backlog_pauses_journal_and_retries_without_losing_or_duplicating(wir
     watcher.step()
     assert runtime.compacting is False
     assert [event["event"] for event in _events(db, sid)] == ["compact_start", "compact_done"]
+
+
+def test_post_append_publish_failure_retries_only_publish(wire, monkeypatch):
+    service, db, sid, _workspace, _runtime, watcher, path = wire
+    publish = service.store.publish_session
+    failing = True
+
+    def flaky_publish(session_id):
+        if failing:
+            raise RuntimeError("post-append publish failed")
+        return publish(session_id)
+
+    monkeypatch.setattr(service.store, "publish_session", flaky_publish)
+    _append(path, BEGIN)
+    with pytest.raises(RuntimeError, match="post-append publish failed"):
+        watcher.step()
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+    with pytest.raises(RuntimeError, match="post-append publish failed"):
+        watcher.step()
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+
+    failing = False
+    watcher.step()
+    assert watcher.pending == []
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+
+
+@pytest.mark.parametrize("close", ["legacy_done", "timer"])
+def test_closed_generation_invalidates_pending_begin_but_allows_a_new_window(
+    wire, monkeypatch, close
+):
+    service, db, sid, _workspace, runtime, watcher, path = wire
+    append = service.store.append_message
+    failing = True
+
+    def flaky_append(session_id, kind, role, content):
+        if failing and content.get("event") == "compact_start":
+            raise RuntimeError("begin append failed")
+        return append(session_id, kind, role, content)
+
+    monkeypatch.setattr(service.store, "append_message", flaky_append)
+    _append(path, BEGIN)
+    with pytest.raises(RuntimeError, match="begin append failed"):
+        watcher.step()
+    with runtime.lock:
+        armed_since = runtime.compacting_since
+    if close == "legacy_done":
+        service._on_update(sid, _chunk("Compaction completed."))
+    else:
+        compact_timer._fire(service, sid, runtime, armed_since)
+    assert runtime.compacting is False
+
+    failing = False
+    watcher.step()
+    assert watcher.pending == [] and runtime.compacting is False
+    expected = ["compact_done"] if close == "legacy_done" else []
+    assert [event["event"] for event in _events(db, sid)] == expected
+
+    _append(path, BEGIN)
+    watcher.step()
+    assert runtime.compacting is True
+    assert [event["event"] for event in _events(db, sid)] == [*expected, "compact_start"]
 
 
 def test_retried_duplicate_signal_does_not_gain_a_notice(wire, monkeypatch):

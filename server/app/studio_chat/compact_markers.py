@@ -28,7 +28,7 @@ def apply_marker_gated(
     *,
     timeout: float,
     structured: bool = False,
-    retry: bool = False,
+    progress: dict[str, Any] | None = None,
 ) -> bool:
     """Gate + apply in ONE runtime.lock critical section; True = consumed.
 
@@ -42,9 +42,10 @@ def apply_marker_gated(
     to start with the same prefix inside a normal turn) is ordinary stream
     text and falls through (False), never flipping the flag. A verified wire
     CompactionBegin/End is not prose, so ``structured`` exempts only the turn
-    context condition; the kimi identity condition still applies. ``retry``
-    belongs to the watcher's durable backlog: after a partial apply it forces
-    the one missing notice, while ordinary duplicate signals stay coalesced.
+    context condition; the kimi identity condition still applies. A watcher's
+    ``progress`` records its lifecycle generation and completed side effects:
+    retries resume only unfinished steps and become no-ops once another source
+    has advanced or closed that window.
 
     #694 review R3-P1 (atomicity): every gate field (kimi_agent /
     turn_open / turn_may_compact / compacting) is written under
@@ -60,29 +61,43 @@ def apply_marker_gated(
     """
     if runtime is None:
         return False
+    progress = {} if progress is None else progress
     with runtime.lock:
-        if not runtime.kimi_agent or (
-            runtime.turn_open and not (runtime.turn_may_compact or structured)
-        ):
-            return False
-        # The marker interrupts prose like a tool call does: close the
-        # open stream slots so later chunks start a fresh row.
-        runtime.stream.reset()
-        already = not retry and (
-            (runtime.compacting and marker == "start")
-            or (runtime.compaction_done and marker == "done")
-        )
-        runtime.compacting = marker == "start"
-        runtime.compacting_since = time.monotonic() if marker == "start" else None
-        runtime.compaction_seen = runtime.compaction_seen or marker == "start"
-        runtime.compaction_done = marker == "done"
-        since = runtime.compacting_since
-    if marker == "start":
-        compact_timer.arm_self_clear(backend, session_id, runtime, since, timeout=timeout)
-    else:
-        compact_timer.cancel_self_clear(runtime)
-    backend.db.update_studio_chat_session(session_id, compacting=marker == "start")
-    if not already:
+        generation = progress.get("generation")
+        if generation is not None and generation != runtime.compaction_generation:
+            return True
+        if generation is None:
+            if not runtime.kimi_agent or (
+                runtime.turn_open and not (runtime.turn_may_compact or structured)
+            ):
+                return False
+            # The marker interrupts prose like a tool call does: close the
+            # open stream slots so later chunks start a fresh row.
+            runtime.stream.reset()
+            already = (runtime.compacting and marker == "start") or (
+                runtime.compaction_done and marker == "done"
+            )
+            if not already:
+                runtime.compaction_generation += 1
+            runtime.compacting = marker == "start"
+            runtime.compacting_since = time.monotonic() if marker == "start" else None
+            runtime.compaction_seen = runtime.compaction_seen or marker == "start"
+            runtime.compaction_done = marker == "done"
+            progress["generation"] = runtime.compaction_generation
+            progress["notify"] = not already
+            progress["since"] = runtime.compacting_since
+    if not progress.get("timer"):
+        if marker == "start":
+            compact_timer.arm_self_clear(
+                backend, session_id, runtime, progress["since"], timeout=timeout
+            )
+        else:
+            compact_timer.cancel_self_clear(runtime)
+        progress["timer"] = True
+    if not progress.get("mirrored"):
+        backend.db.update_studio_chat_session(session_id, compacting=marker == "start")
+        progress["mirrored"] = True
+    if progress["notify"] and not progress.get("appended"):
         # Duplicate lifecycle signal: one timeline notice per transition.
         if marker == "start":
             content: dict[str, Any] = {
@@ -94,5 +109,6 @@ def apply_marker_gated(
         else:
             content = {"event": "compact_done", "detail": text.strip()}
         backend.store.append_message(session_id, "status", "system", content)
+        progress["appended"] = True
     backend.store.publish_session(session_id)
     return True

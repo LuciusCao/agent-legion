@@ -54,9 +54,9 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from server.app.studio_chat.compaction_wire import locate_session_wire
 from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver
 from server.app.studio_chat.inbound_delivery import hold as hold
-from server.app.studio_chat.kimi_wire import kimi_code_homes, locate_wire
 from server.app.studio_chat.queued_drop import _note_dropped
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
 
@@ -218,7 +218,9 @@ def gated_watcher(
     service: StudioChatService, session_id: str, runtime: SessionRuntime, acp_session_id: str
 ) -> GatedUnpromptedWatcher:
     """The #938 journal watcher for one ACP session, with the #1029 gate."""
-    homes = kimi_code_homes(runtime.handle.cwd)
     return GatedUnpromptedWatcher(
-        service, session_id, runtime, lambda: locate_wire(homes, acp_session_id)
+        service,
+        session_id,
+        runtime,
+        lambda: locate_session_wire(runtime.handle.cwd, acp_session_id),
     )

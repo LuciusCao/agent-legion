@@ -158,6 +158,7 @@ def late_gate_blocked(
         runtime.compacting = False
         runtime.compacting_since = None
         runtime.compaction_done = False
+        runtime.compaction_generation += 1
         db.update_studio_chat_session(session_id, compacting=False)
     return False
 
@@ -196,6 +197,7 @@ def note_ready(
         runtime.compacting_since = None
         runtime.compaction_seen = False
         runtime.compaction_done = False
+        runtime.compaction_generation += 1
 
 
 def send_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -> bool:
@@ -214,5 +216,6 @@ def send_blocked(db: Any, session_id: str, runtime: SessionRuntime, text: str) -
         runtime.compacting = False
         runtime.compacting_since = None
         runtime.compaction_done = False
+        runtime.compaction_generation += 1
     db.update_studio_chat_session(session_id, compacting=False)
     return False

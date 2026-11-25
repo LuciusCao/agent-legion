@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from server.app.studio_chat.kimi_wire import WireTail, kimi_code_homes, locate_wire
+from server.app.studio_chat.compaction_wire import locate_session_wire
+from server.app.studio_chat.kimi_wire import WireTail
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ def capture_wire_baseline(cwd: str, acp_session_id: str | None) -> WireBaseline 
     """Pre-spawn baseline of a session's journal (None when there is none)."""
     if not acp_session_id:
         return None
-    path = locate_wire(kimi_code_homes(cwd), acp_session_id)
+    path = locate_session_wire(cwd, acp_session_id)
     if path is None:
         return None
     tail = WireTail(path)

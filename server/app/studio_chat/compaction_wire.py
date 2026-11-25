@@ -13,9 +13,11 @@ ACP ``usage_update`` path), never from message text or ``TurnEnd``.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.studio_chat import compact_markers, compaction
@@ -47,6 +49,23 @@ def read_protocol_version(descriptor: int) -> str | None:
         return None
     version = header.get("protocol_version")
     return version if isinstance(version, str) and len(version) <= 32 else None
+
+
+def locate_session_wire(cwd: str, session_id: str) -> Path | None:
+    """Kimi 1.52 canonical-cwd layout, then the Kimi Code legacy layout."""
+    from server.app.studio_chat.kimi_wire import _SESSION_ID, kimi_code_homes, locate_wire
+
+    if not _SESSION_ID.fullmatch(session_id):
+        return None
+    canonical = Path(cwd).resolve()
+    share = Path(os.environ.get("KIMI_SHARE_DIR", str(Path.home() / ".kimi")))
+    if not share.is_absolute():
+        share = canonical / share
+    digest = hashlib.md5(str(canonical).encode(), usedforsecurity=False).hexdigest()
+    candidate = share.resolve() / "sessions" / digest / session_id / "wire.jsonl"
+    if candidate.is_file():
+        return candidate
+    return locate_wire(kimi_code_homes(cwd), session_id)
 
 
 def parse_records(data: bytes) -> list[dict[str, Any]]:
@@ -106,16 +125,7 @@ def apply(
 ) -> bool:
     """Apply a projected signal through the existing compaction/usage paths."""
     if kind == "compaction":
-        retry = content.pop("_attempted", False)
-        content["_attempted"] = True
         marker = content["marker"]
-        if not retry:
-            # The watcher holds runtime.lock. Preserve this head signal's
-            # first-attempt intent so a retried duplicate stays a duplicate.
-            content["_notify"] = not (
-                (runtime.compacting and marker == "start")
-                or (runtime.compaction_done and marker == "done")
-            )
         text = _WIRE_START_TEXT if marker == "start" else _WIRE_DONE_TEXT
         compact_markers.apply_marker_gated(
             backend,
@@ -125,7 +135,7 @@ def apply(
             text,
             timeout=compaction.COMPACTING_TIMEOUT_SECONDS,
             structured=True,
-            retry=retry and content["_notify"],
+            progress=content,
         )
         return True
     if kind != "usage":
