@@ -94,16 +94,18 @@ class QualityReplayService:
                 )
             if agent_version is not None:
                 raise InvalidOperationError(_LEGACY_REPLAY_RETIRED)
-            profile = ReplayProfileResolver(self.job_db).resolve(
-                workspace_id,
-                job,
-                node,
-                revision_id=revision_id,
-                use_draft=use_draft,
-                node_run_id=item["node_run_id"],
-            )
-            if profile is None and node.node_type == "agent":
-                raise InvalidOperationError(_LEGACY_REPLAY_RETIRED)
+        # Identity/revision reads and git resolution must not hold a pool connection.
+        profile = ReplayProfileResolver(self.job_db).resolve(
+            workspace_id,
+            job,
+            node,
+            revision_id=revision_id,
+            use_draft=use_draft,
+            node_run_id=item["node_run_id"],
+        )
+        if profile is None and node.node_type == "agent":
+            raise InvalidOperationError(_LEGACY_REPLAY_RETIRED)
+        with self.job_db.write() as conn:
             self._reconcile_item_rows(conn, item_id, node_key)
             active = conn.execute(
                 "select 1 from quality_replays"

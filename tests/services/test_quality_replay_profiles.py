@@ -11,15 +11,18 @@ pin is rejected for self-contained nodes; code nodes replay without a route.
 from __future__ import annotations
 
 import json
+import uuid
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 import yaml
 
+from server.app.db.pools import pool_for
 from server.app.db.transaction import write_transaction
+from server.app.jobs import JobQueries
 from server.app.services import skill_commit_pins
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.node_profile_pins import node_profile_hash
 from server.app.services.quality_replays import QualityReplayService
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
@@ -229,6 +232,14 @@ def _real_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, 
     manager = _make_manager(tmp_path)
     monkeypatch.setattr(skill_commit_pins, "build_skill_manager", lambda *_args: manager)
     return repo, manager
+
+
+def _pool_one_db(job_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> JobQueries:
+    monkeypatch.setenv("AGENT_LEGION_DB_POOL_MAX_SIZE", "1")
+    dsn = f"{job_db.dsn_identity}&application_name=replay-pool1-{uuid.uuid4().hex[:12]}"
+    pool_db = JobQueries(dsn, tmp_path / "pool1-jobs")
+    pool_for(dsn).timeout = 0.05
+    return pool_db
 
 
 def test_default_replays_the_original_snapshot_profile(job_db) -> None:
@@ -689,3 +700,60 @@ def test_ambiguous_legacy_prefix_fails_closed_instead_of_using_head(
         env.service().create_replay(env.workspace_id, "item-1")
 
     assert job_db.list_runs(env.workspace_id) == []
+
+
+def test_original_profile_create_replay_needs_only_one_pool_connection(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    pool_db = _pool_one_db(job_db, tmp_path, monkeypatch)
+    repo, _manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(pool_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(original, "latest")
+
+    replay = env.service().create_replay(env.workspace_id, "item-1")
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == original
+    with pytest.raises(ConflictError, match="already in progress"):
+        env.service().create_replay(env.workspace_id, "item-1")
+    assert len(pool_db.list_runs(env.workspace_id)) == 1
+
+
+@pytest.mark.parametrize("use_draft", [False, True], ids=["revision", "draft"])
+def test_selected_profile_create_replay_needs_only_one_pool_connection(
+    job_db, tmp_path, monkeypatch, use_draft
+) -> None:
+    pool_db = _pool_one_db(job_db, tmp_path, monkeypatch)
+    repo, _manager = _real_skill(tmp_path, monkeypatch)
+    accepted = _head_commit(repo)
+    env = _Env(pool_db, _definition(_ORIGINAL, skill=_skill()))
+    revision_id = None
+    if use_draft:
+        pool_db.upsert_workspace_workflow_draft(
+            env.workspace_id,
+            yaml.safe_dump(
+                {
+                    "key": "test",
+                    "label": "Test",
+                    "nodes": {
+                        "generate": {
+                            "type": "agent",
+                            "capability": "write_script",
+                            "inputs": ["question.json"],
+                            "execution": {"runtime": "pi", "provider": "p3", "model": "m3"},
+                            "skill": {"key": _KEY, "ref": "latest"},
+                        }
+                    },
+                }
+            ),
+        )
+    else:
+        revision_id = env.add_revision(2, _definition(_CANDIDATE, skill=_skill()), "active")
+
+    replay = env.service().create_replay(
+        env.workspace_id, "item-1", revision_id=revision_id, use_draft=use_draft
+    )
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == accepted
