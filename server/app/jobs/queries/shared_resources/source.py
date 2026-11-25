@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.services.material_bundles import validate_member_path
+
 _MATERIAL_COLUMNS = (
     "id, workspace_id, content_hash, filename, content_type, size_bytes, storage_key,"
     " status, object_etag, upload_generation"
@@ -12,7 +14,7 @@ _MATERIAL_COLUMNS = (
 
 def _file_from_material(row: dict[str, Any], *, path: str) -> dict[str, Any]:
     return {
-        "path": path,
+        "path": validate_member_path(path),
         "sha256": str(row["content_hash"]),
         "declared_sha256": str(row["content_hash"]),
         "size_bytes": int(row["size_bytes"]),
@@ -35,8 +37,9 @@ def load_source_snapshot_tx(
 ) -> dict[str, Any] | None:
     """Read one material/bundle snapshot, optionally locking it for publication.
 
-    ``FOR KEY SHARE`` serializes the final recheck with material/bundle DELETE;
-    no lock is held while object bytes are copied.
+    Paths enter their canonical form here so initial intent and publication
+    recheck compare the same identity. ``FOR KEY SHARE`` serializes the final
+    recheck with material/bundle DELETE; no lock is held while bytes are copied.
     """
     lock = " for key share" if for_publication else ""
     if source_type == "material":

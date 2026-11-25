@@ -6,7 +6,7 @@ import psycopg
 import pytest
 from botocore.exceptions import ClientError
 
-from server.app.services.job_errors import ConflictError, NotFoundError
+from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.services.shared_resources.errors import SharedResourceCopyError
 from server.app.services.shared_resources.keys import KEY_PREFIX
 from server.app.services.verified_object_copy import VerifiedObjectCopyResult
@@ -107,6 +107,57 @@ def test_missing_declared_hash_is_computed_from_the_conditioned_source(
     import hashlib
 
     assert version["files"][0]["sha256"] == hashlib.sha256(b"legacy-size-only-material").hexdigest()
+
+
+def test_material_filename_surrounding_spaces_share_one_canonical_identity(
+    shared_service, shared_materials, shared_storage
+) -> None:
+    material_id = ready_material(
+        shared_materials, shared_storage, SOURCE_WS, b"padded-name", " rules.txt "
+    )
+
+    resource = create_resource(shared_service, SOURCE_WS, "material", material_id)
+
+    version = shared_service.get_version(SOURCE_WS, resource["id"], 1)
+    assert version["files"][0]["path"] == "rules.txt"
+    assert version["source"]["materials"][0]["path"] == "rules.txt"
+    assert create_resource(shared_service, SOURCE_WS, "material", material_id) == resource
+
+
+def test_source_snapshot_rejects_canonical_path_collisions(shared_storage) -> None:
+    from server.app.services.shared_resources.manifest import prepare_source_snapshot
+
+    base = {
+        "sha256": "a" * 64,
+        "declared_sha256": "a" * 64,
+        "size_bytes": 1,
+        "content_type": "text/plain",
+        "status": "ready",
+        "source_etag": "etag",
+        "source_upload_generation": 0,
+    }
+    snapshot = {
+        "source_type": "bundle",
+        "source_id": "bundle-1",
+        "source_workspace_id": SOURCE_WS,
+        "files": [
+            {
+                **base,
+                "path": "same.txt",
+                "source_storage_key": "source/a",
+                "source_material_id": "a",
+            },
+            {
+                **base,
+                "path": " same.txt ",
+                "source_storage_key": "source/b",
+                "source_material_id": "b",
+            },
+        ],
+    }
+
+    with pytest.raises(InvalidOperationError, match="paths must be unique"):
+        prepare_source_snapshot(snapshot, shared_storage)
 
 
 def test_second_file_copy_failure_is_invisible_and_same_token_retries_new_keys(

@@ -6,7 +6,7 @@
 
 schema v107 建立六张表：
 
-- `shared_resources`：稳定资源 ID、来源 workspace、显示名与首次创建幂等键。来源 workspace 仅作审计，不是运行时解析 fallback。
+- `shared_resources`：稳定资源 ID、来源 workspace、显示名、首次创建幂等键与 `owner_deleted_at` tombstone。来源 workspace 仅作审计，不是运行时解析 fallback；删除 owner 同事务写入 tombstone，同名重建不继承任何 owner 管理权。
 - `shared_resource_versions`：单调整数版本、状态、canonical `manifest_hash`、来源快照、幂等键、复制代次与逻辑删除时间。版本号在资源行锁内分配，不可复用。
 - `shared_resource_files`：逐文件 `path / sha256 / size_bytes / content_type`，以及内部目标 key 和来源 material 代次。API 不返回目标/来源 storage key、ETag 或失败内部详情。
 - `shared_resource_grants`：资源到指定 workspace 的 `active / revoked` 授权，按 `(resource_id, workspace_id)` 唯一。
@@ -17,7 +17,7 @@ schema v107 建立六张表：
 
 ## 创建与不可变发布
 
-创建资源会从同一来源 workspace 的一个 ready material 或 bundle 建立 v1；后续版本只能由资源 owner 从自己的 material/bundle 创建。bundle 的相对路径沿用现有安全校验，单文件 material 使用其 filename。所有路径必须唯一，单版本最多 1000 个文件。
+创建资源会从同一来源 workspace 的一个 ready material 或 bundle 建立 v1；后续版本只能由未删除的资源 owner 从自己的 material/bundle 创建。bundle 的相对路径沿用现有安全校验，单文件 material 使用其 filename。所有路径在来源快照边界统一 canonicalize，发布复核与幂等重试使用同一 canonical 身份，规范化后必须唯一，单版本最多 1000 个文件。
 
 创建流程：
 
@@ -57,7 +57,7 @@ Share 在授权时把当时最高 ready 版本写成目标的初始显式 select
 - `for_new_run=True`：grant 必须 active，版本必须 ready 且未删除；hash 不符、 revoked 或缺失均 fail-closed。
 - `for_new_run=False`：用于已冻结旧 job，允许 revoked grant 与逻辑删除版本，但仍要求精确 version + hash 和被授权 workspace。
 
-revoke 不修改 selection、版本、对象或既有 job pin，只停止新任务使用。来源 material/bundle 的后续删除、TTL 或 repair 不影响已发布版本，因为字节已复制到资源自有前缀。
+revoke 不修改 selection、版本、对象或既有 job pin，只停止新任务使用。来源 material/bundle 的后续删除、TTL 或 repair 不影响已发布版本，因为字节已复制到资源自有前缀。owner workspace 删除在同一事务设置 `owner_deleted_at` 并级联删除其自身 grant；Share/恢复授权、版本创建/重试/发布、授权列表、revoke、逻辑删除和创建幂等均要求 owner 未删除，旧资源不能由同名新实例接管。其他目标的 ready grant、显式选择、精确读取与 job pin 不因 owner 删除而失效。
 
 版本删除是逻辑删除：在版本行锁内统计所有 workspace 的 selection 与 `shared_resource_job_pins`，任一引用存在即 409；零引用时仅设置 `deleted_at`，响应明确 `physical_objects_deleted: false`。M43 必须在 accept 的同一事务中使用 `insert_job_pin_tx` 写 pin，该 helper 对版本取 `FOR KEY SHARE`，与删除守卫串行化；不得在 feeder/dispatch 回读当前 selection 或 latest。
 

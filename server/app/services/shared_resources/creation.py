@@ -64,6 +64,8 @@ class SharedResourceCreationService:
         )
         existing = self._queries.get_resource_creation(workspace_id, idempotency_key)
         if existing is not None:
+            if existing["resource"]["owner_deleted_at"] is not None:
+                raise NotFoundError("Shared resource not found")
             if str(existing["resource"]["create_request_hash"]) != fingerprint:
                 raise ConflictError("idempotency_key was already used for a different resource")
             return self._complete_resource_intent(existing)
@@ -99,7 +101,11 @@ class SharedResourceCreationService:
             raise InvalidOperationError("idempotency_key is required")
         self._validate_source(source_type, source_id)
         resource = self._queries.get_resource(workspace_id, resource_id)
-        if resource is None or str(resource["owner_workspace_id"]) != workspace_id:
+        if (
+            resource is None
+            or str(resource["owner_workspace_id"]) != workspace_id
+            or resource["owner_deleted_at"] is not None
+        ):
             raise NotFoundError("Shared resource not found")
         fingerprint = request_fingerprint(
             workspace_id=workspace_id,
@@ -116,6 +122,7 @@ class SharedResourceCreationService:
             self._queries.load_source_snapshot(workspace_id, source_type, source_id), storage
         )
         intent = self._queries.create_version_intent(
+            workspace_id=workspace_id,
             resource_id=resource_id,
             token=idempotency_key,
             request_hash=fingerprint,

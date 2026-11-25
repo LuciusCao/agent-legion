@@ -181,6 +181,7 @@ def insert_resource_intent_tx(
 def insert_version_intent_tx(
     conn: Any,
     *,
+    workspace_id: str,
     resource_id: str,
     token: str,
     request_hash: str,
@@ -189,7 +190,9 @@ def insert_version_intent_tx(
     created_by: str,
 ) -> dict[str, Any] | None:
     resource = conn.execute(
-        "select * from shared_resources where id=%s for update", (resource_id,)
+        "select * from shared_resources where id=%s and owner_workspace_id=%s"
+        " and owner_deleted_at is null for update",
+        (resource_id, workspace_id),
     ).fetchone()
     if resource is None:
         return None
@@ -217,7 +220,10 @@ def insert_version_intent_tx(
 def restart_version_attempt_tx(conn: Any, version_id: str) -> dict[str, Any] | None:
     """Move a retry to fresh, single-use keys; a ready version is returned as-is."""
     version = conn.execute(
-        "select * from shared_resource_versions where id=%s for update", (version_id,)
+        "select * from shared_resource_versions where id=%s"
+        " and exists (select 1 from shared_resources r where r.id=resource_id"
+        " and r.owner_deleted_at is null) for update",
+        (version_id,),
     ).fetchone()
     if version is None:
         return None
@@ -261,7 +267,10 @@ def mark_version_failed_tx(
 def publish_version_tx(conn: Any, version_id: str, generation: int) -> dict[str, Any] | None:
     """Publish only the exact verified attempt and a still-current source snapshot."""
     version = conn.execute(
-        "select * from shared_resource_versions where id=%s for update", (version_id,)
+        "select * from shared_resource_versions where id=%s"
+        " and exists (select 1 from shared_resources r where r.id=resource_id"
+        " and r.owner_deleted_at is null) for update",
+        (version_id,),
     ).fetchone()
     if version is None:
         return None

@@ -62,6 +62,7 @@ class SharedResourceQueries:
     def create_version_intent(
         self,
         *,
+        workspace_id: str,
         resource_id: str,
         token: str,
         request_hash: str,
@@ -72,6 +73,7 @@ class SharedResourceQueries:
         with self._job_db.write() as conn:
             return creation.insert_version_intent_tx(
                 conn,
+                workspace_id=workspace_id,
                 resource_id=resource_id,
                 token=token,
                 request_hash=request_hash,

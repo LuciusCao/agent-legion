@@ -226,6 +226,29 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
             )
 
 
+def test_delete_workspace_tombstones_shared_resource_owner(client, job_db) -> None:
+    workspace_id = "shared_owner_tombstone"
+    response = client.post("/api/workspaces", json={"id": workspace_id, "name": "Owner"})
+    assert response.status_code == 200, response.text
+    with job_db.write() as conn:
+        conn.execute(
+            "insert into shared_resources(id, owner_workspace_id, name, create_token,"
+            " create_request_hash, created_by) values"
+            " ('owner-tombstone-resource', %s, 'Owner resource', 'token', 'request', 'actor')",
+            (workspace_id,),
+        )
+
+    response = client.delete(f"/api/workspaces/{workspace_id}")
+
+    assert response.status_code == 200, response.text
+    with job_db.read() as conn:
+        row = conn.execute(
+            "select owner_deleted_at from shared_resources where id='owner-tombstone-resource'"
+        ).fetchone()
+    assert row is not None
+    assert row["owner_deleted_at"] is not None
+
+
 def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
     from fastapi.testclient import TestClient
 

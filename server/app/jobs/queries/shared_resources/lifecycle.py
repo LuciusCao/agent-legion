@@ -67,7 +67,8 @@ def share_resource_tx(
     actor_id: str,
 ) -> dict[str, Any]:
     resource = conn.execute(
-        "select * from shared_resources where id=%s and owner_workspace_id=%s for update",
+        "select * from shared_resources where id=%s and owner_workspace_id=%s"
+        " and owner_deleted_at is null for update",
         (resource_id, source_workspace_id),
     ).fetchone()
     if resource is None:
@@ -131,7 +132,8 @@ def list_grants_tx(
     conn: Any, source_workspace_id: str, resource_id: str
 ) -> list[dict[str, Any]] | None:
     resource = conn.execute(
-        "select id from shared_resources where id=%s and owner_workspace_id=%s",
+        "select id from shared_resources where id=%s and owner_workspace_id=%s"
+        " and owner_deleted_at is null",
         (resource_id, source_workspace_id),
     ).fetchone()
     if resource is None:
@@ -154,7 +156,8 @@ def revoke_grant_tx(
     actor_id: str,
 ) -> dict[str, Any] | None:
     resource = conn.execute(
-        "select id from shared_resources where id=%s and owner_workspace_id=%s",
+        "select id from shared_resources where id=%s and owner_workspace_id=%s"
+        " and owner_deleted_at is null",
         (resource_id, source_workspace_id),
     ).fetchone()
     if resource is None:
@@ -270,7 +273,8 @@ def delete_version_tx(
     version: int,
 ) -> dict[str, Any]:
     resource = conn.execute(
-        "select id from shared_resources where id=%s and owner_workspace_id=%s",
+        "select id from shared_resources where id=%s and owner_workspace_id=%s"
+        " and owner_deleted_at is null",
         (resource_id, owner_workspace_id),
     ).fetchone()
     if resource is None:

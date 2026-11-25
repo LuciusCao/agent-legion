@@ -4,7 +4,9 @@ The migration owns the complete DDL so fresh and upgraded databases take the
 same path. Published versions and their file manifests are immutable at the
 database layer; logical deletion only sets ``deleted_at`` after the service's
 reference guard. Objects use the separate ``shared-resources/`` prefix and are
-never removed by this migration or the resource lifecycle API.
+never removed by this migration or the resource lifecycle API. Owner deletion
+is an audit-preserving tombstone: other workspace grants and historical pins
+remain valid, while every owner-only management path requires a live owner.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ create table if not exists shared_resources (
   create_request_hash text not null,
   created_by text not null,
   created_at timestamptz not null default current_timestamp,
+  owner_deleted_at timestamptz,
   unique (owner_workspace_id, create_token)
 );
 

@@ -75,7 +75,8 @@ def resource_record(row: dict[str, Any], workspace_id: str) -> dict[str, Any]:
         "id": str(row["id"]),
         "name": str(row["name"]),
         "owner_workspace_id": str(row["owner_workspace_id"]),
-        "is_owner": str(row["owner_workspace_id"]) == workspace_id,
+        "is_owner": str(row["owner_workspace_id"]) == workspace_id
+        and row.get("owner_deleted_at") is None,
         "access_status": str(row["access_status"]),
         "version_count": int(row["version_count"]),
         "current_selection": selection,
