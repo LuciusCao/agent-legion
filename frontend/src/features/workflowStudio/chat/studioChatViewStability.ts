@@ -6,11 +6,30 @@
 // #1123：草稿视图是合并视图（tool_call 证据 + 合成 draft_saved 事件），
 // 判等必须覆盖锚点与证据时刻字段——只比内容字段会让「同草稿换锚点」
 // （如子代理再次保存后卡片移到新事件行）复用旧引用，卡片位置不更新。
-import type { PermissionView } from './studioChatMessages'
+import type { ChatMessage, PermissionView } from './studioChatMessages'
 import type {
   MergedNodeCodeDraft,
   MergedWorkflowDraft,
 } from './studioChatDraftEvents'
+
+export function permissionTurnKey(
+  toolCallId: string,
+  messages: readonly ChatMessage[],
+  index: number
+): string {
+  const turn = messages.slice(0, index).filter(isPermissionTurnBoundary).length
+  const separator = toolCallId.indexOf(':')
+  return `${separator > 0 ? toolCallId.slice(0, separator) : turn}:${toolCallId}`
+}
+
+function isPermissionTurnBoundary(message: ChatMessage): boolean {
+  if (message.kind === 'text')
+    return message.role === 'user' && message.content.queued !== true
+  if (message.kind !== 'status') return false
+  return ['turn_end', 'turn_timeout', 'error', 'queued_delivered'].includes(
+    message.content.event as string
+  )
+}
 
 export type DraftViews = {
   workflowDraft: MergedWorkflowDraft | null
@@ -68,6 +87,9 @@ export function samePermissionView(
     a.requestId === b.requestId &&
     a.toolTitle === b.toolTitle &&
     a.command === b.command &&
+    a.terminal === b.terminal &&
+    a.summary === b.summary &&
+    a.lateBoundCommand === b.lateBoundCommand &&
     a.resolved === b.resolved &&
     a.decisionText === b.decisionText &&
     a.options.length === b.options.length &&

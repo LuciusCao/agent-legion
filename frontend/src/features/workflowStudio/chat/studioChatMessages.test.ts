@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { ChatMessage } from './studioChatMessages'
+import type { ChatMessage, PermissionView } from './studioChatMessages'
+import { samePermissionView } from './studioChatViewStability'
+import { permissionPresentation } from './studioChatPermissionPresentation'
 import { lastRunCancelled, stopReason } from './studioChatCancelVisibility'
 import {
   buildPermissionViews,
@@ -473,6 +475,147 @@ describe('buildPermissionViews', () => {
     expect(done.decisionText).toBe('已拒绝')
   })
 
+  it('keeps the approval-time summary separate from a late-bound command', () => {
+    const request = message('permission', 'agent', {
+      request_id: 'r-late',
+      status: 'pending',
+      tool_call: {
+        toolCallId: '3:call_1',
+        title: 'Bash',
+        content: [
+          {
+            type: 'content',
+            content: {
+              type: 'text',
+              text: 'Requesting approval to Running: git diff…',
+            },
+          },
+        ],
+      },
+    })
+    const [unbound] = buildPermissionViews([request])
+    expect(unbound).toMatchObject({
+      terminal: true,
+      command: null,
+      lateBoundCommand: null,
+      summary: 'Requesting approval to Running: git diff…',
+    })
+
+    const allowed = message('permission', 'user', {
+      request_id: 'r-late',
+      status: 'resolved',
+      decision: { option_id: 'allow' },
+    })
+    const [child] = buildPermissionViews([request, allowed])
+    expect(child).toMatchObject({ lateBoundCommand: null })
+
+    const started = message('tool_call', 'agent', {
+      toolCallId: '3:call_1',
+      title: 'Bash',
+      kind: 'execute',
+      rawInput: { command: 'git diff --check' },
+    })
+    const [late] = buildPermissionViews([request, allowed, started])
+    expect(late).toMatchObject({
+      command: null,
+      lateBoundCommand: 'git diff --check',
+      summary: unbound.summary,
+    })
+  })
+
+  it('uses the first valid rawInput command by seq for pending, human and allow-all views', () => {
+    const invalid = toolCall('3:call_1', { rawInput: { command: '  ' } })
+    const first = toolCall('3:call_1', { rawInput: { command: 'ls -la' } })
+    const duplicate = toolCall('3:call_1', { rawInput: { command: 'ls -la' } })
+    const later = toolCall('3:call_1', { rawInput: { command: 'cat secrets' } })
+    const request = message('permission', 'agent', {
+      request_id: 'r-first',
+      status: 'pending',
+      tool_call: { toolCallId: '3:call_1', title: 'Bash' },
+    })
+    for (const decision of [
+      undefined,
+      { option_id: 'allow' },
+      { option_id: 'allow', via: 'allow_all' },
+    ]) {
+      const resolved = decision
+        ? message('permission', 'user', {
+            request_id: 'r-first',
+            status: 'resolved',
+            decision,
+          })
+        : null
+      const messages = [
+        duplicate,
+        request,
+        invalid,
+        first,
+        ...(resolved ? [resolved] : []),
+        later,
+      ]
+      const [view] = buildPermissionViews(messages)
+      expect(view.command).toBeNull()
+      expect(view.lateBoundCommand).toBe('ls -la')
+      const presentation = permissionPresentation(view)
+      expect(
+        decision ? presentation.lateDetails : presentation.details
+      ).toContain('ls -la')
+      expect(presentation.details).not.toContain('cat secrets')
+      expect(presentation.lateDetails).not.toContain('cat secrets')
+    }
+  })
+
+  it('uses kind before title and never treats a summary as a bound command', () => {
+    const exact = message('permission', 'agent', {
+      request_id: 'r-exact',
+      status: 'pending',
+      tool_call: {
+        title: 'Bash',
+        kind: 'execute',
+        rawInput: { command: 'git status' },
+      },
+    })
+    expect(buildPermissionViews([exact])[0]).toMatchObject({
+      terminal: true,
+      command: 'git status',
+    })
+    for (const toolCall of [
+      { title: 'Read' },
+      { title: 'Edit', kind: 'edit' },
+      { title: 'Bash', kind: 'read', rawInput: { command: 'not-terminal' } },
+    ]) {
+      const read = message('permission', 'agent', {
+        request_id: 'r-read',
+        status: 'pending',
+        tool_call: toolCall,
+      })
+      expect(buildPermissionViews([read])[0]).toMatchObject({
+        terminal: false,
+        lateBoundCommand: null,
+      })
+    }
+  })
+
+  it('does not invent late binding for a denied request', () => {
+    const request = message('permission', 'agent', {
+      request_id: 'r-denied',
+      status: 'pending',
+      tool_call: { toolCallId: 'call', title: 'Bash' },
+    })
+    const denied = message('permission', 'user', {
+      request_id: 'r-denied',
+      status: 'resolved',
+      decision: { deny: true },
+    })
+    const started = message('tool_call', 'agent', {
+      toolCallId: 'call',
+      rawInput: { command: 'git status' },
+    })
+    expect(buildPermissionViews([request, denied, started])[0]).toMatchObject({
+      lateBoundCommand: null,
+    })
+  })
+
   it('describes auto-approval channels', () => {
     const auto = message('permission', 'system', {
       status: 'resolved',
@@ -489,6 +632,31 @@ describe('buildPermissionViews', () => {
     })
     expect(permissionResolutionText(readOnly)).toBe(
       '已自动允许（只读工具）：Read'
+    )
+  })
+})
+
+describe('samePermissionView', () => {
+  const view: PermissionView = {
+    requestId: 'r1',
+    toolTitle: 'Bash',
+    command: null,
+    terminal: true,
+    summary: 'Running: git…',
+    lateBoundCommand: 'git status',
+    options: [{ optionId: 'allow', name: '允许一次', kind: 'allow_once' }],
+    resolved: true,
+    decisionText: '已允许',
+  }
+
+  it('compares every terminal visibility field while allowing equal copies', () => {
+    expect(
+      samePermissionView(view, { ...view, options: [...view.options] })
+    ).toBe(true)
+    expect(samePermissionView(view, { ...view, terminal: false })).toBe(false)
+    expect(samePermissionView(view, { ...view, summary: 'other' })).toBe(false)
+    expect(samePermissionView(view, { ...view, lateBoundCommand: null })).toBe(
+      false
     )
   })
 })
