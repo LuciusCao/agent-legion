@@ -110,7 +110,11 @@ def resume_session(
     # spawned yet. Whatever the new process writes during session/load, before
     # on_ready or before the watcher's first poll lands after it.
     wire_baseline = capture_wire_baseline(
-        str(service._settings.root_dir), claimed["acp_session_id"]
+        str(service._settings.root_dir),
+        claimed["acp_session_id"],
+        command=str(agent["command"]),
+        args=[str(arg) for arg in agent.get("args", [])],
+        env=None,
     )
     handle = spawn_session_runtime(
         service.db,

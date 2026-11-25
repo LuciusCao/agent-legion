@@ -13,10 +13,10 @@ ACP ``usage_update`` path), never from message text or ``TurnEnd``.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -51,31 +51,24 @@ def read_protocol_version(descriptor: int) -> str | None:
     return version if isinstance(version, str) and len(version) <= 32 else None
 
 
-def locate_session_wire(cwd: str, session_id: str) -> Path | None:
-    """Default child-home first, backend override second, then legacy layout.
+@dataclass(frozen=True)
+class WireBaseline:
+    """Journal identity and end offset; identity None defers to first sight."""
 
-    Production spawns with env=None and the ACP SDK does not forward
-    KIMI_SHARE_DIR, so a plain child writes the default home even when the
-    backend has an override. The override remains a fallback for wrappers.
-    """
-    from server.app.studio_chat.kimi_wire import _SESSION_ID, kimi_code_homes, locate_wire
+    acp_session_id: str
+    path: Path
+    identity: tuple[int, int] | None
+    offset: int
 
-    if not _SESSION_ID.fullmatch(session_id):
-        return None
-    canonical = Path(cwd).resolve()
-    roots = [(Path.home() / ".kimi").resolve()]
-    if raw := os.environ.get("KIMI_SHARE_DIR"):
-        override = Path(raw)
-        if not override.is_absolute():
-            override = canonical / override
-        if (resolved := override.resolve()) != roots[0]:
-            roots.append(resolved)
-    digest = hashlib.md5(str(canonical).encode(), usedforsecurity=False).hexdigest()
-    for share in roots:
-        candidate = share / "sessions" / digest / session_id / "wire.jsonl"
-        if candidate.is_file():
-            return candidate
-    return locate_wire(kimi_code_homes(cwd), session_id)
+
+def usable_baseline(baseline: Any, acp_session_id: str, path: Path | None) -> bool:
+    """Only the very journal session/load restored may continue from it."""
+    return (
+        isinstance(baseline, WireBaseline)
+        and baseline.acp_session_id == acp_session_id
+        and baseline.identity is not None
+        and baseline.path == path
+    )
 
 
 def parse_records(data: bytes) -> list[dict[str, Any]]:

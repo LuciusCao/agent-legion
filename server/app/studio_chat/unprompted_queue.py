@@ -54,11 +54,11 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from server.app.studio_chat.compaction_wire import locate_session_wire
 from server.app.studio_chat.inbound_delivery import DROPPED_ERROR, _deliver
 from server.app.studio_chat.inbound_delivery import hold as hold
 from server.app.studio_chat.queued_drop import _note_dropped
 from server.app.studio_chat.unprompted_turns import UnpromptedTurnWatcher
+from server.app.studio_chat.wire_baseline import locate_session_wire
 
 if TYPE_CHECKING:
     from server.app.studio_chat.runtime import SessionRuntime
@@ -222,5 +222,11 @@ def gated_watcher(
         service,
         session_id,
         runtime,
-        lambda: locate_session_wire(runtime.handle.cwd, acp_session_id),
+        lambda: locate_session_wire(
+            runtime.handle.cwd,
+            acp_session_id,
+            command=runtime.handle.command,
+            args=runtime.handle.args,
+            env=runtime.handle.env,
+        ),
     )

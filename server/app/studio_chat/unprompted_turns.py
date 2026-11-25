@@ -30,9 +30,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from server.app.studio_chat import compaction_wire
+from server.app.studio_chat.compaction_wire import usable_baseline
 from server.app.studio_chat.kimi_wire import WireTail
 from server.app.studio_chat.mcp_hint import is_agent_legion_tool_call
-from server.app.studio_chat.wire_baseline import usable_baseline
 
 if TYPE_CHECKING:
     from pathlib import Path

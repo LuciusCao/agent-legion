@@ -20,14 +20,20 @@ from server.app.studio_chat.kimi_task_snapshot import BackgroundTask, read_task
 _ID = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}\Z")
 
 
-def task_root(cwd: str, session_id: str) -> Path | None:
+def share_session_dir(share: Path, cwd: str, session_id: str) -> Path | None:
+    """Kimi V1 ``sessions/<md5(canonical cwd)>/<session>`` directory."""
     if not _ID.fullmatch(session_id):
         return None
-    share = Path(os.environ.get("KIMI_SHARE_DIR", str(Path.home() / ".kimi")))
     if not share.is_absolute():
         share = Path(cwd) / share
     digest = hashlib.md5(str(Path(cwd).resolve()).encode(), usedforsecurity=False).hexdigest()
-    return share.resolve() / "sessions" / digest / session_id / "tasks"
+    return share.resolve() / "sessions" / digest / session_id
+
+
+def task_root(cwd: str, session_id: str) -> Path | None:
+    share = Path(os.environ.get("KIMI_SHARE_DIR", str(Path.home() / ".kimi")))
+    root = share_session_dir(share, cwd, session_id)
+    return root / "tasks" if root is not None else None
 
 
 def task_snapshots(

@@ -79,6 +79,16 @@ def _new_wire_path(share: Path, cwd: str, session_id: str) -> Path:
     return share / "sessions" / digest / session_id / "wire.jsonl"
 
 
+def _capture(runtime, session_id: str):
+    return capture_wire_baseline(
+        runtime.handle.cwd,
+        session_id,
+        command=runtime.handle.command,
+        args=runtime.handle.args,
+        env=runtime.handle.env,
+    )
+
+
 def _metadata(path: Path, version: str = "1.10") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"type": "metadata", "protocol_version": version}) + "\n")
@@ -92,6 +102,9 @@ def wire(admission, tmp_path, monkeypatch):
     workdir = tmp_path / "frozen-workdir"
     workdir.mkdir()
     runtime.handle.cwd = str(workdir)
+    runtime.handle.command = "kimi"
+    runtime.handle.args = ["acp"]
+    runtime.handle.env = None
     share = tmp_path / "share"
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("KIMI_SHARE_DIR", str(share))
@@ -214,7 +227,7 @@ def test_partial_metadata_is_retried_before_the_first_live_begin(wire):
 def test_loaded_baseline_skips_history_but_loads_header_and_sees_live_begin(wire):
     _service, db, sid, _workspace, runtime, watcher, path = wire
     _append(path, BEGIN, END)
-    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_152")
+    baseline = _capture(runtime, "acp_152")
     assert baseline is not None and baseline.path == path
     watcher.tail = WireTail.from_baseline(baseline)
     watcher.step()
@@ -260,8 +273,11 @@ def test_share_root_selection_matches_plain_child_and_baseline(wire, tmp_path, p
         _append(override, BEGIN)
     else:
         _append(override, END)
+    if present == "both":
+        runtime.handle.command = "/opt/kimi"
+        watcher = gated_watcher(service, sid, runtime, "acp_152")
 
-    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_152")
+    baseline = _capture(runtime, "acp_152")
     watcher.step()
     expected = default if present in ("default", "both") else override
     assert baseline is not None and baseline.path == expected
@@ -279,6 +295,53 @@ def test_share_root_selection_matches_plain_child_and_baseline(wire, tmp_path, p
         ]
 
 
+@pytest.mark.parametrize("launch", ["script", "env", "handle_env"])
+def test_wrapper_dual_root_uses_live_override_not_stale_default(wire, tmp_path, launch):
+    service, db, sid, _workspace, runtime, _watcher, override = wire
+    default = _new_wire_path(tmp_path / "home" / ".kimi", runtime.handle.cwd, "acp_152")
+    _metadata(default)
+    _append(default, END)
+    _append(override, BEGIN)
+    share = override.parents[3]
+    if launch == "script":
+        runtime.handle.command, runtime.handle.args, runtime.handle.env = (
+            "/opt/kimi-wrapper",
+            [],
+            None,
+        )
+    elif launch == "env":
+        runtime.handle.command = "env"
+        runtime.handle.args = [f"KIMI_SHARE_DIR={share}", "kimi", "acp"]
+        runtime.handle.env = None
+    else:
+        runtime.handle.command, runtime.handle.args = "kimi", ["acp"]
+        runtime.handle.env = {"KIMI_SHARE_DIR": str(share)}
+    watcher = gated_watcher(service, sid, runtime, "acp_152")
+
+    baseline = _capture(runtime, "acp_152")
+    watcher.step()
+    assert baseline is not None and baseline.path == override
+    assert watcher.tail.path == override
+    assert runtime.compacting is True
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start"]
+
+
+def test_unproven_kimi_argv_is_neutral_with_two_roots(wire, tmp_path):
+    service, db, sid, _workspace, runtime, _watcher, override = wire
+    default = _new_wire_path(tmp_path / "home" / ".kimi", runtime.handle.cwd, "acp_152")
+    _metadata(default)
+    _append(default, END)
+    _append(override, BEGIN)
+    runtime.handle.command = "kimi"
+    runtime.handle.args = ["--experimental", "acp"]
+    runtime.handle.env = None
+    watcher = gated_watcher(service, sid, runtime, "acp_152")
+    assert _capture(runtime, "acp_152") is None
+    watcher.step()
+    assert watcher.tail is None and runtime.compacting is False
+    assert _events(db, sid) == []
+
+
 def test_legacy_layout_is_the_fallback_after_both_share_roots(wire, tmp_path, monkeypatch):
     service, _db, _sid, _workspace, runtime, _watcher, override = wire
     override.unlink()
@@ -289,7 +352,7 @@ def test_legacy_layout_is_the_fallback_after_both_share_roots(wire, tmp_path, mo
     )
     _metadata(legacy, version="1.5")
     watcher = gated_watcher(service, _sid, runtime, "acp_legacy")
-    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_legacy")
+    baseline = _capture(runtime, "acp_legacy")
     watcher.step()
     assert baseline is not None and baseline.path == legacy
     assert watcher.tail.path == legacy
@@ -304,7 +367,7 @@ def test_new_layout_symlink_is_refused_and_baseline_defers(wire):
     path.symlink_to(target)
     with pytest.raises((OSError, ValueError)):
         watcher.step()
-    baseline = capture_wire_baseline(runtime.handle.cwd, "acp_152")
+    baseline = _capture(runtime, "acp_152")
     assert baseline is not None and baseline.identity is None
     assert runtime.compacting is False
 
