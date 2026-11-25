@@ -18,10 +18,13 @@ import pytest
 import yaml
 
 from server.app.db.transaction import write_transaction
+from server.app.services import skill_commit_pins
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.node_profile_pins import node_profile_hash
 from server.app.services.quality_replays import QualityReplayService
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
+from server.app.skills.errors import SkillRepoError
+from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.schema import (
@@ -29,13 +32,24 @@ from server.app.workflows.schema import (
     WorkflowIntake,
     WorkflowNode,
     WorkflowNodeExecution,
+    WorkflowNodeSkill,
+)
+from tests.helpers.skill_git import (
+    _KEY,
+    _commit_skill_update,
+    _head_commit,
+    _make_manager,
+    _make_skill_repo,
+    _tag,
 )
 from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.fresh_schema
 
 
-def _definition(execution: WorkflowNodeExecution | None, *, tools=()) -> WorkflowDefinition:
+def _definition(
+    execution: WorkflowNodeExecution | None, *, tools=(), skill: WorkflowNodeSkill | None = None
+) -> WorkflowDefinition:
     generate = WorkflowNode(
         key="generate",
         label="generate",
@@ -48,6 +62,8 @@ def _definition(execution: WorkflowNodeExecution | None, *, tools=()) -> Workflo
     )
     if execution is not None:
         generate = replace(generate, execution=execution)
+    if skill is not None:
+        generate = replace(generate, skill=skill)
     return WorkflowDefinition(
         key="test",
         label="Test",
@@ -102,6 +118,7 @@ class _Env:
                 " 'completed') returning id",
                 (self.job["id"],),
             ).fetchone()
+            self.node_run_id = int(run["id"])
             conn.execute(
                 "insert into quality_sample_batches(id, workspace_id, name, sample_size)"
                 " values ('batch-1', %s, 'batch', 10)",
@@ -135,6 +152,29 @@ class _Env:
             )
         return revision_id
 
+    def prove_execution(self, commit: str, ref: str, *, version_ref: str | None = None) -> None:
+        manifest = {
+            "skill_commit": commit,
+            "skill_version": f"{version_ref or ref}@{commit[:12]}",
+        }
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            conn.execute(
+                "insert into agent_execution_requests("
+                "execution_id, workspace_id, job_id, node_key, agent_id,"
+                " agent_definition_hash, node_concurrency_limit, state, node_run_id,"
+                " queued_at, finished_at, manifest_json)"
+                " values ('proof-1', %s, %s, 'generate', 'generate', '', 1, 'done', %s,"
+                " current_timestamp, current_timestamp, %s)",
+                (self.workspace_id, self.job["id"], self.node_run_id, json.dumps(manifest)),
+            )
+
+    def prove_legacy_prefix(self, commit: str, ref: str) -> None:
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            conn.execute(
+                "update node_runs set skill_version=%s where id=%s",
+                (f"{ref}@{commit[:12]}", self.node_run_id),
+            )
+
     def service(self) -> QualityReplayService:
         return QualityReplayService(self.job_db)
 
@@ -147,6 +187,17 @@ class _Env:
 def _copy_node(copy_job: dict) -> WorkflowNode:
     payload = json.loads(str(copy_job["workflow_definition_snapshot_json"]))
     return workflow_definition_from_dict(payload).nodes["generate"]
+
+
+def _skill(ref: str = "latest") -> WorkflowNodeSkill:
+    return WorkflowNodeSkill(key=_KEY, ref=ref)
+
+
+def _real_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, SkillManager]:
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    manager = _make_manager(tmp_path)
+    monkeypatch.setattr(skill_commit_pins, "build_skill_manager", lambda *_args: manager)
+    return repo, manager
 
 
 def test_default_replays_the_original_snapshot_profile(job_db) -> None:
@@ -168,6 +219,7 @@ def test_default_replays_the_original_snapshot_profile(job_db) -> None:
     }
     assert replay["agent_version"] is None
     assert replay["profile_hash"] == node_profile_hash(original_node)
+    assert "skill_commits" not in pins
 
 
 def test_revision_choice_transplants_that_profile(job_db) -> None:
@@ -372,3 +424,186 @@ def test_code_node_replays_without_any_route(job_db) -> None:
     assert "node_profiles" not in pins or pins["node_profiles"] == {}
     with pytest.raises(InvalidOperationError, match="only agent nodes"):
         env.service().create_replay(env.workspace_id, "item-1", use_draft=True)
+    assert "skill_commits" not in pins
+
+
+def test_original_latest_freezes_executed_commit_after_head_moves_without_digest_drift(
+    job_db, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(original, "latest")
+    _commit_skill_update(repo, "# newer HEAD\n")
+    digest_payloads: list[dict] = []
+    real_create_run = job_db.create_run
+
+    def spy_create_run(*args, **kwargs):
+        digest_payloads.append(args[2])
+        return real_create_run(*args, **kwargs)
+
+    monkeypatch.setattr(job_db, "create_run", spy_create_run)
+    replay = env.service().create_replay(env.workspace_id, "item-1")
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"] == {
+        "node_key": "generate",
+        "skill_key": _KEY,
+        "skill_ref": "latest",
+        "skill_commit": original,
+    }
+    assert manager.load_lock().skills == {}
+    assert len(digest_payloads) == 1
+    assert "skill_commits" not in digest_payloads[0]
+    assert set(digest_payloads[0]) == {
+        "quality_replay",
+        "node_config",
+        "node_code_versions",
+        "agent_versions",
+        "node_profiles",
+    }
+
+
+def test_original_pinned_ref_survives_retag_and_relock(job_db, tmp_path, monkeypatch) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _tag(repo, "v1")
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill("v1")))
+    env.prove_execution(original, "v1")
+    moved = _commit_skill_update(repo, "# retagged\n")
+    assert _tag(repo, "v1", force=True) == moved
+    assert skill_commit_pins.resolve_skill_commit(manager, _KEY, "v1") == moved
+
+    replay = env.service().create_replay(env.workspace_id, "item-1")
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == original
+    assert pins["skill_commits"]["generate"]["skill_ref"] == "v1"
+    assert manager.load_lock().skills[_KEY].refs["v1"] == moved
+
+
+def test_selected_revision_freezes_its_accept_time_head_not_the_original_commit(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(original, "latest")
+    accepted = _commit_skill_update(repo, "# selected revision\n")
+    revision_id = env.add_revision(2, _definition(_CANDIDATE, skill=_skill()), "active")
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", revision_id=revision_id)
+    _commit_skill_update(repo, "# after acceptance\n")
+
+    _copy_job, pins = env.copy(replay)
+    pin = pins["skill_commits"]["generate"]
+    assert pin["skill_commit"] == accepted != original
+    assert pin["skill_ref"] == "latest"
+    assert manager.load_lock().skills == {}
+
+
+def test_selected_draft_freezes_its_accept_time_head(job_db, tmp_path, monkeypatch) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(original, "latest")
+    accepted = _commit_skill_update(repo, "# selected draft\n")
+    job_db.upsert_workspace_workflow_draft(
+        env.workspace_id,
+        yaml.safe_dump(
+            {
+                "key": "test",
+                "label": "Test",
+                "nodes": {
+                    "generate": {
+                        "type": "agent",
+                        "capability": "write_script",
+                        "inputs": ["question.json"],
+                        "execution": {"runtime": "pi", "provider": "p3", "model": "m3"},
+                        "skill": {"key": _KEY, "ref": "latest"},
+                    }
+                },
+            }
+        ),
+    )
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", use_draft=True)
+    _commit_skill_update(repo, "# draft moved after acceptance\n")
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == accepted != original
+    assert manager.load_lock().skills == {}
+
+
+def test_selected_unlocked_ref_uses_normal_first_pin_at_acceptance(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(original, "latest")
+    selected = _tag(repo, "v2")
+    revision_id = env.add_revision(2, _definition(_CANDIDATE, skill=_skill("v2")), "active")
+
+    replay = env.service().create_replay(env.workspace_id, "item-1", revision_id=revision_id)
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == selected
+    assert manager.load_lock().skills[_KEY].refs["v2"] == selected
+
+
+def test_original_legacy_prefix_restores_unique_old_commit_not_current_head(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_legacy_prefix(original, "latest")
+    _commit_skill_update(repo, "# HEAD is not proof\n")
+
+    replay = env.service().create_replay(env.workspace_id, "item-1")
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == original
+    assert manager.load_lock().skills == {}
+
+
+def test_original_without_execution_proof_fails_before_any_replay_write(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    _repo, _manager = _real_skill(tmp_path, monkeypatch)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+
+    with pytest.raises(InvalidOperationError, match="cannot prove.*neither a full"):
+        env.service().create_replay(env.workspace_id, "item-1")
+
+    assert env.service().list_replays(env.workspace_id, "item-1") == []
+    assert job_db.list_runs(env.workspace_id) == []
+
+
+def test_original_proof_ref_mismatch_fails_closed(job_db, tmp_path, monkeypatch) -> None:
+    repo, _manager = _real_skill(tmp_path, monkeypatch)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill("v1")))
+    env.prove_execution(_head_commit(repo), "v1", version_ref="other")
+
+    with pytest.raises(InvalidOperationError, match="does not match ref 'v1'"):
+        env.service().create_replay(env.workspace_id, "item-1")
+
+    assert job_db.list_runs(env.workspace_id) == []
+
+
+def test_ambiguous_legacy_prefix_fails_closed_instead_of_using_head(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    repo, manager = _real_skill(tmp_path, monkeypatch)
+    original = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_legacy_prefix(original, "latest")
+
+    def ambiguous(*_args):
+        raise SkillRepoError("short object id is ambiguous")
+
+    monkeypatch.setattr(manager, "_rev_parse", ambiguous)
+    with pytest.raises(InvalidOperationError, match="does not resolve uniquely"):
+        env.service().create_replay(env.workspace_id, "item-1")
+
+    assert job_db.list_runs(env.workspace_id) == []

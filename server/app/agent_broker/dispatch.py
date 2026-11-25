@@ -32,7 +32,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.node_profile_pins import MANIFEST_KEY as NODE_PROFILE_PIN_MANIFEST_KEY
 from server.app.services.runtime_reserved_config import TIMEOUT_BASE_MANIFEST_KEY
 from server.app.settings import Settings
-from server.app.skills.checkout import checkout_node_skill
+from server.app.skills.checkout import checkout_node_skill as checkout
 from server.app.skills.runtime import build_skill_manager
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
@@ -78,6 +78,7 @@ class AgentDispatchService:
         timeout_base: dict[str, Any] | None = None,
         profile_source: str = PROFILE_SOURCE_DEFINITION,
         node_profile_pin: Mapping[str, Any] | None = None,
+        skill_commit_pin: Mapping[str, Any] | None = None,
     ) -> bool:
         """Freeze the manifest + bundle and queue one Agent request.
 
@@ -102,7 +103,7 @@ class AgentDispatchService:
             sandbox_network=(node_config or {}).get("sandbox_network"),
         )
         execution_id = str(uuid.uuid4())
-        skill = checkout_node_skill(self.skill_manager, node, definition.skill, execution_id)
+        skill = checkout(self.skill_manager, node, definition.skill, execution_id, skill_commit_pin)
         try:
             manifest: dict[str, Any] = {
                 "execution_id": execution_id,

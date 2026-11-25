@@ -23,11 +23,12 @@ from server.app.agent_broker.agent_claim_compatibility import live_claim_manifes
 from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.services.agent_node_profile_types import PROFILE_SOURCE_NODE
 from server.app.services.node_profile_pins import MANIFEST_KEY, PIN_KEY, node_profile_hash
+from server.app.services.skill_commit_pins import PIN_KEY as SKILL_COMMITS_PIN_KEY
 from server.app.settings import Settings
 from server.app.skills.checkout import SkillCheckout
 from server.app.workflow_worker.agent_claim import claim_agent_node
 from server.app.workflow_worker.state import WorkflowWorkerState
-from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
+from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution, WorkflowNodeSkill
 
 pytestmark = pytest.mark.no_db
 
@@ -39,6 +40,7 @@ _CHOSEN = WorkflowNode(
     node_type="agent",
     inputs=["question.json"],
     outputs=["answer.json"],
+    skill=WorkflowNodeSkill(key="question/generate", ref="latest"),
     execution=WorkflowNodeExecution(
         runtime="pi", provider="gateway", model="model-b", prompt="PROMPT-B"
     ),
@@ -61,10 +63,21 @@ _ORIGINAL_REVISION = {
 
 
 def _dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, MagicMock]:
-    checkout = SkillCheckout(key="", ref="", run_dir=tmp_path, commit="", version="")
+    def checkout_skill(*_args, **kwargs):
+        pin = _args[4] if len(_args) > 4 else kwargs.get("commit_pin")
+        commit = str(pin["skill_commit"]) if pin else "d" * 40
+        ref = str(pin["skill_ref"]) if pin else "latest"
+        return SkillCheckout(
+            key="question/generate",
+            ref=ref,
+            run_dir=tmp_path,
+            commit=commit,
+            version=f"{ref}@{commit[:12]}",
+        )
+
     monkeypatch.setattr(agent_dispatch, "build_skill_manager", lambda *_a, **_k: MagicMock())
     monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", lambda **_k: MagicMock())
-    monkeypatch.setattr(agent_dispatch, "checkout_node_skill", lambda *_a, **_k: checkout)
+    monkeypatch.setattr(agent_dispatch, "checkout", checkout_skill)
     monkeypatch.setattr(agent_dispatch, "stage_agent_inputs", lambda *_a, **_k: None)
     monkeypatch.setattr(
         agent_dispatch, "build_agent_bundle", lambda path, **_k: path.write_text("bundle")
@@ -88,15 +101,27 @@ def _dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Mag
     return service, broker
 
 
-def _claim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, run_payload: dict) -> MagicMock:
+def _claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_payload: dict,
+    *,
+    use_run_row: bool = False,
+) -> MagicMock:
     service, broker = _dispatch(tmp_path, monkeypatch)
     failures: list[str] = []
     state = WorkflowWorkerState()
-    state.batch_payload_cache["run-1"] = run_payload
+    job_db = None
+    if use_run_row:
+        job_db = SimpleNamespace(
+            get_run=lambda _run_id: {"frozen_pins_json": json.dumps(run_payload)}
+        )
+    else:
+        state.batch_payload_cache["run-1"] = run_payload
     worker = SimpleNamespace(
         state=state,
         agent_dispatch=service,
-        job_db=None,
+        job_db=job_db,
         leases=SimpleNamespace(fail_without_lease=lambda _req, msg: failures.append(msg)),
     )
     claimed = claim_agent_node(
@@ -146,6 +171,34 @@ def test_pinned_run_enqueues_the_pin_and_claims_the_chosen_profile(
     assert claimed["additional_prompt"] == "PROMPT-B"
 
 
+def test_replay_skill_commit_pin_reaches_exact_manifest_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commit = "a" * 40
+    skill_pin = {
+        "node_key": "generate",
+        "skill_key": "question/generate",
+        "skill_ref": "latest",
+        "skill_commit": commit,
+    }
+    broker = _claim(
+        tmp_path,
+        monkeypatch,
+        {
+            PIN_KEY: {"generate": _pin()},
+            SKILL_COMMITS_PIN_KEY: {"generate": skill_pin},
+            "node_config": {},
+        },
+        use_run_row=True,
+    )
+
+    manifest = dict(broker.enqueue.call_args.args[0].manifest)
+    assert manifest["skill"] == "question/generate"
+    assert manifest["skill_ref"] == "latest"
+    assert manifest["skill_commit"] == commit
+    assert manifest["skill_version"] == f"latest@{commit[:12]}"
+
+
 def test_unpinned_run_keeps_the_live_revision_reread(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -154,6 +207,7 @@ def test_unpinned_run_keeps_the_live_revision_reread(
 
     manifest = dict(broker.enqueue.call_args.args[0].manifest)
     assert MANIFEST_KEY not in manifest
+    assert manifest["skill_commit"] == "d" * 40
     claimed = live_claim_manifest(
         {
             "manifest_json": json.dumps(manifest),

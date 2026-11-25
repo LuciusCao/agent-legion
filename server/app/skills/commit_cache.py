@@ -120,6 +120,29 @@ def resolve_skill_commit(manager: SkillManager, skill_key: str, ref: str | None)
         return manager._resolve_pinned(skill_key, cache_dir, effective_ref)
 
 
+def resolve_unique_skill_commit_prefix(manager: SkillManager, skill_key: str, prefix: str) -> str:
+    """Restore a legacy 12-hex execution proof without consulting any ref.
+
+    Git's short-sha resolution searches the object database and rejects an
+    ambiguous prefix. It therefore recovers the original commit even after
+    HEAD moves or a tag is relocked, while never substituting either one's
+    current value. The commit must still exist in the in-place repository.
+    """
+    if len(prefix) != 12 or any(char not in "0123456789abcdef" for char in prefix):
+        raise SkillRepoError(f"legacy skill commit proof must be 12 lowercase hex: {prefix!r}")
+    workflow, capability = manager._parse_skill_key(skill_key)
+    cache_dir = manager._resolve_cache_dir(workflow, capability)
+    with manager._cache_lock_for(cache_dir):
+        manager._require_cache_dir(skill_key, cache_dir)
+        try:
+            return manager._rev_parse(cache_dir, prefix)
+        except SkillRepoError as exc:
+            raise SkillRepoError(
+                f"legacy skill commit prefix {prefix!r} does not resolve uniquely in "
+                f"{cache_dir}; a full 40-hex execution proof is required"
+            ) from exc
+
+
 def materialized_commit_dir(manager: SkillManager, skill_key: str, commit: str) -> Path:
     """Return the shared cached tree of (``skill_key``, ``commit``).
 

@@ -23,6 +23,7 @@ from server.app.skills.checkout import (
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeSkill
 from tests.helpers.skill_git import (
     _KEY,
+    _commit_skill_update,
     _head_commit,
     _make_manager,
     _make_skill_repo,
@@ -80,6 +81,72 @@ def test_checkout_explicit_latest_skips_the_lock(tmp_path: Path) -> None:
 
     assert checkout.ref == "latest"
     assert manager.load_lock().skills == {}
+
+
+def _replay_pin(node: WorkflowNode, commit: str, *, key: str = _KEY) -> dict[str, str]:
+    assert node.skill is not None
+    return {
+        "node_key": node.key,
+        "skill_key": key,
+        "skill_ref": node.skill.ref,
+        "skill_commit": commit,
+    }
+
+
+def test_replay_pin_exports_original_latest_after_head_moves(tmp_path: Path) -> None:
+    repo = _make_skill_repo(tmp_path / "skills")
+    original = _head_commit(repo)
+    manager = _make_manager(tmp_path)
+    node = _node_with_skill(_KEY, "latest")
+    _commit_skill_update(repo, "# newer HEAD\n")
+
+    checkout = checkout_node_skill(
+        manager, node, "", "replay-latest", commit_pin=_replay_pin(node, original)
+    )
+
+    assert checkout.commit == original
+    assert checkout.ref == "latest"
+    assert checkout.version == f"latest@{original[:12]}"
+    assert (checkout.run_dir / "SKILL.md").read_text() == "# skill\n"
+    assert manager.load_lock().skills == {}
+
+
+def test_replay_pin_exports_original_commit_after_retag_and_relock(tmp_path: Path) -> None:
+    repo = _make_skill_repo(tmp_path / "skills")
+    original = _tag(repo, "v1")
+    moved = _commit_skill_update(repo, "# retagged\n")
+    assert _tag(repo, "v1", force=True) == moved
+    manager = _make_manager(
+        tmp_path,
+        lock={"skills": {_KEY: {"repo": str(repo), "refs": {"v1": moved}}}},
+    )
+    node = _node_with_skill(_KEY, "v1")
+
+    checkout = checkout_node_skill(
+        manager, node, "", "replay-pinned", commit_pin=_replay_pin(node, original)
+    )
+
+    assert checkout.commit == original
+    assert checkout.ref == "v1"
+    assert (checkout.run_dir / "SKILL.md").read_text() == "# skill\n"
+    assert manager.load_lock().skills[_KEY].refs["v1"] == moved
+
+
+def test_replay_pin_rejects_real_skill_key_mismatch_before_materialization(tmp_path: Path) -> None:
+    repo = _make_skill_repo(tmp_path / "skills")
+    manager = _make_manager(tmp_path)
+    node = _node_with_skill(_KEY, "latest")
+
+    with pytest.raises(ValueError, match="skill_key=.*does not match"):
+        checkout_node_skill(
+            manager,
+            node,
+            "",
+            "replay-mismatch",
+            commit_pin=_replay_pin(node, _head_commit(repo), key="group/other"),
+        )
+
+    assert not (manager.runs_dir / "replay-mismatch").exists()
 
 
 def _contract_skill_tree(base_dir: Path, key: str) -> None:
