@@ -18,13 +18,24 @@ const workspacePath = (workspaceId: string) =>
 const resourcePath = (workspaceId: string, resourceId: string) =>
   `${workspacePath(workspaceId)}/shared-resources/${encodeURIComponent(resourceId)}`
 
-export function listSharedResources(
+export async function listSharedResources(
   workspaceId: string,
   signal?: AbortSignal
 ): Promise<SharedResourceListResponse> {
-  return api(`${workspacePath(workspaceId)}/shared-resources?limit=200`, {
-    signal,
-  })
+  const resources: SharedResourceListResponse['resources'] = []
+  let offset = 0
+  let total: number
+  do {
+    const page = await api<SharedResourceListResponse>(
+      `${workspacePath(workspaceId)}/shared-resources?limit=200&offset=${offset}`,
+      { signal }
+    )
+    resources.push(...page.resources)
+    total = page.total
+    offset += page.resources.length
+    if (page.resources.length === 0) break
+  } while (offset < total)
+  return { resources, total, limit: resources.length, offset: 0 }
 }
 
 export function getSharedResource(

@@ -6,7 +6,10 @@ import { MemoryRouter } from '../../testing/TestMemoryRouter'
 import { TestQueryProvider } from '../../testing/testQueryClient'
 import { makeWorkspace } from '../../testing/workspaceFixtures'
 import { makeSharedResource } from '../../testing/sharedResourceFixtures'
-import { listSharedResources } from '../../api/sharedResources'
+import {
+  listSharedResources,
+  shareSharedResource,
+} from '../../api/sharedResources'
 import { fetchWorkspaces } from '../../api'
 import { useAuthStore } from '../../stores/authStore'
 import ResourceLibraryPage from './ResourceLibraryPage'
@@ -100,7 +103,7 @@ describe('ResourceLibraryPage', () => {
     ).toBeInTheDocument()
   })
 
-  it('viewer 显示只读说明且不能更改共享', async () => {
+  it('来源 viewer 可共享到目标 editor，但不能撤销已有共享', async () => {
     useAuthStore.setState({
       user: { id: 'u1', username: 'viewer', role: 'member' } as never,
       status: 'authenticated',
@@ -112,6 +115,11 @@ describe('ResourceLibraryPage', () => {
           name: '数学教研',
           current_user_role: 'viewer',
         }),
+        makeWorkspace({
+          id: 'ws2',
+          name: '试题维护',
+          current_user_role: 'editor',
+        }),
       ],
     })
     const user = userEvent.setup()
@@ -120,12 +128,20 @@ describe('ResourceLibraryPage', () => {
       await screen.findByText(/你在当前工作区为只读成员/)
     ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '添加到工作流' })).toBeDisabled()
+    vi.mocked(shareSharedResource).mockResolvedValue({
+      duplicate: false,
+      grant: { workspace_id: 'ws2', workspace_name: '试题维护' } as never,
+    })
     await user.click(screen.getByRole('button', { name: '共享' }))
     expect(
-      await screen.findByText('你在当前工作区为只读成员，不能更改共享设置。')
+      await screen.findByText(
+        /可以共享到你有编辑权限的其他工作区，不能撤销已有共享/
+      )
     ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '共享到试题维护' }))
+    expect(shareSharedResource).toHaveBeenCalledWith('ws1', 'resource-1', 'ws2')
     expect(
-      screen.queryByRole('button', { name: /共享到/ })
+      screen.queryByRole('button', { name: '停止新任务使用' })
     ).not.toBeInTheDocument()
   })
 

@@ -101,12 +101,13 @@ export function ShareResourceDialog({
           <p className={`${styles.notice} ${styles.warningNotice}`}>
             这个资源来自其他工作区。只有来源工作区可以管理共享。
           </p>
-        ) : !canEdit ? (
-          <p className={`${styles.notice} ${styles.warningNotice}`}>
-            你在当前工作区为只读成员，不能更改共享设置。
-          </p>
         ) : (
           <>
+            {!canEdit && (
+              <p className={`${styles.notice} ${styles.warningNotice}`}>
+                你在来源工作区为只读成员，可以共享到你有编辑权限的其他工作区，不能撤销已有共享。
+              </p>
+            )}
             <label className={styles.field}>
               目标工作区
               <select

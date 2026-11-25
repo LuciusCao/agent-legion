@@ -164,7 +164,7 @@ export default function ResourceLibraryPage() {
         </header>
         {access.isViewer && (
           <p className={styles.notice}>
-            你在当前工作区为只读成员，可以查看资源，不能更改共享或版本。
+            你在当前工作区为只读成员，可以查看和共享资源，不能更改版本或撤销已有共享。
           </p>
         )}
         {access.error && (

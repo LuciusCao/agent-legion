@@ -273,6 +273,11 @@ test('共享资源三任务接入真实平台，并覆盖版本历史、run 读�
     { headers: CSRF_HEADERS, data: { user_id: user.id, role: 'viewer' } }
   )
   expect(memberResponse.ok()).toBeTruthy()
+  const targetMemberResponse = await page.request.put(
+    `/api/workspaces/${targetId}/members`,
+    { headers: CSRF_HEADERS, data: { user_id: user.id, role: 'editor' } }
+  )
+  expect(targetMemberResponse.ok()).toBeTruthy()
   const viewerContext = await browser.newContext({
     baseURL: new URL(page.url()).origin,
     viewport: { width: 390, height: 844 },
@@ -295,7 +300,7 @@ test('共享资源三任务接入真实平台，并覆盖版本历史、run 读�
     viewerCard.getByRole('button', { name: '添加到工作流' })
   ).toBeDisabled()
   await expect(
-    viewerPage.getByText(/你在当前工作区为只读成员，可以查看资源/)
+    viewerPage.getByText(/你在当前工作区为只读成员，可以查看和共享资源/)
   ).toBeVisible()
   await expect(
     viewerPage.getByText('无法确认编辑权限，已按只读方式显示。')
@@ -303,9 +308,22 @@ test('共享资源三任务接入真实平台，并覆盖版本历史、run 读�
   await capture(viewerPage, '09-viewer-library-mobile')
   await viewerCard.getByRole('button', { name: '共享' }).click()
   await expect(
-    viewerPage.getByText('你在当前工作区为只读成员，不能更改共享设置。')
+    viewerPage.getByText(/可以共享到你有编辑权限的其他工作区，不能撤销已有共享/)
   ).toBeVisible()
-  await viewerPage.keyboard.press('Escape')
+  const viewerShareDialog = viewerPage.getByRole('dialog', {
+    name: `共享「${resourceName}」`,
+  })
+  await viewerShareDialog.getByLabel('目标工作区').selectOption(targetId)
+  await viewerShareDialog
+    .getByRole('button', { name: `共享到${targetName}` })
+    .click()
+  await expect(
+    viewerShareDialog.getByText(`此前已共享到${targetName}，无需重复操作。`)
+  ).toBeVisible()
+  await expect(
+    viewerShareDialog.getByRole('button', { name: '停止新任务使用' })
+  ).toHaveCount(0)
+  await viewerShareDialog.getByRole('button', { name: '关闭' }).click()
   await expect(
     viewerPage.getByRole('dialog', { name: `共享「${resourceName}」` })
   ).toBeHidden()
