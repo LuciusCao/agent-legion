@@ -77,7 +77,7 @@ def _dispatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Mag
 
     monkeypatch.setattr(agent_dispatch, "build_skill_manager", lambda *_a, **_k: MagicMock())
     monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", lambda **_k: MagicMock())
-    monkeypatch.setattr(agent_dispatch, "checkout", checkout_skill)
+    monkeypatch.setattr(agent_dispatch, "checkout_node_skill", checkout_skill)
     monkeypatch.setattr(agent_dispatch, "stage_agent_inputs", lambda *_a, **_k: None)
     monkeypatch.setattr(
         agent_dispatch, "build_agent_bundle", lambda path, **_k: path.write_text("bundle")

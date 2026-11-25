@@ -77,7 +77,7 @@ def _service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Magi
     )
     monkeypatch.setattr(agent_dispatch, "build_skill_manager", lambda *_a, **_k: MagicMock())
     monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", lambda **_k: MagicMock())
-    monkeypatch.setattr(agent_dispatch, "checkout", lambda *_a, **_k: checkout)
+    monkeypatch.setattr(agent_dispatch, "checkout_node_skill", lambda *_a, **_k: checkout)
     monkeypatch.setattr(
         agent_dispatch,
         "stage_agent_inputs",

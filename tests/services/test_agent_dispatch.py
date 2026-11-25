@@ -88,7 +88,7 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
         agent_dispatch, "build_skill_manager", lambda _root, _runs_dir=None: manager
     )
     monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", _pool)
-    monkeypatch.setattr(agent_dispatch, "checkout", checkout_node_skill)
+    monkeypatch.setattr(agent_dispatch, "checkout_node_skill", checkout_node_skill)
     monkeypatch.setattr(agent_dispatch, "stage_agent_inputs", stage_agent_inputs)
     monkeypatch.setattr(agent_dispatch, "render_command_spec", render_command_spec)
     monkeypatch.setattr(agent_dispatch, "build_agent_bundle", build_agent_bundle)
