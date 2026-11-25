@@ -53,4 +53,6 @@ class WorkflowNodeResponse(BaseModel):
     tools: list[str] = Field(default_factory=list)
     # #933：自含 agent 节点的 Worker 标签要求（Worker labels ⊇ 它）；只读。
     requires_labels: dict[str, str] = Field(default_factory=dict)
+    on_failure: dict[str, str] = Field(default_factory=dict)
+    failure_default: str = Field(default_factory=str)
     execution: WorkflowNodeExecutionResponse = Field(default_factory=WorkflowNodeExecutionResponse)

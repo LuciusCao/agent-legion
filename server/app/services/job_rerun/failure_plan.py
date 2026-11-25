@@ -41,8 +41,9 @@ def resolve_failure_rerun_targets(
                 job_id,
                 "rerun",
                 "skipped",
-                "no_matching_failure",
-                f"No latest failed run at or downstream of node {from_node_key!r}",
+                node_key=None,
+                reason_code="no_matching_failure",
+                message=f"No latest failed run at or downstream of node {from_node_key!r}",
             )
         return (from_node_key,), None
 

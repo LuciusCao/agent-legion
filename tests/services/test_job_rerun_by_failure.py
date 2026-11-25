@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
@@ -7,6 +8,7 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_batch_operations import JobBatchOpsFeeder, dispatch_rerun_by_failure
 from server.app.services.job_batch_operations.handlers import BatchOpsExecutors, run_chunk
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.job_rerun.preview import batch_rerun_preview
@@ -421,3 +423,69 @@ def test_busy_job_has_no_preview_targets_and_execute_does_not_mutate(rerun_servi
     assert executed[0]["status"] == "skipped"
     assert executed[0]["reason_code"] == "busy"
     assert _node_statuses(job_db, job["id"])["review_script"] == "failed"
+
+
+def test_from_node_without_matching_failure_result_contract(rerun_service, job_db, workspace):
+    job = _create_job(job_db, workspace, "Q-no-match-contract")
+    _fail_node(job_db, job, "review_script", "business", "review_rejected")
+
+    results = rerun_service.rerun_by_failure_category(
+        workspace["id"],
+        "business",
+        job_ids=[job["id"]],
+        from_node_key="publish_content",
+    )
+
+    assert results == [
+        {
+            "job_id": job["id"],
+            "operation": "rerun",
+            "status": "skipped",
+            "node_key": None,
+            "reason_code": "no_matching_failure",
+            "message": "No latest failed run at or downstream of node 'publish_content'",
+            "rerun_nodes": [],
+        }
+    ]
+
+
+def test_from_node_without_matching_failure_async_result_contract(
+    rerun_service, job_db, workspace, settings, monkeypatch
+):
+    jobs = [_create_job(job_db, workspace, f"Q-no-match-async-{index}") for index in range(2)]
+    for job in jobs:
+        _fail_node(job_db, job, "review_script", "business", "review_rejected")
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.service.BATCH_OPS_ASYNC_THRESHOLD", 1
+    )
+
+    _, operation = dispatch_rerun_by_failure(
+        job_db,
+        workspace["id"],
+        category="business",
+        strategy="auto",
+        from_node_key="publish_content",
+        job_ids=[job["id"] for job in jobs],
+        job_filter=None,
+        exclude_ids=(),
+        created_by="user:tester",
+    )
+    assert operation is not None
+    feeder = JobBatchOpsFeeder(job_db, settings, _feeder_executors(rerun_service))
+    for _ in range(100):
+        if not feeder.consume_once():
+            break
+    else:
+        raise AssertionError("feeder did not quiesce")
+
+    rows = job_db.list_job_batch_operation_results_page(str(operation["id"]), limit=10)
+    assert len(rows) == 2
+    for row in rows:
+        assert row["status"] == "skipped"
+        assert row["reason_code"] == "no_matching_failure"
+        assert row["message"] == "No latest failed run at or downstream of node 'publish_content'"
+        payload = json.loads(str(row["payload_json"]))
+        assert payload["node_key"] is None
+        assert payload["reason_code"] == "no_matching_failure"
+        assert payload["message"] == row["message"]
+        assert payload["rerun_nodes"] == []

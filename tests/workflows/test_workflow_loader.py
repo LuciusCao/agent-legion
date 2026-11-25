@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import yaml
 
+from server.app.routes.workflow_contracts import WorkflowDefinitionResponse
 from server.app.services.workflow_revision_format import (
     definition_hash,
     definition_to_yaml,
@@ -147,11 +148,10 @@ def test_failure_policy_round_trips_through_snapshot_and_yaml() -> None:
     restored = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
     echoed = workflow_definition_from_mapping(yaml.safe_load(definition_to_yaml(definition)))
 
-    response_node = next(
-        node
-        for node in workflow_definition_to_response_payload(definition)["nodes"]
-        if node["key"] == "draft"
+    response = WorkflowDefinitionResponse.model_validate(
+        workflow_definition_to_response_payload(definition)
     )
+    response_node = next(node for node in response.model_dump()["nodes"] if node["key"] == "draft")
     assert response_node["failure_default"] == "business"
     assert response_node["on_failure"]["unknown"] == "rerun_upstream"
     for loaded in (definition, restored, echoed):
@@ -169,13 +169,12 @@ def test_legacy_snapshot_without_failure_policy_keeps_empty_defaults() -> None:
 
     assert loaded.nodes["draft"].failure_default == ""
     assert loaded.nodes["draft"].on_failure == {}
-    response_node = next(
-        node
-        for node in workflow_definition_to_response_payload(loaded)["nodes"]
-        if node["key"] == "draft"
+    response = WorkflowDefinitionResponse.model_validate(
+        workflow_definition_to_response_payload(loaded)
     )
-    assert "failure_default" not in response_node
-    assert "on_failure" not in response_node
+    response_node = next(node for node in response.model_dump()["nodes"] if node["key"] == "draft")
+    assert response_node["failure_default"] == ""
+    assert response_node["on_failure"] == {}
 
 
 def test_undeclared_failure_policy_preserves_legacy_serialization_and_hash() -> None:

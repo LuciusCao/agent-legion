@@ -8760,6 +8760,8 @@ export interface components {
       /** Capability */
       capability: string
       execution?: components['schemas']['WorkflowNodeExecutionResponse']
+      /** Failure Default */
+      failure_default?: string
       /** Inputs */
       inputs: string[]
       /** Key */
@@ -8768,6 +8770,10 @@ export interface components {
       label: string
       /** Node Type */
       node_type?: string
+      /** On Failure */
+      on_failure?: {
+        [key: string]: string
+      }
       /** Outputs */
       outputs: string[]
       /** Requires Labels */
