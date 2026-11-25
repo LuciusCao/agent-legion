@@ -113,6 +113,21 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     # Bundle intake (materials-and-runs design §5, #156).
     ("POST", "/api/workspaces/{workspace_id}/material-bundles", None),
     ("DELETE", "/api/workspaces/{workspace_id}/material-bundles/{bundle_id}", None),
+    # Shared resource creation, authorization and explicit version selection (#1553).
+    ("POST", "/api/workspaces/{workspace_id}/shared-resources", None),
+    ("POST", "/api/workspaces/{workspace_id}/shared-resources/{resource_id}/versions", None),
+    ("POST", "/api/workspaces/{workspace_id}/shared-resources/{resource_id}/shares", None),
+    ("PUT", "/api/workspaces/{workspace_id}/shared-resources/{resource_id}/selection", None),
+    (
+        "DELETE",
+        "/api/workspaces/{workspace_id}/shared-resources/{resource_id}/versions/{version}",
+        None,
+    ),
+    (
+        "DELETE",
+        "/api/workspaces/{workspace_id}/shared-resources/{resource_id}/shares/{target_workspace_id}",
+        None,
+    ),
     # Workspace, secret, package, member and settings writes.
     ("POST", "/api/workspaces", None),
     ("PATCH", "/api/workspaces/{workspace_id}", None),
@@ -368,6 +383,9 @@ _PATH_PARAM_VALUES = {
     "material_id": "mat-x",
     "bundle_id": "bundle-x",
     "op_id": "op-x",
+    "resource_id": "resource-x",
+    "target_workspace_id": "target-ws",
+    "version": "1",
 }
 
 
