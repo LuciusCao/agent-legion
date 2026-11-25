@@ -8,6 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from server.app.executors._code_runtime import build_runtime
+from server.app.executors.cancellation import CancellationToken
+from server.app.executors.models import ExecutionContext
 from server.app.jobs.job_id_encoding import encode_job_id, encode_resource_job_id
 from server.app.jobs.storage_layout import job_storage_dir
 from server.app.routes.job_view_contracts import JobDetailResponse
@@ -36,7 +39,7 @@ from server.app.workflows.shared_resource_runtime import (
 from server.app.workflows.shared_resources import public_resource_pins
 from shared.material_cache import MaterializeError, cache_file_path
 from tests.services.shared_resources.conftest import SOURCE_WS, TARGET_WS
-from tests.services.shared_resources.helpers import create_resource, ready_material
+from tests.services.shared_resources.helpers import create_bundle, create_resource, ready_material
 
 
 def _publish(job_db, resource_id: str, workspace_id: str = TARGET_WS):
@@ -348,6 +351,95 @@ def test_host_dispatch_materializes_only_the_old_job_pin(
         )
         == {}
     )
+
+
+@pytest.mark.parametrize("input_kind", ["material", "bundle"])
+def test_build_runtime_pins_material_bundle_and_shared_resources_together(
+    input_kind,
+    job_db,
+    settings,
+    shared_service,
+    shared_materials,
+    shared_storage,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("AGENT_LEGION_MATERIAL_CACHE_MAX_BYTES", "5")
+    source_material = ready_material(
+        shared_materials, shared_storage, SOURCE_WS, b"rrrr", "rules.txt"
+    )
+    resource = create_resource(shared_service, SOURCE_WS, "material", source_material)
+    resource_id = str(resource["id"])
+    shared_service.share(SOURCE_WS, resource_id, target_workspace_id=TARGET_WS, actor_id="owner")
+    definition = _publish(job_db, resource_id)
+    ordinary_payload = b"mmmm" if input_kind == "material" else b"bbbb"
+    if input_kind == "bundle":
+        start = replace(
+            definition.start_node,
+            accepted_item_types=("material", "bundle"),
+        )
+        definition = replace(definition, nodes={**definition.nodes, start.key: start})
+        WorkflowRevisionService(job_db).publish_workspace_revision(TARGET_WS, definition)
+        bundle_id = create_bundle(
+            shared_materials,
+            shared_storage,
+            TARGET_WS,
+            [(ordinary_payload, "member.txt")],
+        )
+        item = {"type": "bundle", "bundle_id": bundle_id}
+    else:
+        material_id = ready_material(
+            shared_materials, shared_storage, TARGET_WS, ordinary_payload, "input.txt"
+        )
+        item = {"type": "material", "material_id": material_id}
+    created = _service(job_db, settings, shared_materials).create_run(
+        TARGET_WS, workflow_key=TARGET_WS, items=[item]
+    )
+    job = job_db.get_job(created["job_ids"][0])
+    cache_root = tmp_path / "joint-cache"
+    executor = SimpleNamespace(
+        job_db=job_db,
+        _materials_cache_root=cache_root,
+        _object_store=lambda: shared_storage,
+        _repo_root=tmp_path,
+        settings_config={},
+    )
+    context = ExecutionContext(
+        execution_id="exec-joint",
+        lease_id="lease-joint",
+        node_run_id=1,
+        executor_id="code",
+        workspace_id=TARGET_WS,
+        job_id=str(job["id"]),
+        workflow_key=TARGET_WS,
+        node_key="draft",
+        capability="draft",
+        workspace={"id": TARGET_WS},
+        job=job,
+        job_dir=tmp_path / "job",
+        log_path=tmp_path / "run.log",
+        inputs=(),
+        expected_outputs=(),
+    )
+
+    runtime = build_runtime(executor, context, CancellationToken())
+    ordinary_path = Path(runtime["materials"]["path"])
+    if input_kind == "bundle":
+        ordinary_path /= "member.txt"
+    shared_path = Path(runtime["shared_resources"][resource_id]["files"][0]["local_path"])
+    assert ordinary_path.read_bytes() == ordinary_payload
+    assert shared_path.read_bytes() == b"rrrr"
+    assert (
+        hashlib.sha256(ordinary_path.read_bytes()).hexdigest()
+        == hashlib.sha256(ordinary_payload).hexdigest()
+    )
+    opened = shared_storage.opened
+
+    cached = build_runtime(executor, context, CancellationToken())
+    assert shared_storage.opened == opened
+    assert ordinary_path.read_bytes() == ordinary_payload
+    assert Path(cached["materials"]["path"]).exists()
+    assert shared_path.read_bytes() == b"rrrr"
 
 
 def test_multi_resource_materialization_pins_the_whole_collection_during_eviction(

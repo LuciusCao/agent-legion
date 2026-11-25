@@ -73,7 +73,7 @@ def build_runtime(
     materials = prefetch_material_block(executor, context.job, str(context.workspace_id))
     if materials is not None:
         runtime["materials"] = materials
-    shared_resources = prefetch_shared_resource_block(executor, context, run)
+    shared_resources = prefetch_shared_resource_block(executor, context, run, materials=materials)
     if shared_resources:
         runtime["shared_resources"] = shared_resources
     # Shard executions (#389, #1356): local shard dispatch carries

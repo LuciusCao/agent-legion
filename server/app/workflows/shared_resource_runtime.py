@@ -14,7 +14,12 @@ from server.app.workflows.shared_resources import (
     resource_ids_for_node,
 )
 from shared.material_bundle import assemble_bundle_tree, bundle_address
-from shared.material_cache import MaterializeError, cache_file_path, materialize_stream
+from shared.material_cache import (
+    MaterializeError,
+    cache_file_path,
+    material_cache_address,
+    materialize_stream,
+)
 
 
 def _verify_file(path: Path, file: Mapping[str, Any]) -> None:
@@ -45,6 +50,8 @@ def materialize_resource_pins(
     pins: list[Mapping[str, Any]],
     cache_root: Path,
     storage: ObjectStorage | None,
+    *,
+    materials: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Materialize only explicit job pins; no selection/latest lookup exists here."""
     if not pins:
@@ -52,12 +59,20 @@ def materialize_resource_pins(
     object_storage = _storage(storage)
     prepared: list[tuple[Mapping[str, Any], list[dict[str, Any]], str]] = []
     pinned: set[Path] = set()
+    if materials and materials.get("path"):
+        pinned.add(Path(str(materials["path"])))
+        for entry in materials.get("entries") or []:
+            if entry.get("content_hash"):
+                pinned.add(cache_file_path(cache_root, str(entry["content_hash"])))
     for pin in pins:
         files = list(pin["files"])
         manifest = [(str(file["sha256"]), str(file["path"])) for file in files]
         address = bundle_address(manifest)
         prepared.append((pin, files, address))
-        pinned.update(cache_file_path(cache_root, sha256) for sha256, _ in manifest)
+        pinned.update(
+            cache_file_path(cache_root, material_cache_address(str(pin["resource_id"]), sha256, 0))
+            for sha256, _ in manifest
+        )
         pinned.add(cache_file_path(cache_root, address))
 
     result: dict[str, dict[str, Any]] = {}
@@ -108,7 +123,11 @@ def materialize_resource_pins(
 
 
 def prefetch_shared_resource_block(
-    executor: Any, context: Any, run: Mapping[str, Any] | None
+    executor: Any,
+    context: Any,
+    run: Mapping[str, Any] | None,
+    *,
+    materials: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     job_db = executor.job_db
     read_pins = getattr(job_db, "get_job_shared_resource_pins", None)
@@ -124,4 +143,5 @@ def prefetch_shared_resource_block(
         pins,
         executor._materials_cache_root,
         executor._object_store(),
+        materials=materials,
     )
