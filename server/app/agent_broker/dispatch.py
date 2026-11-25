@@ -55,10 +55,8 @@ class AgentDispatchService:
         # wiring; the settings DSN is the fallback for test-only brokers.
         broker_dsn = getattr(broker, "database_dsn", None) or settings.database_url
         self.skill_manager = build_skill_manager(broker_dsn, settings.skills_runs_dir)
-        enqueue_config = settings.executor_runtime.agent_enqueue
-        self.enqueue_pool = AgentEnqueuePool(
-            workers=enqueue_config.workers, max_pending=enqueue_config.max_pending
-        )
+        config = settings.executor_runtime.agent_enqueue
+        self.enqueue_pool = AgentEnqueuePool(workers=config.workers, max_pending=config.max_pending)
 
     def enqueue(
         self,
@@ -78,6 +76,7 @@ class AgentDispatchService:
         timeout_base: dict[str, Any] | None = None,
         profile_source: str = PROFILE_SOURCE_DEFINITION,
         node_profile_pin: Mapping[str, Any] | None = None,
+        skill_commit_pin: Mapping[str, Any] | None = None,
     ) -> bool:
         """Freeze the manifest + bundle and queue one Agent request.
 
@@ -102,7 +101,9 @@ class AgentDispatchService:
             sandbox_network=(node_config or {}).get("sandbox_network"),
         )
         execution_id = str(uuid.uuid4())
-        skill = checkout_node_skill(self.skill_manager, node, definition.skill, execution_id)
+        skill = checkout_node_skill(
+            self.skill_manager, node, definition.skill, execution_id, skill_commit_pin
+        )
         try:
             manifest: dict[str, Any] = {
                 "execution_id": execution_id,

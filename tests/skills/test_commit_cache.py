@@ -25,6 +25,7 @@ from server.app.skills.commit_cache import (
     materialized_commit_dir,
     materialized_private_copy,
     resolve_skill_commit,
+    resolve_unique_skill_commit_prefix,
     shared_cache_root,
 )
 from server.app.skills.errors import SkillRepoError
@@ -368,6 +369,40 @@ def test_resolve_skill_commit_matches_checkout_semantics(tmp_path: Path) -> None
     assert resolve_skill_commit(manager, _KEY, "v1") == tagged
     # A pinned ref freezes into the lock document on first resolution.
     assert manager.load_lock().skills[_KEY].refs["v1"] == tagged
+
+
+def test_legacy_prefix_resolution_uses_object_identity_not_moved_refs(tmp_path: Path) -> None:
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    original = _head_commit(repo)
+    _tag(repo, "v1")
+    _commit_skill_update(repo, "# moved\n")
+    _tag(repo, "v1", force=True)
+    manager = _make_manager(tmp_path)
+
+    assert resolve_unique_skill_commit_prefix(manager, _KEY, original[:12]) == original
+    assert manager.load_lock().skills == {}
+
+
+def test_ambiguous_legacy_prefix_is_an_actionable_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _make_skill_repo(tmp_path / "skills", _KEY)
+    manager = _make_manager(tmp_path)
+
+    def ambiguous(*_args):
+        raise SkillRepoError("short object id is ambiguous")
+
+    monkeypatch.setattr(manager, "_rev_parse", ambiguous)
+    with pytest.raises(SkillRepoError, match="does not resolve uniquely.*full 40-hex"):
+        resolve_unique_skill_commit_prefix(manager, _KEY, _head_commit(repo)[:12])
+
+
+def test_legacy_prefix_rejects_non_12_hex_without_git_io(tmp_path: Path) -> None:
+    _make_skill_repo(tmp_path / "skills", _KEY)
+    manager = _make_manager(tmp_path)
+
+    with pytest.raises(SkillRepoError, match="12 lowercase hex"):
+        resolve_unique_skill_commit_prefix(manager, _KEY, "HEAD")
 
 
 def test_malformed_commit_fails_closed(tmp_path: Path) -> None:

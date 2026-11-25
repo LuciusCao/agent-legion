@@ -117,6 +117,7 @@ def _enqueue(
     *,
     definition: AgentDefinition | None = None,
     node: WorkflowNode | None = None,
+    skill_commit_pin: dict[str, str] | None = None,
 ) -> bool:
     return harness.service.enqueue(
         agent_id="generator-v1",
@@ -129,6 +130,7 @@ def _enqueue(
         log_path=harness.tmp_path / "logs" / "job-1.log",
         inputs=("question.json",),
         node_config={"page_size": 25, "api_key": "must-not-leak", "unknown": "drop"},
+        skill_commit_pin=skill_commit_pin,
     )
 
 
@@ -211,7 +213,7 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
     checkout_args = harness.checkout_node_skill.call_args.args
     assert checkout_args[0] is harness.manager
     assert checkout_args[1].key == "generate"
-    assert checkout_args[2:] == ("question/generate", _EXECUTION_ID)
+    assert checkout_args[2:] == ("question/generate", _EXECUTION_ID, None)
     assert manifest["command_spec"] == {"command": ["pi", "--print"]}
     assert manifest["bundle_name"] == f"{_EXECUTION_ID}.tar.gz"
     assert manifest["execution"] == {
@@ -328,12 +330,30 @@ def test_node_skill_binding_wins_and_flows_into_manifest(harness: SimpleNamespac
 
     assert _enqueue(harness, definition=_definition(skill=""), node=node) is True
 
-    harness.checkout_node_skill.assert_called_once_with(harness.manager, node, "", _EXECUTION_ID)
+    harness.checkout_node_skill.assert_called_once_with(
+        harness.manager, node, "", _EXECUTION_ID, None
+    )
     manifest = dict(harness.broker.enqueue.call_args.args[0].manifest)
     assert manifest["skill"] == "question/node-generate"
     assert manifest["skill_ref"] == "v2"
     assert manifest["skill_version"] == f"v2@{'d' * 12}"
     assert harness.build_agent_bundle.call_args.kwargs["skill_dir"] == harness.skill_dir
+
+
+def test_replay_commit_pin_is_forwarded_to_exact_checkout(harness: SimpleNamespace) -> None:
+    node = _node(skill=WorkflowNodeSkill(key="question/generate", ref="latest"))
+    pin = {
+        "node_key": "generate",
+        "skill_key": "question/generate",
+        "skill_ref": "latest",
+        "skill_commit": "a" * 40,
+    }
+
+    assert _enqueue(harness, node=node, skill_commit_pin=pin) is True
+
+    harness.checkout_node_skill.assert_called_once_with(
+        harness.manager, node, "question/generate", _EXECUTION_ID, pin
+    )
 
 
 def test_enqueue_fails_when_neither_side_binds_a_skill(harness: SimpleNamespace) -> None:

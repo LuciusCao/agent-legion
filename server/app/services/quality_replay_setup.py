@@ -22,6 +22,7 @@ from server.app.services.job_errors import InvalidOperationError, JobServiceErro
 from server.app.services.node_config_batch import frozen_node_config, run_frozen_payload
 from server.app.services.node_profile_pins import PIN_KEY as NODE_PROFILES_PIN_KEY
 from server.app.services.quality_replay_profiles import ReplayProfile
+from server.app.services.skill_commit_pins import PIN_KEY as SKILL_COMMITS_PIN_KEY
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.capacity_metadata import node_capacity_requirements
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
@@ -80,6 +81,11 @@ class QualityReplaySetup:
         # the established run-id digest and reconstructed-payload shape.
         agent_versions: dict[str, Any] = {}
         node_profiles = {node.key: profile.pin} if profile is not None else {}
+        skill_commits = (
+            {node.key: profile.skill_pin}
+            if profile is not None and profile.skill_pin is not None
+            else {}
+        )
         # The digest payload mirrors the retired batch payload so the
         # deterministic run id is stable across the cutover; the authoritative
         # pins land on the run row and the frozen config on the copy job
@@ -103,6 +109,8 @@ class QualityReplaySetup:
                 "node_code_versions": node_code_versions,
                 "agent_versions": agent_versions,
                 NODE_PROFILES_PIN_KEY: node_profiles,
+                # #322: commit pins are replay authority only, never digest input.
+                **({SKILL_COMMITS_PIN_KEY: skill_commits} if skill_commits else {}),
             },
         )
         candidate = {

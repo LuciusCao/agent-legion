@@ -1064,7 +1064,9 @@ Token Usage 收集并展示 agent 节点（pi / velites runtime）运行时的 t
 ### Quality Replay 执行档案与历史 pin
 
 - 新建 agent replay 只接受 `revision_id` / `use_draft`；自含节点缺省回放原快照档案，legacy（v93 内联前或未能内联）节点必须显式选择带自含执行档案的 revision 或 draft。新副本冻结 `node_profiles` pin，digest 中保留空的 `agent_versions` 成员以维持既有 run-id 与 reconstructed payload 形状，但不再存在非空 legacy pin 新写入口。
+- **skill commit 级冻结（#322，EXEC-QUALITY-REPLAY-001）：**带 skill 的 replay 另在 `runs.frozen_pins_json` 写独立 `skill_commits[node_key] = {node_key, skill_key, skill_ref, skill_commit}`，不进入 run-id digest。缺省原 profile 只复用 `quality_sample_items.node_run_id` 精确指向的采样原完成执行完整 `skill_commit`，job/node/id 不匹配或该 run 非 completed 均不得退回同节点最新 completed run；旧记录只有 `ref@commit12` 时，仅在本地 git 对象库能唯一恢复完整 commit 时接受，缺失、冲突或歧义均在任何 replay/run/job 写入前 fail-closed，禁止回退当前 HEAD。选择 revision/draft 时冻结接受瞬间按该来源 ref 解析的 commit，绝不借用原 job commit；具体 ref 若尚未入锁，仅在这个选择路径按普通 first-pin 语义写入新锁项，原 profile replay 与后续 exact-commit enqueue 均不改锁。enqueue 校验 pin 的 node/key/ref 后按 40-hex commit 精确物化，manifest 保留原 `skill_ref` 与完整 `skill_commit`；普通 dispatch 的 latest=现场 HEAD、具体 ref=DB lock 语义不变。无 skill/code 节点不写此 pin，既有 replay/run 无需 DDL 或迁移。
 - **迁移错误（#936）：**旧客户端在 create body 中发送 `agent_version`（包括 `null`）得到 422，并收到改用 `revision_id` / `use_draft` 的明确指引；legacy 节点未作选择得到 400。两种拒绝都发生在 `quality_replays` / `runs` / `jobs` / `agent_execution_requests` 任何新写之前，不会静默丢弃请求里的 pin。
+- **pool 事务边界：**`create_replay` 先在只读事务取得 item/job/definition/node 后释放连接，resolver 的样本身份查询、revision/draft 读取与 git 解析均在不持有池连接的区段执行；`_reconcile_item_rows`、active guard 与 replay row insert 再进入同一个新写事务，防重复 replay 竞态且 pool max=1 不自等待。
 - **历史兼容：**replay 读取响应的 `agent_id` / `agent_version`、请求行与 `node_runs` 身份镜像均保留。存量 run 的 `agent_versions` 由 `node_profile_pins` 只读解析，仍按精确 version + definition hash fail-closed 执行；broker enqueue、claim、stale/unclaimable sweep 与 Worker 失联 requeue/recovery 语义不变。versioned_entities 的 Agent 归档行、pre-v93 rerun/upgrade resolver 和只读 catalog 不变，无 DDL。
 
 ### Quality Subsystem

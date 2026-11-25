@@ -94,11 +94,18 @@ class QualityReplayService:
                 )
             if agent_version is not None:
                 raise InvalidOperationError(_LEGACY_REPLAY_RETIRED)
-            profile = ReplayProfileResolver(self.job_db).resolve(
-                workspace_id, job, node, revision_id=revision_id, use_draft=use_draft
-            )
-            if profile is None and node.node_type == "agent":
-                raise InvalidOperationError(_LEGACY_REPLAY_RETIRED)
+        # Identity/revision reads and git resolution must not hold a pool connection.
+        profile = ReplayProfileResolver(self.job_db).resolve(
+            workspace_id,
+            job,
+            node,
+            revision_id=revision_id,
+            use_draft=use_draft,
+            node_run_id=item["node_run_id"],
+        )
+        if profile is None and node.node_type == "agent":
+            raise InvalidOperationError(_LEGACY_REPLAY_RETIRED)
+        with self.job_db.write() as conn:
             self._reconcile_item_rows(conn, item_id, node_key)
             active = conn.execute(
                 "select 1 from quality_replays"
@@ -214,7 +221,7 @@ class QualityReplayService:
     ) -> dict[str, Any]:
         row = conn.execute(
             """
-            select i.id, i.batch_id, i.job_id, i.node_key, i.agent_version
+            select i.id, i.batch_id, i.job_id, i.node_key, i.node_run_id, i.agent_version
             from quality_sample_items i
             join quality_sample_batches b on b.id = i.batch_id
             where i.id = %s and b.workspace_id = %s

@@ -1,10 +1,12 @@
-"""Ref-aware skill checkout for Agent dispatch and Host-side validation (#76, #330)."""
+"""Ref-aware ordinary checkout plus replay-only exact-commit export (#76, #322, #330)."""
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+from server.app.services.skill_commit_pins import validated_skill_commit
 from server.app.skills.manager import SkillManager
 from server.app.workflows.schema import WorkflowNode
 from server.app.workflows.skills import resolve_workflow_skill
@@ -60,9 +62,25 @@ def resolve_skill_checkout(
     return SkillCheckout(key, version[:-13], run_dir, commit, version)
 
 
-def checkout_node_skill(
-    skill_manager: SkillManager, node: WorkflowNode, agent_skill: str, execution_id: str
+def resolve_exact_skill_checkout(
+    skill_manager: SkillManager, key: str, ref: str, commit: str, execution_id: str
 ) -> SkillCheckout:
-    """Checkout the node's effective skill (see ``effective_node_skill``)."""
+    """Materialize a replay's exact commit without resolving or writing a ref lock."""
+    run_dir = skill_manager.checkout_skill_commit(key, execution_id, commit)
+    validate_run_dir(skill_manager, key, execution_id, run_dir)
+    return SkillCheckout(key, ref, run_dir, commit, f"{ref}@{commit[:12]}")
+
+
+def checkout_node_skill(
+    skill_manager: SkillManager,
+    node: WorkflowNode,
+    agent_skill: str,
+    execution_id: str,
+    commit_pin: Mapping[str, Any] | None = None,
+) -> SkillCheckout:
+    """Checkout the effective skill; a replay pin selects exact-commit export only."""
     key, ref = effective_node_skill(node, agent_skill)
-    return resolve_skill_checkout(skill_manager, key, execution_id, ref)
+    if commit_pin is None:
+        return resolve_skill_checkout(skill_manager, key, execution_id, ref)
+    commit = validated_skill_commit(node, key, ref, commit_pin)
+    return resolve_exact_skill_checkout(skill_manager, key, ref, commit, execution_id)

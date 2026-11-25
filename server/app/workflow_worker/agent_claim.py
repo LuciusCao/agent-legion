@@ -10,17 +10,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from server.app.db.rowmap import parse_object
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.services.agent_node_profile_types import (
     PROFILE_SOURCE_DEFINITION,
 )
 from server.app.services.node_config import dispatch_config_resolution
-from server.app.services.node_config_batch import run_frozen_payload
 from server.app.services.node_execution_config import (
     agent_effective_schema,
     node_config_reserved_defaults,
 )
 from server.app.services.node_profile_pins import agent_version_pin, node_profile_pin
+from server.app.services.run_payload import reconstruct_batch_payload
+from server.app.services.skill_commit_pins import PIN_KEY as SKILL_COMMITS_PIN_KEY
+from server.app.services.skill_commit_pins import skill_commit_pin
 from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_claim_profile import resolve_claim_profile
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
@@ -31,15 +34,22 @@ if TYPE_CHECKING:
 
 
 def cached_run_payload(worker: WorkflowWorkerThread, job: dict[str, Any]) -> dict[str, Any] | None:
-    """Per-pass memoized ``run_frozen_payload``: jobs share a handful of
-    runs, so one lookup per run per pass replaces one per candidate."""
+    """Per-pass memoized run payload, including replay-only extension pins."""
     run_id = job.get("run_id")
     if not run_id:
         return None
     cache = worker.state.batch_payload_cache
     key = str(run_id)
     if key not in cache:
-        cache[key] = run_frozen_payload(worker.job_db, job)
+        run = worker.job_db.get_run(key)
+        if run is None:
+            cache[key] = None
+        else:
+            payload = reconstruct_batch_payload(run, job)
+            pins = parse_object(run.get("frozen_pins_json"))
+            if SKILL_COMMITS_PIN_KEY in pins:
+                payload[SKILL_COMMITS_PIN_KEY] = pins[SKILL_COMMITS_PIN_KEY]
+            cache[key] = payload
     return cache[key]
 
 
@@ -117,6 +127,7 @@ def claim_agent_node(
     pin = agent_version_pin(run_payload, node.key)
     # #1079（D6）：回放按 revision / 草稿选执行档案时冻结 node_profiles pin。
     profile_pin = node_profile_pin(run_payload, node.key)
+    replay_skill_pin = skill_commit_pin(run_payload, node.key)
     profile = resolve_claim_profile(
         worker, str(workspace_id), agent_id, node, pin, profile_source, profile_pin
     )
@@ -166,6 +177,7 @@ def claim_agent_node(
                 execution_generation=execution_generation,
                 profile_source=profile_source,
                 node_profile_pin=profile_pin,
+                skill_commit_pin=replay_skill_pin,
             )
         except (ValueError, SkillRepoError) as exc:
             # SkillRepoError (git clone/fetch/checkout 失败) 是 RuntimeError

@@ -15,6 +15,9 @@ instead of Agent versions. This module owns that half of a replay:
     hash-keyed definition cache never mixes it with the original;
   * no choice + a legacy (not inlined) or code node → ``None``: legacy nodes
     must choose a self-contained profile; code nodes replay unpinned.
+  Skill content has a separate ``skill_commits`` pin (#322): original profiles
+  use the sampled ``node_run_id`` execution proof; selected profiles resolve their own ref at
+  acceptance. Neither is part of the profile hash or the run-id digest.
 - **options** — the revisions / draft a sample item can be replayed with.
 - **describe** — the pin a replay's copy run froze, for the replay views.
 
@@ -37,6 +40,10 @@ from server.app.services.node_profile_pins import (
     node_profile_fields,
     node_profile_hash,
 )
+from server.app.services.skill_commit_pins import (
+    capture_original_skill_pin,
+    resolve_selected_skill_pin,
+)
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowNode,
@@ -57,6 +64,8 @@ class ReplayProfile:
     #: Rewritten copy-job snapshot (+ its hash); None = reuse the original's.
     snapshot_json: str | None = None
     snapshot_hash: str = ""
+    #: Exact skill content selected for this replay; independent of the profile pin.
+    skill_pin: dict[str, Any] | None = None
 
 
 def _pin(revision_id: str | None, node: WorkflowNode) -> dict[str, Any]:
@@ -88,11 +97,15 @@ class ReplayProfileResolver:
         *,
         revision_id: str | None,
         use_draft: bool,
+        node_run_id: int | None = None,
     ) -> ReplayProfile | None:
         if revision_id is None and not use_draft:
             if not is_self_contained_agent_node(node):
                 return None
-            return ReplayProfile(pin=_pin(str(job["workflow_revision_id"] or "") or None, node))
+            return ReplayProfile(
+                pin=_pin(str(job["workflow_revision_id"] or "") or None, node),
+                skill_pin=capture_original_skill_pin(self.job_db, job, node, node_run_id),
+            )
         if revision_id is not None and use_draft:
             raise InvalidOperationError("choose either a workflow revision or the draft, not both")
         if node.node_type != "agent":
@@ -106,6 +119,7 @@ class ReplayProfileResolver:
             pin=_pin(revision_id, source),
             snapshot_json=snapshot,
             snapshot_hash=definition_hash(snapshot),
+            skill_pin=resolve_selected_skill_pin(self.job_db, source),
         )
 
     def options(
