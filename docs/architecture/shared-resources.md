@@ -59,7 +59,7 @@ Share 在授权时把当时最高 ready 版本写成目标的初始显式 select
 
 revoke 不修改 selection、版本、对象或既有 job pin，只停止新任务使用。来源 material/bundle 的后续删除、TTL 或 repair 不影响已发布版本，因为字节已复制到资源自有前缀。owner workspace 删除在同一事务设置 `owner_deleted_at` 并级联删除其自身 grant；Share/恢复授权、版本创建/重试/发布、授权列表、revoke、逻辑删除和创建幂等均要求 owner 未删除，旧资源不能由同名新实例接管。其他目标的 ready grant、显式选择、精确读取与 job pin 不因 owner 删除而失效。
 
-版本删除是逻辑删除：在版本行锁内统计所有 workspace 的 selection 与 `shared_resource_job_pins`，任一引用存在即 409；零引用时仅设置 `deleted_at`，响应明确 `physical_objects_deleted: false`。M43 必须在 accept 的同一事务中使用 `insert_job_pin_tx` 写 pin，该 helper 对版本取 `FOR KEY SHARE`，与删除守卫串行化；不得在 feeder/dispatch 回读当前 selection 或 latest。
+版本删除是逻辑删除：先以 `FOR UPDATE` 锁定 resource 行、与 owner tombstone 串行，再锁版本行并统计所有 workspace 的 selection 与 `shared_resource_job_pins`，任一引用存在即 409；零引用时仅设置 `deleted_at`，响应明确 `physical_objects_deleted: false`。M43 必须在 accept 的同一事务中使用 `insert_job_pin_tx` 写 pin，该 helper 对版本取 `FOR KEY SHARE`，与删除守卫串行化；不得在 feeder/dispatch 回读当前 selection 或 latest。
 
 `shared-resources/` 前缀从材料根孤儿扫描中排除，文件 key 同时并入 `artifact_key_gc` 的全局 DB 引用集。首版不自动物理删除已发布对象或失败残留，后续人工回收必须另做零引用复核与故障恢复，不能直接把该前缀加入材料删除道。
 
