@@ -182,7 +182,7 @@ export function AddItemsDialog({
     isSubmitting ||
     hasActiveUploads ||
     hasActiveBundles ||
-    sharedResources.isLoading ||
+    sharedResources.isFetching ||
     sharedResources.isError ||
     sharedResources.hasUnavailable ||
     !workflowKey

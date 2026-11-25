@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { existsSync } from 'node:fs'
 import type { components } from '../src/generated/api'
 import { ensureAdminSession } from './helpers'
 
@@ -25,6 +26,7 @@ async function capture(
   const output = process.env.UI_ACCEPTANCE_DIR
   if (!output) return
   const path = `${output}/1553-shared-resources/${filename}.png`
+  if (process.env.UI_ACCEPTANCE_ONLY_NEW === '1' && existsSync(path)) return
   if (selector) {
     await page.locator(selector).screenshot({ path, animations: 'disabled' })
     return
@@ -35,18 +37,40 @@ async function capture(
 async function createRunFromFirstMaterial(
   page: Page,
   resourceName: string,
-  version: number
+  version: number,
+  options?: { delayResourcesMs?: number }
 ): Promise<RunResponse> {
+  const delay = options?.delayResourcesMs ?? 0
+  if (delay > 0) {
+    await page.route(
+      `**/${SOURCE_WORKSPACE}/shared-resources?*`,
+      async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, delay))
+        await route.continue()
+      }
+    )
+  }
   await page.goto(`/workspaces/${SOURCE_WORKSPACE}`)
   await page.getByRole('button', { name: '添加', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '添加条目' })
   await dialog.getByRole('tab', { name: '已有材料' }).click()
   await dialog.getByRole('checkbox').first().check()
+  const createButton = dialog.getByRole('button', { name: '创建运行' })
+  if (delay > 0) {
+    await expect(createButton).toBeDisabled()
+    await expect(dialog.getByText('正在重新确认共享资源…')).toBeVisible()
+    await expect(
+      dialog.getByText(`${resourceName} v1`, { exact: true })
+    ).toHaveCount(0)
+    await capture(page, '05-run-confirmation-refetch-disabled-desktop')
+  }
   await expect(
     dialog.getByText(`${resourceName} v${version}`, { exact: true })
   ).toBeVisible()
-  const createButton = dialog.getByRole('button', { name: '创建运行' })
   await expect(createButton).toBeEnabled()
+  if (delay > 0) {
+    await page.unroute(`**/${SOURCE_WORKSPACE}/shared-resources?*`)
+  }
   await capture(page, `05-run-confirmation-v${version}-desktop`)
   const [response] = await Promise.all([
     page.waitForResponse(
@@ -127,7 +151,8 @@ test('共享资源三任务接入真实平台，并覆盖版本历史、run 读�
   await expect(
     page.locator('article').filter({ hasText: resourceName })
   ).toBeVisible()
-  await capture(page, '03-shared-target-desktop')
+  await expect(page.getByText('正在加载资源库…')).toHaveCount(0)
+  await capture(page, '03-shared-target-desktop-verified')
 
   // A：资源库 → Studio 节点选择 → 原有草稿发布 → 创建运行确认 v1。
   await page.goto(`/workspaces/${SOURCE_WORKSPACE}/resources`)
@@ -203,7 +228,9 @@ test('共享资源三任务接入真实平台，并覆盖版本历史、run 读�
   ).toBeVisible()
   await expect(page.getByRole('heading', { name: '文件差异' })).toBeVisible()
 
-  const secondRun = await createRunFromFirstMaterial(page, resourceName, 2)
+  const secondRun = await createRunFromFirstMaterial(page, resourceName, 2, {
+    delayResourcesMs: 1500,
+  })
   expect(secondRun.job_ids[0]).toBeTruthy()
   expect(secondRun.job_ids[0]).not.toBe(firstRun.job_ids[0])
   await page.goto(

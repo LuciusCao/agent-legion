@@ -30,6 +30,19 @@ export function sourceOptions(
   ]
 }
 
+export async function collectSourcePages<Item>(
+  loadPage: (offset: number) => Promise<{ items: Item[]; total: number }>
+): Promise<Item[]> {
+  const collected: Item[] = []
+  let offset = 0
+  for (;;) {
+    const page = await loadPage(offset)
+    collected.push(...page.items)
+    offset += page.items.length
+    if (page.items.length === 0 || offset >= page.total) return collected
+  }
+}
+
 export function newSubmissionKey(): string {
   return (
     globalThis.crypto?.randomUUID?.() ??

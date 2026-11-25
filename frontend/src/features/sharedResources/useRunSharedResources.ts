@@ -38,6 +38,8 @@ export function useRunSharedResources(
       }
     },
     enabled: enabled && Boolean(workspaceId),
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   const declaredIds = useMemo(
     () => workflowSharedResourceIds(workflowQuery.data?.definition_yaml ?? ''),
@@ -47,6 +49,8 @@ export function useRunSharedResources(
     queryKey: sharedResourceKeys.list(workspaceId ?? ''),
     queryFn: ({ signal }) => listSharedResources(workspaceId!, signal),
     enabled: enabled && Boolean(workspaceId) && declaredIds.length > 0,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   const resources = declaredIds.map((id) => {
     const resource = resourcesQuery.data?.resources.find(
@@ -67,6 +71,8 @@ export function useRunSharedResources(
     hasResources: declaredIds.length > 0,
     hasUnavailable: resources.some((resource) => resource.unavailable),
     isLoading: enabled && (workflowQuery.isLoading || resourcesQuery.isLoading),
+    isFetching:
+      enabled && (workflowQuery.isFetching || resourcesQuery.isFetching),
     isError: workflowQuery.isError || resourcesQuery.isError,
     refetch: () => {
       void workflowQuery.refetch()

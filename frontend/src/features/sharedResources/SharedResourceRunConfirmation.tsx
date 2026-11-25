@@ -7,8 +7,8 @@ export function SharedResourceRunConfirmation({
 }: {
   state: ReturnType<typeof useRunSharedResources>
 }) {
-  if (state.isLoading && !state.hasResources) {
-    return <p className={styles.help}>正在确认共享资源…</p>
+  if (state.isFetching) {
+    return <p className={styles.help}>正在重新确认共享资源…</p>
   }
   if (state.isError) {
     return (

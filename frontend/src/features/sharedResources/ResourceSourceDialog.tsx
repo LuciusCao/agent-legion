@@ -16,7 +16,11 @@ import type { MaterialListResponse } from '../../types'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { sharedResourceErrorMessage } from './sharedResourceError'
 import { sharedResourceKeys } from './sharedResourceQueryKeys'
-import { newSubmissionKey, sourceOptions } from './sharedResourceSource'
+import {
+  collectSourcePages,
+  newSubmissionKey,
+  sourceOptions,
+} from './sharedResourceSource'
 import type {
   MaterialBundleListResponse,
   SharedResource,
@@ -42,13 +46,25 @@ export function ResourceSourceDialog({
   const [error, setError] = useState('')
   const sourcesQuery = useQuery({
     queryKey: ['shared-resource-sources', workspaceId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       const path = `/api/workspaces/${encodeURIComponent(workspaceId)}`
       const [materials, bundles] = await Promise.all([
-        api<MaterialListResponse>(`${path}/materials?limit=200`),
-        api<MaterialBundleListResponse>(`${path}/material-bundles?limit=200`),
+        collectSourcePages(async (offset) => {
+          const page = await api<MaterialListResponse>(
+            `${path}/materials?limit=200&offset=${offset}`,
+            { signal }
+          )
+          return { items: page.materials, total: page.total }
+        }),
+        collectSourcePages(async (offset) => {
+          const page = await api<MaterialBundleListResponse>(
+            `${path}/material-bundles?limit=200&offset=${offset}`,
+            { signal }
+          )
+          return { items: page.bundles, total: page.total }
+        }),
       ])
-      return { materials: materials.materials, bundles: bundles.bundles }
+      return { materials, bundles }
     },
   })
   const options = useMemo(
