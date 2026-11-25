@@ -4907,6 +4907,8 @@ export interface components {
       reason_counts?: {
         [key: string]: number
       }
+      /** Selection Complete */
+      selection_complete?: boolean
       /** Skipped Count */
       skipped_count: number
       /**
@@ -5015,6 +5017,8 @@ export interface components {
       reason_counts?: {
         [key: string]: number
       }
+      /** Selection Complete */
+      selection_complete?: boolean
       /** Skipped Count */
       skipped_count: number
       /**

@@ -43,6 +43,7 @@ class JobBatchOperationResponse(FeedingGateFields):
     kind: JobBatchOperationKindParam
     status: JobBatchOperationStatus
     items_total: int = Field(ge=0)
+    selection_complete: bool = Field(default_factory=lambda: True)
     processed_count: int = Field(ge=0)
     succeeded_count: int = Field(ge=0)
     skipped_count: int = Field(ge=0)

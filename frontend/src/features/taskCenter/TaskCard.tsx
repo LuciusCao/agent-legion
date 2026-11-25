@@ -20,7 +20,19 @@ const STATUS_LABEL: Record<TaskCardStatus, string> = {
   cancelled: '已取消',
 }
 
+const COUNT_PREFIX: Partial<Record<TaskCardStatus, string>> = {
+  paused: '暂停前已处理',
+  cancelled: '取消前已处理',
+  failed: '失败前已处理',
+}
+
 function countLine(card: TaskCardModel): string {
+  if (card.selectionComplete === false) {
+    const known = `已知 ${card.total.toLocaleString()}+ 条`
+    const prefix = COUNT_PREFIX[card.status] ?? '已处理'
+    const suffix = card.status === 'running' ? '仍在计算' : '选择尚未完成'
+    return `${prefix} ${card.processed.toLocaleString()} · ${known}（${suffix}）`
+  }
   switch (card.status) {
     case 'queued':
       return `共 ${card.total.toLocaleString()} 条 · 等待开始`
@@ -54,11 +66,14 @@ export function TaskCard({
   workspacePaused?: boolean
   actions?: TaskCardActions
 }) {
+  const selecting =
+    card.selectionComplete === false && card.status === 'running'
   const percent =
-    card.total > 0
-      ? Math.min(100, Math.round((card.processed / card.total) * 100))
-      : 0
+    Math.min(100, Math.round((card.processed / card.total) * 100)) || 0
   const terminal = card.status === 'done' || card.status === 'partial'
+  const displayStatus = selecting ? 'selecting' : card.status
+  const text = selecting ? '选择计算中' : STATUS_LABEL[card.status]
+  const width = card.selectionComplete === false ? undefined : `${percent}%`
   return (
     <div
       className={`${styles.tcard} ${terminal ? styles.terminal : ''} ${
@@ -76,7 +91,7 @@ export function TaskCard({
         </span>
         <span className={`${styles.st} ${styles[card.status]}`}>
           <span className={styles.dot} />
-          {STATUS_LABEL[card.status]}
+          {text}
         </span>
       </div>
       <TaskCardGate card={card} workspacePaused={workspacePaused} />
@@ -85,13 +100,15 @@ export function TaskCard({
         {card.startedAt ? ` · ${formatDayTime(card.startedAt)} 发起` : ''}
       </div>
       <div
-        className={`${styles.pbar} ${styles[`pbar-${card.status}`]}`}
+        className={`${styles.pbar} ${styles[`pbar-${displayStatus}`]}`}
         role="progressbar"
-        aria-valuenow={percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
+        aria-label={selecting ? '正在计算选择集，总量未定' : undefined}
+        aria-valuetext={card.selectionComplete === false ? text : undefined}
+        aria-valuenow={card.selectionComplete === false ? undefined : percent}
       >
-        <div className={styles.fill} style={{ width: `${percent}%` }} />
+        {(card.selectionComplete !== false || selecting) && (
+          <div className={styles.fill} style={{ width }} />
+        )}
       </div>
       <div className={styles.tcCount}>{countLine(card)}</div>
       <div className={styles.tcDetail}>

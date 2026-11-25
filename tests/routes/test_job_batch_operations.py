@@ -103,6 +103,7 @@ def test_large_pause_returns_202_handle_and_completes(
     assert operation["kind"] == "pause"
     assert operation["status"] == "pending"
     assert operation["items_total"] == 2
+    assert operation["selection_complete"] is True
     assert operation["processed_count"] == 0
     assert operation["created_by"].startswith("user:")
     op_id = operation["id"]
@@ -117,6 +118,7 @@ def test_large_pause_returns_202_handle_and_completes(
     assert status.status_code == 200, status.text
     body = status.json()
     assert body["status"] == "completed"
+    assert body["selection_complete"] is True
     assert body["processed_count"] == 2
     assert (body["succeeded_count"], body["skipped_count"], body["failed_count"]) == (2, 0, 0)
     assert body["reason_counts"] == {}
@@ -358,6 +360,39 @@ def test_list_views_keyset_paging_and_item_shape(client: TestClient) -> None:
         ).status_code
         == 404
     )
+
+
+def test_list_exposes_frozen_stream_selection_completion(client: TestClient) -> None:
+    ws = _create_workspace(client)
+    _insert_operation(client, ws, "op-explicit", status="running")
+    _insert_operation(client, ws, "op-stream", status="running", items_total=2000)
+    _insert_operation(client, ws, "op-paused-stream", status="paused", items_total=1000)
+    job_db = client.app.state.job_db
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_batch_operations set target_spec_json=%s where id=%s",
+            ('{"job_ids": [], "stream": {"next_cursor": "2000"}}', "op-stream"),
+        )
+        conn.execute(
+            "update job_batch_operations set target_spec_json=%s where id=%s",
+            ('{"job_ids": [], "stream": {"next_cursor": "1000"}}', "op-paused-stream"),
+        )
+
+    body = client.get(f"/api/workspaces/{ws}/job-batch-operations").json()
+    by_id = {operation["id"]: operation for operation in body["operations"]}
+    assert by_id["op-explicit"]["selection_complete"] is True
+    assert by_id["op-stream"]["selection_complete"] is False
+    assert by_id["op-paused-stream"]["selection_complete"] is False
+
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_batch_operations set target_spec_json=%s, items_total=4000 where id=%s",
+            ('{"job_ids": [], "stream": {"next_cursor": null}}', "op-stream"),
+        )
+    body = client.get(f"/api/workspaces/{ws}/job-batch-operations").json()
+    completed = next(op for op in body["operations"] if op["id"] == "op-stream")
+    assert completed["selection_complete"] is True
+    assert completed["items_total"] == 4000
 
 
 def test_archive_endpoint_idempotent_and_guards(client: TestClient) -> None:
