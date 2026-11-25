@@ -56,6 +56,8 @@ vi.mock('./routes/pages', async () => {
     MonitoringPage: stub('monitoring'),
     TaskCenterPage: stub('task-center'),
     QualityPage: stub('quality'),
+    ResourceLibraryPage: stub('resource-library'),
+    ResourceManagePage: stub('resource-manage'),
     GlobalSettingsPage: stub('global-settings'),
     GlobalOnboardingPage: stub('agent-onboarding'),
   }

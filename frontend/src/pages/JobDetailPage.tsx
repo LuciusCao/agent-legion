@@ -14,6 +14,7 @@ import { useJobDetail } from './jobDetail/useJobDetail'
 import { useJobDetailActions } from './jobDetail/useJobDetailActions'
 import { useJobInspectDock } from './jobDetail/useJobInspectDock'
 import { EntityPanel } from './jobDetail/EntityPanel'
+import { SharedResourceUsageList } from '../features/sharedResources/SharedResourceUsage'
 
 export default function JobDetailPage() {
   const { workspaceId, jobId } = useParams<{
@@ -126,6 +127,10 @@ export default function JobDetailPage() {
           jobStatus={detail.job.status}
           artifacts={detail.artifacts}
         />
+      )}
+
+      {detail?.shared_resources && (
+        <SharedResourceUsageList resources={detail.shared_resources} />
       )}
 
       <div className={styles.columns}>

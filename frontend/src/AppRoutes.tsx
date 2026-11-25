@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { AuthGate } from './components/AuthGate'
 import AdminRoutes from './routes/AdminRoutes'
 import {
@@ -8,6 +8,8 @@ import {
   LoginPage,
   MonitoringPage,
   QualityPage,
+  ResourceLibraryPage,
+  ResourceManagePage,
   SettingsPage,
   SetupPage,
   TaskCenterPage,
@@ -33,7 +35,12 @@ export default function AppRoutes() {
           <Route index element={<WorkspaceMainPage />} />
           <Route path="jobs/:jobId" element={<JobDetailPage />} />
         </Route>
-        <Route path="/workspaces/:workspaceId">
+        <Route path="/workspaces/:workspaceId" element={<Outlet />}>
+          <Route path="resources" element={<ResourceLibraryPage />} />
+          <Route
+            path="resources/:resourceId"
+            element={<ResourceManagePage />}
+          />
           <Route path="tasks" element={<TaskCenterPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="token-usage" element={<TokenUsagePage />} />

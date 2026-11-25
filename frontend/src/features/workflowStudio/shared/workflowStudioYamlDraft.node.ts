@@ -73,6 +73,20 @@ export function patchWorkflowNodeTools(
   })
 }
 
+export function patchWorkflowNodeSharedResources(
+  rawYaml: string,
+  nodeKey: string,
+  resourceIds: string[]
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    if (resourceIds.length === 0) {
+      delete node.shared_resources
+      return
+    }
+    node.shared_resources = resourceIds
+  })
+}
+
 // M48：节点级 requires_labels（仅 agent 节点，运行通道字段）。空 mapping =
 // 未声明（任意可用 worker），与 tools 的「空即删键」语义一致。
 export function patchWorkflowNodeRequiresLabels(

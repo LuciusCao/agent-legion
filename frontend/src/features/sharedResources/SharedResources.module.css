@@ -1,0 +1,343 @@
+.main {
+  padding: 24px;
+}
+
+.page {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 20px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.title {
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.3;
+  color: #17202a;
+}
+
+.subtitle {
+  margin: 8px 0 0;
+  color: #667085;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.resourceList {
+  display: grid;
+  gap: 12px;
+}
+
+.resourceCard,
+.panel {
+  background: #fff;
+  border: 1px solid #e3e7ed;
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.resourceCard {
+  display: grid;
+  gap: 16px;
+}
+
+.resourceHeading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.resourceName {
+  margin: 0;
+  font-size: 18px;
+  color: #17202a;
+  overflow-wrap: anywhere;
+}
+
+.source {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.secondaryActions {
+  padding-top: 12px;
+  border-top: 1px solid #edf0f3;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 9px;
+  background: #f2f4f7;
+  color: #475467;
+  font-size: 12px;
+}
+
+.warningStatus {
+  background: #fff4e5;
+  color: #8a4b0f;
+}
+
+.state {
+  border: 1px solid #e3e7ed;
+  border-radius: 8px;
+  background: #fff;
+  padding: 32px 20px;
+  text-align: center;
+  color: #667085;
+}
+
+.stateTitle {
+  margin: 0 0 8px;
+  color: #344054;
+  font-size: 17px;
+}
+
+.error {
+  margin: 0;
+  color: #b42318;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.notice {
+  margin: 0;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #f2f6fc;
+  color: #475467;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.successNotice {
+  background: #edf8f0;
+  color: #237a3b;
+}
+
+.warningNotice {
+  background: #fff7e8;
+  color: #8a4b0f;
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+  min-width: min(460px, calc(100vw - 80px));
+  padding-top: 4px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.input,
+.select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  background: #fff;
+  color: #17202a;
+  font: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+.input:focus,
+.select:focus {
+  outline: 2px solid #84adff;
+  outline-offset: 1px;
+  border-color: #528bff;
+}
+
+.help {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.grantList,
+.versionList,
+.jobList {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+}
+
+.grantRow,
+.versionRow,
+.jobRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e7eaf0;
+  border-radius: 8px;
+}
+
+.grantName,
+.versionName,
+.jobName {
+  color: #344054;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.grantMeta,
+.versionMeta,
+.jobMeta {
+  margin-top: 4px;
+  color: #667085;
+  font-size: 13px;
+}
+
+.diffTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.diffTable th,
+.diffTable td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #edf0f3;
+  text-align: left;
+  vertical-align: top;
+}
+
+.diffTable th {
+  color: #667085;
+  font-weight: 500;
+}
+
+.diffPath {
+  overflow-wrap: anywhere;
+  color: #344054;
+}
+
+.details {
+  margin-top: 14px;
+  color: #475467;
+  font-size: 13px;
+}
+
+.details summary {
+  cursor: pointer;
+  color: #1570c2;
+  font-weight: 500;
+}
+
+.hash {
+  display: block;
+  margin-top: 8px;
+  color: #667085;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.usage {
+  border: 1px solid #e3e7ed;
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px 16px;
+}
+
+.usageTitle {
+  margin: 0 0 8px;
+  color: #344054;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.usageItems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: #475467;
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .main {
+    padding: 16px 12px;
+  }
+
+  .header {
+    display: grid;
+  }
+
+  .resourceCard,
+  .panel {
+    padding: 16px;
+  }
+
+  .actions {
+    align-items: stretch;
+  }
+
+  .actions :global(.MuiButton-root) {
+    min-height: 40px;
+  }
+
+  .form {
+    min-width: 0;
+    width: calc(100vw - 112px);
+  }
+
+  .diffTable,
+  .diffTable tbody,
+  .diffTable tr,
+  .diffTable td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .diffTable thead {
+    display: none;
+  }
+
+  .diffTable tr {
+    padding: 8px 0;
+    border-bottom: 1px solid #edf0f3;
+  }
+
+  .diffTable td {
+    border: 0;
+    padding: 4px 0;
+  }
+
+  .diffTable td::before {
+    content: attr(data-label);
+    display: inline-block;
+    min-width: 76px;
+    color: #667085;
+  }
+}

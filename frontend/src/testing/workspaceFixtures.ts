@@ -14,6 +14,7 @@ export function makeWorkspace(
     updated_at: new Date().toISOString(),
     resource_config: {},
     node_config: {},
+    current_user_role: 'editor',
     ...overrides,
   }
 }

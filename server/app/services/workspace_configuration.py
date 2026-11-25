@@ -26,6 +26,7 @@ from server.app.services.workspace_preview_settings import (
 from server.app.services.workspace_preview_settings import (
     write_preview_hidden,
 )
+from server.app.services.workspace_role_projection import project_current_user_roles
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_settings_schemas import (
     workspace_settings_payload_with_schemas,
@@ -77,7 +78,11 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def list_visible_workspaces(
-        self, *, member_user_id: str | None, bound_workspace_id: str | None
+        self,
+        *,
+        member_user_id: str | None,
+        bound_workspace_id: str | None,
+        current_user: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Workspace listing narrowed to what the caller may see (#711).
 
@@ -91,7 +96,10 @@ class WorkspaceConfigurationService:
             member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
         )
         workspaces = self.job_db.list_workspaces()
-        return workspaces if visible is None else [w for w in workspaces if w["id"] in visible]
+        visible_workspaces = (
+            workspaces if visible is None else [w for w in workspaces if w["id"] in visible]
+        )
+        return project_current_user_roles(visible_workspaces, current_user, self.job_db)
 
     def visible_workspace_ids(
         self, *, member_user_id: str | None, bound_workspace_id: str | None

@@ -3,6 +3,7 @@ import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 import { StudioStateContext, StudioViewContext } from './studioStateContext'
 import { useWorkflowStudio } from './useWorkflowStudio'
 import { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
+import { WorkflowStudioResourceDialog } from './WorkflowStudioResourceDialog'
 
 export function WorkflowStudioPageHost({
   workspaceId,
@@ -22,6 +23,7 @@ export function WorkflowStudioPageHost({
       <StudioViewContext.Provider value={view}>
         <AppShell>
           <WorkflowStudioLayout />
+          <WorkflowStudioResourceDialog />
         </AppShell>
       </StudioViewContext.Provider>
     </StudioStateContext.Provider>

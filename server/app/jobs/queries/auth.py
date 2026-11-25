@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from server.app.auth.sessions import session_expiry
-from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.workspace_roles import WorkspaceRoleQueriesMixin
 
 USER_ROLES = ("admin", "member")
 WORKSPACE_MEMBER_ROLES = ("editor", "viewer")
@@ -49,7 +49,7 @@ def _insert_session(conn: Any, token_hash: str, user_id: str) -> None:
     )
 
 
-class AuthQueriesMixin(ConnectionQueriesMixin):
+class AuthQueriesMixin(WorkspaceRoleQueriesMixin):
     """Persistence for users, sessions, and workspace membership."""
 
     # --- users -----------------------------------------------------------

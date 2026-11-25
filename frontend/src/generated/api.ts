@@ -9507,6 +9507,8 @@ export interface components {
     WorkspaceRecord: {
       /** Created At */
       created_at: string
+      /** Current User Role */
+      current_user_role?: ('admin' | 'editor' | 'viewer') | null
       /** Default Entity */
       default_entity: string
       /** Description */

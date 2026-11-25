@@ -59,6 +59,14 @@ export default function WorkspaceLayout() {
                   }}
                 />
                 <LabeledIconButton
+                  icon="folder_open"
+                  label="资源库"
+                  onClick={() =>
+                    workspaceId &&
+                    navigate(`/workspaces/${workspaceId}/resources`)
+                  }
+                />
+                <LabeledIconButton
                   icon={selectMode ? 'close' : 'checklist'}
                   label={selectMode ? '完成' : '多选'}
                   active={selectMode}

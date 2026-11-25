@@ -24,6 +24,7 @@ export type WorkflowYamlNode = {
   skill?: string | { key?: string; ref?: string }
   // #443：节点级工具声明（仅 agent 节点）；空/缺省 = 跟随 runtime 默认档。
   tools?: string[]
+  shared_resources?: string[]
   after?: string[]
   inputs?: string[]
   outputs?: string[]

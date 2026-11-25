@@ -6,7 +6,7 @@ import {
   type TaskCardStatus,
 } from './taskCardModel'
 import { TaskCardFooter, type TaskCardActions } from './TaskCardFooter'
-import { TaskCardGate } from './TaskCardGate'
+import { TaskCardRunGate } from './TaskCardRunGate'
 
 export type { TaskCardActions } from './TaskCardFooter'
 
@@ -94,7 +94,7 @@ export function TaskCard({
           {text}
         </span>
       </div>
-      <TaskCardGate card={card} workspacePaused={workspacePaused} />
+      <TaskCardRunGate card={card} workspacePaused={workspacePaused} />
       <div className={styles.tcMeta}>
         {card.refLabel} <span className={styles.mono}>{card.refId}</span>
         {card.startedAt ? ` · ${formatDayTime(card.startedAt)} 发起` : ''}

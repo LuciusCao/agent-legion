@@ -13,7 +13,9 @@ E2E PostgreSQL database is recreated per run, CMS question-detail lookups
 are served by an in-process stub (the ``cms-internal`` external connection
 is seeded to point at it), and the main-flow spec's velites Agent node
 talks to an in-process stub LLM gateway (OpenAI SSE) claimed through a
-standalone Worker process (``worker/executor.py``).
+standalone Worker process (``worker/executor.py``). When no S3 is configured,
+an isolated SeaweedFS container and random bucket are created before seeding
+and removed during teardown; an explicitly configured object store always wins.
 
 Example:
     uv run python scripts/e2e/run_browser_smoke.py [playwright spec filter...]
@@ -41,6 +43,7 @@ from scripts.e2e._demo_seed import seed_demo_workspace  # noqa: E402
 from scripts.e2e._llm_stub import StubGateway  # noqa: E402
 from scripts.e2e._main_flow_seed import resume_main_flow_workspace  # noqa: E402
 from scripts.e2e._preview_panel_seed import seed_probe_preview_panel  # noqa: E402
+from scripts.e2e._s3 import TemporaryObjectStorage, ensure_object_storage  # noqa: E402
 from scripts.e2e._worker import (  # noqa: E402
     ensure_velites_binary,
     prepare_main_flow_runtime,
@@ -197,6 +200,7 @@ def main() -> int:
     worker_proc: subprocess.Popen | None = None
     cms_stub = None
     llm_stub: StubGateway | None = None
+    object_storage: TemporaryObjectStorage | None = None
     returncode = 1
 
     try:
@@ -208,6 +212,8 @@ def main() -> int:
             shutil.rmtree(DATA_DIR)
         DATA_DIR.mkdir(parents=True)
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        object_storage = ensure_object_storage(DATA_DIR, PROJECT_ROOT.name)
+        os.environ.update(object_storage.env)
 
         ensure_velites_binary()
         cms_stub = start_cms_stub(cms_stub_port)
@@ -295,6 +301,8 @@ def main() -> int:
             cms_stub.server_close()
         if llm_stub is not None:
             llm_stub.close()
+        if object_storage is not None:
+            object_storage.close()
         elapsed = time.monotonic() - started
         logger.info("Total elapsed: %.1fs (results in %s)", elapsed, RESULTS_DIR)
     return returncode
