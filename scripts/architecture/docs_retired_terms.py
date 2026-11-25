@@ -60,6 +60,7 @@ _CURRENT_DOCS = (
     "docs/architecture/artifact-identity-state-space.md",
     "docs/architecture/node-sdk-and-worker-execution.md",
     "docs/architecture/materials-and-runs.md",
+    "docs/architecture/shared-resources.md",
     "docs/architecture/runs-async-mode.md",
     "docs/architecture/batch-ops-async.md",
     "docs/architecture/studio-draft-publish-contract.md",

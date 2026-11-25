@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from ..auth.studio_authoring import require_studio_authoring
 from ..auth.workspace_access import require_job_workspace_access, require_workspace_access
+from ..services.shared_resources.service import SharedResourcesService
 from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
@@ -23,6 +24,7 @@ from .preview_panels import create_preview_panels_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
 from .runtime_profile import create_runtime_profile_router
+from .shared_resources import create_shared_resource_share_router, create_shared_resources_router
 from .skill_directories import create_skill_directories_router
 from .skills import create_skills_router
 from .studio_agent_context import create_studio_agent_context_router
@@ -116,7 +118,14 @@ def assemble_router(deps: RouterDeps) -> APIRouter:
     if deps.workspace_api_token_store is not None:
         secured(create_workspace_api_tokens_router(deps.workspace_api_token_store))
     if deps.materials_service is not None:
-        secured(create_materials_router(deps.materials_service))
+        materials_service = deps.materials_service
+        secured(create_materials_router(materials_service))
+        shared_resources = SharedResourcesService(
+            deps.job_db,
+            storage_provider=lambda: materials_service.storage,
+        )
+        secured(create_shared_resources_router(shared_resources))
+        router.include_router(create_shared_resource_share_router(shared_resources))
     studio_secured(create_workflow_revisions_router(deps.job_db, deps.settings))
     studio_secured(create_workflow_node_codes_router(deps.job_db, deps.settings))
     studio_secured(create_agent_definitions_router(deps.job_db))
