@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.jobs.job_id_encoding import encode_job_id
+from server.app.jobs.job_id_encoding import encode_resource_job_id
 from server.app.jobs.queries.shared_resources.lifecycle import insert_job_pin_tx
 from server.app.workflows.shared_resources import resource_freeze_from_run
 
 
 def scoped_job_id(workspace_id: str, workflow_key: str, source_id: str, pins_hash: str) -> str:
-    base = encode_job_id(workspace_id, workflow_key, source_id)
-    # A fourth, unescaped segment cannot collide with the injective 3-segment form.
-    return f"{base}_shared-{pins_hash}" if pins_hash else base
+    return encode_resource_job_id(workspace_id, workflow_key, source_id, pins_hash)
 
 
 def insert_run_resource_pins(conn: Any, run_id: str, job_ids: list[str]) -> None:

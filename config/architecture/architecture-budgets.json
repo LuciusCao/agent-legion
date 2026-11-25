@@ -1460,7 +1460,7 @@
     "server/app/jobs/queries/shared_resources/__init__.py": 10,
     "server/app/jobs/queries/shared_resources/creation.py": 263,
     "server/app/jobs/queries/shared_resources/facade.py": 182,
-    "server/app/jobs/queries/shared_resources/job_bulk_pins.py": 36,
+    "server/app/jobs/queries/shared_resources/job_bulk_pins.py": 35,
     "server/app/jobs/queries/shared_resources/job_pins.py": 59,
     "server/app/jobs/queries/shared_resources/lifecycle.py": 297,
     "server/app/jobs/queries/shared_resources/reads.py": 78,

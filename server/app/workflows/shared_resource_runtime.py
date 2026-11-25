@@ -50,13 +50,18 @@ def materialize_resource_pins(
     if not pins:
         return {}
     object_storage = _storage(storage)
-    result: dict[str, dict[str, Any]] = {}
+    prepared: list[tuple[Mapping[str, Any], list[dict[str, Any]], str]] = []
+    pinned: set[Path] = set()
     for pin in pins:
         files = list(pin["files"])
         manifest = [(str(file["sha256"]), str(file["path"])) for file in files]
         address = bundle_address(manifest)
-        pinned = {cache_file_path(cache_root, sha256) for sha256, _ in manifest}
+        prepared.append((pin, files, address))
+        pinned.update(cache_file_path(cache_root, sha256) for sha256, _ in manifest)
         pinned.add(cache_file_path(cache_root, address))
+
+    result: dict[str, dict[str, Any]] = {}
+    for pin, files, address in prepared:
         materialized: list[tuple[Path, str]] = []
         for file in files:
             try:
