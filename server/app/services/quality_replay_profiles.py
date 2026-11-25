@@ -16,7 +16,7 @@ instead of Agent versions. This module owns that half of a replay:
   * no choice + a legacy (not inlined) or code node → ``None``: legacy nodes
     must choose a self-contained profile; code nodes replay unpinned.
   Skill content has a separate ``skill_commits`` pin (#322): original profiles
-  use the original execution proof; selected profiles resolve their own ref at
+  use the sampled ``node_run_id`` execution proof; selected profiles resolve their own ref at
   acceptance. Neither is part of the profile hash or the run-id digest.
 - **options** — the revisions / draft a sample item can be replayed with.
 - **describe** — the pin a replay's copy run froze, for the replay views.
@@ -97,13 +97,14 @@ class ReplayProfileResolver:
         *,
         revision_id: str | None,
         use_draft: bool,
+        node_run_id: int | None = None,
     ) -> ReplayProfile | None:
         if revision_id is None and not use_draft:
             if not is_self_contained_agent_node(node):
                 return None
             return ReplayProfile(
                 pin=_pin(str(job["workflow_revision_id"] or "") or None, node),
-                skill_pin=capture_original_skill_pin(self.job_db, job, node),
+                skill_pin=capture_original_skill_pin(self.job_db, job, node, node_run_id),
             )
         if revision_id is not None and use_draft:
             raise InvalidOperationError("choose either a workflow revision or the draft, not both")

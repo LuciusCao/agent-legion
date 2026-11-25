@@ -77,31 +77,36 @@ class UpgradeImplIdentityQueriesMixin(ConnectionQueriesMixin):
         acquire_implementation_publication_lock(conn, workspace_id)
 
     def latest_done_request_identities(
-        self, job_id: str, node_keys: Collection[str]
+        self, job_id: str, node_keys: Collection[str], node_run_id: int | None = None
     ) -> dict[str, tuple[str, str, str, str]]:
-        """node_key → 最新完成执行的 ``(kind, hash, skill_commit, skill_version)``。
+        """node_key → 完成执行的 ``(kind, hash, skill_commit, skill_version)``。
 
-        每个 node_key 先取最新一条 completed ``node_runs``。该 run 的身份
-        列非空时优先使用；为空时仅回落到 ``node_run_id`` 指向这条 run 的
-        done 请求。请求 manifest 同时投影 ``skill_commit`` /
-        ``skill_version``（trim 保留这些键）；即使 run 身份非空，也可从
-        同一请求取得完整 skill commit，比 run 的 12 位 version 后缀更强。
-        无 completed run → 该节点不在返回值里；最新 run 的两侧身份均空
-        → 返回空 hash，由调用方按「不可证明」处理。
+        默认每个 node_key 取最新一条 completed ``node_runs``（upgrade 行为不变）；
+        指定 ``node_run_id`` 时只读该次 completed run，job/node/id 不匹配或非
+        completed 均无记录，绝不退回最新 completed run。该 run 的身份列非空时
+        优先使用；为空时仅回落到 ``node_run_id`` 指向这条 run 的 done 请求。
+        请求 manifest 同时投影 ``skill_commit`` / ``skill_version``（trim 保留
+        这些键）；即使 run 身份非空，也可从同一请求取得完整 skill commit，比
+        run 的 12 位 version 后缀更强。两侧身份均空 → 返回空 hash，由调用方
+        按「不可证明」处理。
         """
         keys = sorted({str(key) for key in node_keys})
         if not keys:
             return {}
+        run_filter = " and id=%s" if node_run_id is not None else ""
+        params: list[Any] = [job_id, keys]
+        if node_run_id is not None:
+            params.append(node_run_id)
         with self._connect_read() as conn:
             rows = conn.execute(
-                """
+                f"""
                 with latest_runs as (
                   select distinct on (node_key)
                          id, node_key, agent_definition_hash, skill_version
                   from node_runs
                   where job_id=%s
                     and node_key=any(%s)
-                    and status='completed'
+                    and status='completed'{run_filter}
                   order by node_key, id desc
                 )
                 select n.node_key,
@@ -122,7 +127,7 @@ class UpgradeImplIdentityQueriesMixin(ConnectionQueriesMixin):
                   limit 1
                 ) r on true
                 """,
-                (job_id, keys),
+                params,
             ).fetchall()
         return {
             str(row["node_key"]): (

@@ -152,7 +152,31 @@ class _Env:
             )
         return revision_id
 
-    def prove_execution(self, commit: str, ref: str, *, version_ref: str | None = None) -> None:
+    def add_node_run(self, status: str = "completed") -> int:
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            row = conn.execute(
+                "insert into node_runs(job_id, node_key, status) values (%s, 'generate', %s)"
+                " returning id",
+                (self.job["id"], status),
+            ).fetchone()
+        return int(row["id"])
+
+    def set_sample_node_run(self, node_run_id: int) -> None:
+        with write_transaction(TEST_DATABASE_URL) as conn:
+            conn.execute(
+                "update quality_sample_items set node_run_id=%s where id='item-1'",
+                (node_run_id,),
+            )
+
+    def prove_execution(
+        self,
+        commit: str,
+        ref: str,
+        *,
+        version_ref: str | None = None,
+        node_run_id: int | None = None,
+    ) -> None:
+        run_id = self.node_run_id if node_run_id is None else node_run_id
         manifest = {
             "skill_commit": commit,
             "skill_version": f"{version_ref or ref}@{commit[:12]}",
@@ -163,16 +187,23 @@ class _Env:
                 "execution_id, workspace_id, job_id, node_key, agent_id,"
                 " agent_definition_hash, node_concurrency_limit, state, node_run_id,"
                 " queued_at, finished_at, manifest_json)"
-                " values ('proof-1', %s, %s, 'generate', 'generate', '', 1, 'done', %s,"
+                " values (%s, %s, %s, 'generate', 'generate', '', 1, 'done', %s,"
                 " current_timestamp, current_timestamp, %s)",
-                (self.workspace_id, self.job["id"], self.node_run_id, json.dumps(manifest)),
+                (
+                    f"proof-{run_id}",
+                    self.workspace_id,
+                    self.job["id"],
+                    run_id,
+                    json.dumps(manifest),
+                ),
             )
 
-    def prove_legacy_prefix(self, commit: str, ref: str) -> None:
+    def prove_legacy_prefix(self, commit: str, ref: str, *, node_run_id: int | None = None) -> None:
+        run_id = self.node_run_id if node_run_id is None else node_run_id
         with write_transaction(TEST_DATABASE_URL) as conn:
             conn.execute(
                 "update node_runs set skill_version=%s where id=%s",
-                (f"{ref}@{commit[:12]}", self.node_run_id),
+                (f"{ref}@{commit[:12]}", run_id),
             )
 
     def service(self) -> QualityReplayService:
@@ -464,6 +495,35 @@ def test_original_latest_freezes_executed_commit_after_head_moves_without_digest
     }
 
 
+def test_original_profile_freezes_the_sampled_run_not_the_latest_completed_run(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    repo, _manager = _real_skill(tmp_path, monkeypatch)
+    sampled = _head_commit(repo)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(sampled, "latest")
+    latest = _commit_skill_update(repo, "# newer execution and HEAD\n")
+    latest_run = env.add_node_run()
+    env.prove_execution(latest, "latest", node_run_id=latest_run)
+
+    # The optional facade filter leaves the upgrade default (latest completed) intact.
+    latest_identity = job_db.latest_done_request_identities(str(env.job["id"]), ["generate"])
+    assert latest_identity["generate"][2] == latest
+    assert (
+        job_db.latest_done_request_identities("another-job", ["generate"], node_run_id=latest_run)
+        == {}
+    )
+
+    replay = env.service().create_replay(env.workspace_id, "item-1")
+
+    _copy_job, pins = env.copy(replay)
+    assert pins["skill_commits"]["generate"]["skill_commit"] == sampled != latest
+    sampled_identity = job_db.latest_done_request_identities(
+        str(env.job["id"]), ["generate"], node_run_id=env.node_run_id
+    )
+    assert sampled_identity["generate"][2] == sampled
+
+
 def test_original_pinned_ref_survives_retag_and_relock(job_db, tmp_path, monkeypatch) -> None:
     repo, manager = _real_skill(tmp_path, monkeypatch)
     original = _tag(repo, "v1")
@@ -565,6 +625,28 @@ def test_original_legacy_prefix_restores_unique_old_commit_not_current_head(
     _copy_job, pins = env.copy(replay)
     assert pins["skill_commits"]["generate"]["skill_commit"] == original
     assert manager.load_lock().skills == {}
+
+
+def test_noncompleted_sample_never_falls_back_to_the_latest_completed_run(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    repo, _manager = _real_skill(tmp_path, monkeypatch)
+    env = _Env(job_db, _definition(_ORIGINAL, skill=_skill()))
+    env.prove_execution(_head_commit(repo), "latest")
+    failed_run = env.add_node_run("failed")
+    env.set_sample_node_run(failed_run)
+
+    assert (
+        job_db.latest_done_request_identities(
+            str(env.job["id"]), ["generate"], node_run_id=failed_run
+        )
+        == {}
+    )
+    with pytest.raises(InvalidOperationError, match="sampled node_run.*no completed"):
+        env.service().create_replay(env.workspace_id, "item-1")
+
+    assert env.service().list_replays(env.workspace_id, "item-1") == []
+    assert job_db.list_runs(env.workspace_id) == []
 
 
 def test_original_without_execution_proof_fails_before_any_replay_write(

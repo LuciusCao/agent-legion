@@ -3,7 +3,8 @@
 Ordinary dispatch is unchanged: ``latest`` resolves live HEAD and a concrete
 ref resolves through the DB lock. A replay instead carries an independent
 ``skill_commits[node_key]`` frozen pin. Original-profile replays prove the
-commit from the original completed execution; choosing a revision/draft
+commit from the sampled original execution (``quality_sample_items.node_run_id``);
+choosing a revision/draft
 resolves that source at acceptance time. Only the latter uses ordinary
 first-pin semantics for a previously unlocked concrete ref. Neither path
 rewrites an existing lock entry, and exact-commit enqueue never writes one.
@@ -54,16 +55,23 @@ def capture_original_skill_pin(
     job_db: JobQueries,
     job: dict[str, Any],
     node: WorkflowNode,
+    node_run_id: int | None = None,
     manager: SkillManager | None = None,
 ) -> dict[str, Any] | None:
-    """Freeze the original execution's proven commit, or fail closed."""
+    """Freeze the sampled original execution's proven commit, or fail closed."""
     binding = _node_binding(node)
     if binding is None:
         return None
     skill_key, ref = binding
-    record = job_db.latest_done_request_identities(str(job["id"]), [node.key]).get(node.key)
+    if node_run_id is None:
+        raise _proof_error(node.key, "the sample has no original node_run_id")
+    record = job_db.latest_done_request_identities(
+        str(job["id"]), [node.key], node_run_id=node_run_id
+    ).get(node.key)
     if record is None:
-        raise _proof_error(node.key, "no completed execution identity is recorded")
+        raise _proof_error(
+            node.key, f"sampled node_run {node_run_id} has no completed identity for this job/node"
+        )
     full_commit, skill_version = record[2], record[3]
     if full_commit and not _COMMIT_RE.fullmatch(full_commit):
         raise _proof_error(node.key, "the recorded skill_commit is not a full 40-hex sha")
