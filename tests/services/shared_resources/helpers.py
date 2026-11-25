@@ -36,11 +36,18 @@ def create_bundle(
     storage: FakeObjectStorage,
     workspace_id: str,
     members: list[tuple[bytes, str]],
+    member_hash_flags: list[bool] | None = None,
 ) -> str:
     bundle_members = []
-    for index, (payload, path) in enumerate(members):
+    hash_flags = member_hash_flags or [True] * len(members)
+    for index, ((payload, path), declare_hash) in enumerate(zip(members, hash_flags, strict=True)):
         material_id = ready_material(
-            materials, storage, workspace_id, payload, f"upload-{index}.txt"
+            materials,
+            storage,
+            workspace_id,
+            payload,
+            f"upload-{index}.txt",
+            declare_hash=declare_hash,
         )
         bundle_members.append({"material_id": material_id, "path": path})
     bundle = MaterialBundlesService(materials.connect_source).create(

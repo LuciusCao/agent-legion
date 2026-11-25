@@ -62,8 +62,8 @@ def materialize_resource_pins(
     if materials and materials.get("path"):
         pinned.add(Path(str(materials["path"])))
         for entry in materials.get("entries") or []:
-            if entry.get("content_hash"):
-                pinned.add(cache_file_path(cache_root, str(entry["content_hash"])))
+            if address := str(entry.get("cache_address") or entry.get("content_hash") or ""):
+                pinned.add(cache_file_path(cache_root, address))
     for pin in pins:
         files = list(pin["files"])
         manifest = [(str(file["sha256"]), str(file["path"])) for file in files]

@@ -353,7 +353,7 @@ def test_host_dispatch_materializes_only_the_old_job_pin(
     )
 
 
-@pytest.mark.parametrize("input_kind", ["material", "bundle"])
+@pytest.mark.parametrize("input_kind", ["material", "bundle", "hashless_bundle", "mixed_bundle"])
 def test_build_runtime_pins_material_bundle_and_shared_resources_together(
     input_kind,
     job_db,
@@ -373,18 +373,27 @@ def test_build_runtime_pins_material_bundle_and_shared_resources_together(
     shared_service.share(SOURCE_WS, resource_id, target_workspace_id=TARGET_WS, actor_id="owner")
     definition = _publish(job_db, resource_id)
     ordinary_payload = b"mmmm" if input_kind == "material" else b"bbbb"
-    if input_kind == "bundle":
+    if input_kind != "material":
         start = replace(
             definition.start_node,
             accepted_item_types=("material", "bundle"),
         )
         definition = replace(definition, nodes={**definition.nodes, start.key: start})
         WorkflowRevisionService(job_db).publish_workspace_revision(TARGET_WS, definition)
+        members = [(ordinary_payload, "member.txt")]
+        if input_kind == "mixed_bundle":
+            members.append((b"cccc", "other.txt"))
+        hash_flags = {
+            "bundle": None,
+            "hashless_bundle": [False],
+            "mixed_bundle": [False, True],
+        }[input_kind]
         bundle_id = create_bundle(
             shared_materials,
             shared_storage,
             TARGET_WS,
-            [(ordinary_payload, "member.txt")],
+            members,
+            member_hash_flags=hash_flags,
         )
         item = {"type": "bundle", "bundle_id": bundle_id}
     else:
@@ -423,8 +432,16 @@ def test_build_runtime_pins_material_bundle_and_shared_resources_together(
     )
 
     runtime = build_runtime(executor, context, CancellationToken())
+    if input_kind == "hashless_bundle":
+        entry = runtime["materials"]["entries"][0]
+        assert entry["content_hash"] == ""
+        assert entry["cache_address"].endswith("-v2g0")
+    elif input_kind == "mixed_bundle":
+        first, second = runtime["materials"]["entries"]
+        assert first["content_hash"] == "" and first["cache_address"].endswith("-v2g0")
+        assert second["cache_address"] == second["content_hash"]
     ordinary_path = Path(runtime["materials"]["path"])
-    if input_kind == "bundle":
+    if input_kind != "material":
         ordinary_path /= "member.txt"
     shared_path = Path(runtime["shared_resources"][resource_id]["files"][0]["local_path"])
     assert ordinary_path.read_bytes() == ordinary_payload

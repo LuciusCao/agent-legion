@@ -92,6 +92,7 @@ def _entries_block(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "path": str(member["path"]),
             "size_bytes": int(member.get("size_bytes") or 0),
             "content_hash": str(member.get("content_hash") or ""),
+            "cache_address": _member_address(member),
         }
         for member in members
     ]
