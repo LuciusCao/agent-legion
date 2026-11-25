@@ -5,6 +5,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from server.app.jobs.queries.shared_resources.run_accept import (
+    accepted_resource_pin,
+    run_pin_reference_count_tx,
+)
+
 from .creation import version_with_files_tx
 
 
@@ -23,20 +28,32 @@ def insert_job_pin_tx(
     job/resource pin is accepted only when every frozen identity field matches.
     """
     version = conn.execute(
-        "select id, manifest_hash from shared_resource_versions"
-        " where id=%s and resource_id=%s and status='ready' and deleted_at is null"
-        " for key share",
+        "select id, manifest_hash, deleted_at from shared_resource_versions"
+        " where id=%s and resource_id=%s and status='ready' for key share",
         (version_id, resource_id),
     ).fetchone()
     if version is None or str(version["manifest_hash"]) != manifest_hash:
         raise ValueError("shared resource pin does not match its ready version")
     grant = conn.execute(
-        "select id, workspace_id from shared_resource_grants"
-        " where id=%s and resource_id=%s and status='active' for key share",
+        "select id, workspace_id, status from shared_resource_grants"
+        " where id=%s and resource_id=%s for key share",
         (grant_id, resource_id),
     ).fetchone()
-    job = conn.execute("select workspace_id from jobs where id=%s", (job_id,)).fetchone()
+    job = conn.execute(
+        "select j.workspace_id, r.frozen_pins_json from jobs j"
+        " left join runs r on r.id=j.run_id where j.id=%s",
+        (job_id,),
+    ).fetchone()
     if grant is None or job is None or str(job["workspace_id"]) != str(grant["workspace_id"]):
+        raise ValueError("shared resource pin requires an active grant in the job workspace")
+    accepted = accepted_resource_pin(
+        job,
+        resource_id=resource_id,
+        version_id=version_id,
+        manifest_hash=manifest_hash,
+        grant_id=grant_id,
+    )
+    if not accepted and (version["deleted_at"] is not None or str(grant["status"]) != "active"):
         raise ValueError("shared resource pin requires an active grant in the job workspace")
     conn.execute(
         "insert into shared_resource_job_pins(job_id, resource_id, version_id, manifest_hash, grant_id)"
@@ -298,7 +315,7 @@ def delete_version_tx(
         (version_id,),
     ).fetchone()
     selection_count = int(selections["count"])
-    job_pin_count = int(pins["count"])
+    job_pin_count = int(pins["count"]) + run_pin_reference_count_tx(conn, version_id)
     if selection_count or job_pin_count:
         return {
             "status": "in_use",

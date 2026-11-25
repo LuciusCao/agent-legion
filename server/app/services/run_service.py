@@ -41,7 +41,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.db.rowmap import iso_optional, parse_object
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
@@ -52,6 +51,12 @@ from server.app.services.run_batches.feeding_gate import batch_with_feeding_gate
 from server.app.services.run_item_resolution import create_run_response, resolve_run_items
 from server.app.services.run_text_items import is_text_item, materialize_text_items
 from server.app.settings import Settings
+from server.app.workflows.run_record import run_record as _run_record
+from server.app.workflows.shared_resource_run import accept_resource_run
+from server.app.workflows.shared_resources import (
+    declarations_for,
+    resource_pins_hash,
+)
 
 if TYPE_CHECKING:
     from server.app.services.materials import MaterialsService
@@ -59,23 +64,6 @@ if TYPE_CHECKING:
 # Runs created from items carry this marker in source_kind; legacy rows keep
 # their intake source_kind for display (design §5.2).
 ITEMS_SOURCE_KIND = "items"
-
-
-def _run_record(row: dict[str, Any]) -> dict[str, Any]:
-    """Public run record; queue_payload (async intake working state) stays internal."""
-    return {
-        "id": str(row["id"]),
-        "workspace_id": str(row["workspace_id"]),
-        "source_kind": str(row["source_kind"]),
-        "status": str(row["status"]),
-        "created_count": int(row["created_count"]),
-        "error_message": str(row["error_message"] or ""),
-        "frozen_pins": parse_object(row.get("frozen_pins_json")),
-        "stats": parse_object(row.get("stats_json")),
-        "created_by": str(row["created_by"] or ""),
-        "created_at": iso_optional(row["created_at"]),
-        "updated_at": iso_optional(row["updated_at"]),
-    }
 
 
 class RunService:
@@ -145,7 +133,7 @@ class RunService:
         stored_items = [item for item in items if not is_text_item(item)]
         candidates = resolve_run_items(self.job_db, workspace_id, stored_items)
         node_config, node_code_versions = self.pipeline.resolve_node_setup(
-            definition, workspace, workspace_id, workflow_key
+            definition, workspace, workspace_id, workflow_key, allow_shared_resources=True
         )
         if len(stored_items) != len(items):
             start_node = definition.start_node
@@ -163,17 +151,42 @@ class RunService:
                 ),
             )
 
-        # Same dedup contract as intake: items whose (source_type, source_id)
-        # already has a job in this workflow drop out; accepted keys grow the
-        # set so intra-request duplicates filter exactly like pre-existing
-        # jobs (the probe's check-then-act race note lives on the pipeline).
-        fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates)
+        # Legacy runs keep the intake item-key dedup. Shared-resource runs add
+        # the accept-time pins hash, so an explicit selection revision creates
+        # a new execution instead of hitting the old version's job. Accepted
+        # keys grow the set for intra-request duplicates in both forms.
         digest_payload = {
             "workflow_key": workflow_key,
             "source_kind": ITEMS_SOURCE_KIND,
             "items": items,
             "node_config": node_config,
         }
+        accepted = accept_resource_run(
+            self.job_db,
+            workspace_id=workspace_id,
+            workflow_key=workflow_key,
+            source_kind=ITEMS_SOURCE_KIND,
+            digest_payload=digest_payload,
+            status="created",
+            node_code_versions=node_code_versions,
+            declarations=declarations_for(definition),
+        )
+        precreated, created, freeze = accepted or (None, False, {})
+        pins_hash = resource_pins_hash(freeze)
+        fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates, pins_hash)
+        if not fresh and accepted is not None:
+            assert precreated is not None
+            if not created:
+                healed = self.job_db.heal_failed_run_if_duplicate(
+                    workspace_id,
+                    workflow_key,
+                    ITEMS_SOURCE_KIND,
+                    {**digest_payload, "shared_resource_pins": pins_hash},
+                    align_created_count=True,
+                )
+                return create_run_response(_run_record(healed or precreated), [], len(items))
+            self.job_db.delete_run_without_jobs(str(precreated["id"]))
+            raise InvalidOperationError("No tasks were resolved from input")
         if not fresh:
             # #501：全量重复提交不再一律 400——同 digest 的 failed run（上次
             # 分块提交中途失败、所有 job 已由重试/他路补齐的场景）用同一
@@ -204,6 +217,8 @@ class RunService:
             definition=definition,
             node_config=node_config,
             notify=notify_schedulable_work,
+            precreated_run=precreated,
+            resource_pins_hash=pins_hash,
         )
         # Persist the final creation progress so the run row alone answers
         # the detail endpoint (legacy sync intake kept this only in memory).

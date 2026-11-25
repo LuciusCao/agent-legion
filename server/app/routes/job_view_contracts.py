@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from server.app.routes.job_client_token_contracts import JobClientTokenFields
 from server.app.routes.job_execution_control_contracts import ExecutionControlSummaryResponse
+from server.app.routes.run_contracts import RunSharedResourceRecord
 
 
 class JobNodeSummaryResponse(BaseModel):
@@ -144,3 +145,4 @@ class JobDetailResponse(BaseModel):
     nodes: list[JobNodeResponse]
     runs: list[NodeRunResponse]
     artifacts: list[str]
+    shared_resources: list[RunSharedResourceRecord] = Field(default_factory=list)

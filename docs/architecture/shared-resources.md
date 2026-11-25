@@ -48,18 +48,30 @@ Share 在授权时把当时最高 ready 版本写成目标的初始显式 select
 
 重复 Share 返回同一 grant 与 `duplicate: true`，对象数量不变。revoked grant 再次 Share 会恢复 active 并返回 `duplicate: false`。scoped token 不能执行任何资源共享写操作。
 
-版本选择相同版本且 revision 相符是幂等 no-op；实际升级或切回才将 revision 加一。revision 不符返回 409 与 `current_revision`，因此 v1→v2→v1 都能形成显式新选择且不会被旧请求覆盖。workflow YAML 不保存版本、selection revision 或 hash；M43 只声明稳定资源 ID。
+版本选择相同版本且 revision 相符是幂等 no-op；实际升级或切回才将 revision 加一。revision 不符返回 409 与 `current_revision`，因此 v1→v2→v1 都能形成显式新选择且不会被旧请求覆盖。workflow YAML 不保存版本、selection revision 或 hash，只声明稳定资源 ID。
+
+## Run 版本冻结与 Host 执行（M43）
+
+Host code 节点以 `shared_resources: [<resource_id>, ...]` 声明资源；列表元素只能是稳定 ID，mapping、`version` / `manifest_hash` / `binding_revision`、`latest`、`id@version` 与重复 ID 均在 definition load/publish 前拒绝。非 code 节点不能声明；带资源声明的 workflow 走旧 `/job-batches` 时 fail-closed，必须使用 `/runs`。
+
+同步与异步 accept 都在同一事务内对 grant 和选中版本取 `FOR KEY SHARE`，读取当时显式 selection 并写入 run 的 `frozen_pins_json.shared_resources`。内部 spec 包含 `node_key → resource_id`、精确 `version_id + manifest_hash + grant_id`、来源与逐文件公开元数据、`binding_revision` 和 canonical `pins_hash`。grant 锁与 selection CAS/revoke 串行，版本锁与逻辑删除串行；异步 feeder 只消费 accept 时写入 `target_spec` 的 pins hash，不重新读取 selection。
+
+去重键是原 item 键加 `pins_hash`，资源 job id 对完整 `(workspace_id, workflow_key, source_id, pins_hash)` 取 SHA256，固定小于文件系统 255 字节上限且不截断原始前缀；无资源 job id 保持原编码不变。相同 selection revision 的重复提交命中原 run/job；显式升级、切回（包括 v1→v2→v1）改变 revision 和 hash，因而产生新 run 与新 job。全量重复提交仍保留 #501：同 pins digest 的 failed run 在 job 已补齐时原子恢复 created、清错误并对齐实际 job 计数；成功 run 幂等返回不变。每个 chunk 的 job INSERT 与 `shared_resource_job_pins` 写入同一事务，pin helper 复核 run 已接受的精确身份；accept 后的 revoke 不阻断该 run 后续 feeder 写入，也不能改变旧 pin。版本删除同时把 run spec 视为引用，覆盖异步 accept 后尚无 job 的窗口。
+
+Host dispatch 只按 job pin 读取精确版本，revoked grant 或已逻辑删除版本仍可物化历史执行；不存在 current/latest 回读。文件经内容寻址缓存和只读目录树提供给 `ctx.shared_resources[resource_id]`，节点只见本节点声明的资源、版本、manifest hash、相对/本地路径与文件 hash，不见 storage key、grant 或 selection revision。共享资源首次下载前即计算整个资源集合的文件与目录地址，并把当前 runtime 的普通 material 文件、bundle 目录及其 entries 的精确 `cache_address`（含无 hash 成员的 `material_id-v2gN` 代次地址）纳入同一联合 pin，后续每次淘汰都保护全部 runtime 输入；普通材料与共享资源复用 `material_cache_address` / `bundle_address`，字节仍按需流式下载，不预读整个集合。下载和缓存命中都复核 size/SHA256，缺失、对象漂移、毒化缓存与跨资源淘汰均 fail-closed。普通 rerun 保留原 job pin，quality replay 从原 run 继承 spec 并给副本写入同一精确 pin。workflow upgrade 在 jobs UPDATE 前逐节点比较旧/新 snapshot 的稳定资源 ID 集合；新增、删除、替换或新节点声明都以 `shared_resource_declaration_changed` fail-closed，job/run/status/pin 不变，只有完全一致的声明可升级并继续使用原 pin，绝不按 current binding 补资源或改写旧 pin。损坏旧快照不直接当空声明：无 pin 且目标无声明时才走既有保守 clean/inherit 修复；已有 pin 或目标新增声明而无法证明一致时同样 skipped 且零变更。
+
+run/job 详情的 `shared_resources` 只投影资源名、来源、版本、manifest hash 与文件 path/SHA256/size/content_type；`binding_revision`、pins hash、grant/version 内部行身份与 storage key 不进入 API，主 UI 不暴露去重 revision。此切片只实现 Host code 物化；带声明的普通/shard 节点在远程 enqueue 前直接回退 Host，Worker 对任何非空资源声明或资源 payload 明确报错，绝不以空 mapping 执行。精确 pin 的 Worker claim/物化与协议支持属于 M44，本切片不提前实现。
 
 ## 精确读取、revoke 与删除
 
-`SharedResourcesService.resolve_exact_version` 是后续 run freeze 的内部接口，输入 `(workspace_id, resource_id, version, manifest_hash, for_new_run)`，输出精确版本与逐文件描述符。描述符包含内部 storage key，禁止直接作为 API 响应序列化。
+`SharedResourcesService.resolve_exact_version` 是精确 pin 的内部接口，输入 `(workspace_id, resource_id, version, manifest_hash, for_new_run)`，输出精确版本与逐文件描述符。描述符包含内部 storage key，禁止直接作为 API 响应序列化；run accept 使用带锁的 selection 快照接口，dispatch 使用 job pin 描述符，二者都不解析 latest。
 
 - `for_new_run=True`：grant 必须 active，版本必须 ready 且未删除；hash 不符、 revoked 或缺失均 fail-closed。
 - `for_new_run=False`：用于已冻结旧 job，允许 revoked grant 与逻辑删除版本，但仍要求精确 version + hash 和被授权 workspace。
 
 revoke 不修改 selection、版本、对象或既有 job pin，只停止新任务使用。来源 material/bundle 的后续删除、TTL 或 repair 不影响已发布版本，因为字节已复制到资源自有前缀。owner workspace 删除在同一事务设置 `owner_deleted_at` 并级联删除其自身 grant；Share/恢复授权、版本创建/重试/发布、授权列表、revoke、逻辑删除和创建幂等均要求 owner 未删除，旧资源不能由同名新实例接管。其他目标的 ready grant、显式选择、精确读取与 job pin 不因 owner 删除而失效。
 
-版本删除是逻辑删除：先以 `FOR UPDATE` 锁定 resource 行、与 owner tombstone 串行，再锁版本行并统计所有 workspace 的 selection 与 `shared_resource_job_pins`，任一引用存在即 409；零引用时仅设置 `deleted_at`，响应明确 `physical_objects_deleted: false`。M43 必须在 accept 的同一事务中使用 `insert_job_pin_tx` 写 pin，该 helper 对版本取 `FOR KEY SHARE`，与删除守卫串行化；不得在 feeder/dispatch 回读当前 selection 或 latest。
+版本删除是逻辑删除：先以 `FOR UPDATE` 锁定 resource 行、与 owner tombstone 串行，再锁版本行并统计所有 workspace 的 selection、`shared_resource_job_pins` 与已冻结 run spec，任一引用存在即 409；零引用时仅设置 `deleted_at`，响应明确 `physical_objects_deleted: false`。job 创建事务使用 `insert_job_pin_tx` 写 pin，该 helper 对版本取 `FOR KEY SHARE`，与删除守卫串行化；feeder/dispatch 不得回读当前 selection 或 latest。
 
 `shared-resources/` 前缀从材料根孤儿扫描中排除，文件 key 同时并入 `artifact_key_gc` 的全局 DB 引用集。首版不自动物理删除已发布对象或失败残留，后续人工回收必须另做零引用复核与故障恢复，不能直接把该前缀加入材料删除道。
 
@@ -68,4 +80,4 @@ revoke 不修改 selection、版本、对象或既有 job pin，只停止新任�
 - PostgreSQL fresh/v106→v107 upgrade/catalog parity、触发器不可变、授权可见性、源读目标写与 scoped-token 权限矩阵。
 - 第 k 文件复制失败、目标核验失败、缺 hash 补算、复制后来源漂移、同 token 重试与伪造 helper 成功的独立 mutation。
 - 重复 Share 零复制、目标独立选择、并发 CAS 单一赢家、升级/切回、revoke 新旧 pin 分界、来源删除、selection/job pin 零引用保护与 GC 前缀排除。
-- 对象 I/O 不持数据库事务；发布、选择与删除的状态判定和写操作在同一短事务内完成。M43/M44 的 run freeze、Host/Worker 物化与生产 UI 属于后续任务，本切片不宣称这些路径已可用。
+- 对象 I/O 不持数据库事务；发布、选择与删除的状态判定和写操作在同一短事务内完成。M43 的 sync/async accept、升级/切回去重、revoke 后旧 pin、replay、缺失/hash/缓存毒化与 pin 故障回滚由 `tests/services/shared_resources/test_run_freeze.py` 覆盖；声明、脱敏与 SDK 只读视图由 `tests/workflows/test_shared_resource_declarations.py` 覆盖。Worker 物化与生产 UI 属于后续任务。

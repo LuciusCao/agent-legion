@@ -39,6 +39,7 @@ class RunHealingQueriesMixin(ConnectionQueriesMixin):
         workflow_key: str,
         source_kind: str,
         digest_payload: dict[str, Any],
+        align_created_count: bool = False,
     ) -> dict[str, Any] | None:
         """Heal the deterministic-id run when it sits failed (#501).
 
@@ -46,8 +47,10 @@ class RunHealingQueriesMixin(ConnectionQueriesMixin):
         same run id as the submission that failed partway; an atomic guarded
         UPDATE (matching only status='failed') flips it back to 'created',
         clears error_message, and aligns created_count with the run's live
-        job count. None = no failed run under that id (caller keeps the
-        legacy "No tasks were resolved" 400). The status matches the
+        job count. ``align_created_count`` also covers a resource-run upsert
+        that already flipped failed→created but left a stale count; the default
+        preserves the legacy success-run behavior. None = no healable row under
+        that id (caller keeps the legacy "No tasks were resolved" 400). The status matches the
         partial-resume healing contract (RUN_UPSERT_CONFLICT's
         failed→created arm), not 'completed' — the run's jobs may still be
         mid-flight and 'created' is the honest state for that.
@@ -60,10 +63,15 @@ class RunHealingQueriesMixin(ConnectionQueriesMixin):
                 set status='created', error_message='',
                     created_count=(select count(*) from jobs where run_id=%s),
                     updated_at=current_timestamp
-                where id=%s and workspace_id=%s and status='failed'
+                where id=%s and workspace_id=%s and (
+                    status='failed' or (
+                        %s and status='created'
+                        and created_count<>(select count(*) from jobs where run_id=%s)
+                    )
+                )
                 returning *
                 """,
-                (run_id, run_id, workspace_id),
+                (run_id, run_id, workspace_id, align_created_count, run_id),
             ).fetchone()
         if row is None:
             return None

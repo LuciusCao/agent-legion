@@ -546,6 +546,7 @@ server/app/
 | RunBatchListResponse | BaseModel | batches: list[RunBatchListItem], next_cursor: str | None, active_count: int | app/routes/run_batches_contracts.py |
 | RunBatchArchiveResponse | BaseModel | batch: RunBatchListItem | app/routes/run_batches_contracts.py |
 | RunCreateRequest | BaseModel | items: list[RunItem], mode: Literal['sync', 'async'] | None | app/routes/run_contracts.py |
+| RunSharedResourceRecord | BaseModel | resource_id: str, name: str, version: int, manifest_hash: str, source: Shared... | app/routes/run_contracts.py |
 | RunRecord | BaseModel | id: str, workspace_id: str, source_kind: str, status: str, created_count: int... | app/routes/run_contracts.py |
 | RunCreateResponse | BaseModel | run: RunRecord, created_count: int, job_ids: list[str], skipped_count: int | app/routes/run_contracts.py |
 | RunListResponse | BaseModel | runs: list[RunRecord] | app/routes/run_contracts.py |

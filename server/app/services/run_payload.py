@@ -21,6 +21,7 @@ from typing import Any
 from server.app.db.rowmap import parse_object
 from server.app.jobs.run_freeze import candidate_input as candidate_input
 
+# Shared resources use their exact job-pin SDK view, not this legacy payload.
 _PIN_KEYS = ("node_code_versions", "agent_versions", "node_profiles", "quality_replay")
 
 
@@ -57,6 +58,9 @@ def sdk_batch_row(run: Mapping[str, Any] | None, job: Mapping[str, Any]) -> dict
     if run is None:
         return None
     row = dict(run)
+    public_pins = parse_object(row.get("frozen_pins_json"))
+    public_pins.pop("shared_resources", None)
+    row["frozen_pins_json"] = json.dumps(public_pins, ensure_ascii=False, sort_keys=True)
     row["source_payload_json"] = json.dumps(
         reconstruct_batch_payload(run, job), ensure_ascii=False, sort_keys=True
     )

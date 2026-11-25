@@ -36,7 +36,30 @@ check, ``verify_chunk_identities``) as a structured collision error.
 
 from __future__ import annotations
 
+import hashlib
+import json
+
 _DECODE = {"~": "~", "u": "_", "s": "/"}
+
+
+def encode_resource_job_id(
+    workspace_id: str, workflow_key: str, source_id: str, pins_hash: str
+) -> str:
+    """Bounded shared-resource job id over the complete execution identity.
+
+    The unbounded 3-segment form stays unchanged for ordinary jobs. Resource
+    jobs hash the entire tuple (including client tokens and the exact pins),
+    never a truncated prefix; identical pins retry identically while selection
+    revisions and distinct items produce independent ids (≤255 UTF-8 bytes).
+    """
+    if not pins_hash:
+        return encode_job_id(workspace_id, workflow_key, source_id)
+    identity = json.dumps(
+        [workspace_id, workflow_key, source_id, pins_hash],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"shared-resource-v1_{hashlib.sha256(identity).hexdigest()}"
 
 
 def _encode_segment(segment: str) -> str:

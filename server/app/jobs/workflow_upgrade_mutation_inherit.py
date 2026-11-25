@@ -78,7 +78,7 @@ def upgrade_job_workflow_inherit(
     全 rerun；``deleted_rows`` 携带 ``storage_key`` 供提交后 best-effort
     对象删除）。
     """
-    existing_rows = existing_node_states(conn, job_id)
+    existing_rows = existing_node_states(conn, job_id, workflow_definition_snapshot_json)
     kept_nodes = {
         key
         for key in inherit_nodes

@@ -25,6 +25,7 @@ from server.app.executors.models import ExecutionContext
 from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.material_cache import prefetch_material_block
 from server.app.services.run_payload import sdk_batch_row
+from server.app.workflows.shared_resource_runtime import prefetch_shared_resource_block
 from workspace_libs.node_sdk import auth_failure_marker_path
 
 if TYPE_CHECKING:
@@ -58,6 +59,7 @@ def build_runtime(
         "node_config": dict(context.node_config),
         "cancellation": token,
     }
+    run: Mapping[str, Any] | None = None
     if executor.job_db is not None:
         run_id = str(context.job.get("run_id") or "")
         if run_id:
@@ -71,6 +73,9 @@ def build_runtime(
     materials = prefetch_material_block(executor, context.job, str(context.workspace_id))
     if materials is not None:
         runtime["materials"] = materials
+    shared_resources = prefetch_shared_resource_block(executor, context, run, materials=materials)
+    if shared_resources:
+        runtime["shared_resources"] = shared_resources
     # Shard executions (#389, #1356): local shard dispatch carries
     # ``shard_index`` / ``shard_input`` on ``context.runtime``
     # (workflow_worker/shard_dispatch.py); mirror them into the child runtime

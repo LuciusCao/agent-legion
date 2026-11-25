@@ -129,6 +129,8 @@ class WorkflowNode:
     # empty means undeclared — dispatch falls back to the Agent definition's
     # tools. Only ``agent`` nodes may declare a non-empty list.
     tools: tuple[str, ...] = ()
+    # Stable shared-resource ids; exact versions freeze when a run is accepted.
+    shared_resources: tuple[str, ...] = ()
     # Worker label requirements of a self-contained agent node (#933): claim
     # requires Worker labels ⊇ these. Only ``agent`` nodes that also declare
     # ``execution.runtime`` may declare them (a half-filled profile is a

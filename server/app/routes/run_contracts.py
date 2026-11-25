@@ -13,6 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.run_batch_record import RunBatchRecord
 from server.app.routes.run_item_contracts import RunItem
+from server.app.routes.shared_resource_contracts import (
+    SharedResourceFileRecord,
+    SharedResourceSourceRecord,
+)
 
 
 class RunCreateRequest(BaseModel):
@@ -25,6 +29,15 @@ class RunCreateRequest(BaseModel):
     mode: Literal["sync", "async"] | None = None
 
 
+class RunSharedResourceRecord(BaseModel):
+    resource_id: str
+    name: str
+    version: int
+    manifest_hash: str
+    source: SharedResourceSourceRecord
+    files: list[SharedResourceFileRecord]
+
+
 class RunRecord(BaseModel):
     id: str
     workspace_id: str
@@ -33,6 +46,7 @@ class RunRecord(BaseModel):
     created_count: int
     error_message: str
     frozen_pins: dict[str, Any]
+    shared_resources: list[RunSharedResourceRecord] = Field(default_factory=list)
     stats: dict[str, Any]
     created_by: str
     created_at: str | None

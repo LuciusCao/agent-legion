@@ -24,6 +24,7 @@ from server.app.services.workspace_execution_configuration import (
 )
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.shared_resources import public_resource_pins
 
 _RUN_PATH_FIELDS = {"log_path", "run_dir", "session_dir"}
 _UNSET: Any = object()
@@ -183,6 +184,9 @@ class JobQueryService:
                 for run in self.job_db.list_node_runs(job_id)
             ],
             "artifacts": self._artifact_names(job),
+            "shared_resources": public_resource_pins(
+                self.job_db.get_job_shared_resource_pins(job_id)
+            ),
         }
 
     def workspace_runs(

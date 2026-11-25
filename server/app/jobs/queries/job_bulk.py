@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from server.app.jobs.job_id_encoding import encode_job_id
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
 from server.app.jobs.queries.job_bulk_identity import verify_chunk_identities
 from server.app.jobs.queries.job_bulk_rows import (
@@ -21,6 +20,10 @@ from server.app.jobs.queries.job_bulk_sql import (
     insert_jobs_batched,
     lock_job_mutations_sorted,
     lock_rows_for_key_share,
+)
+from server.app.jobs.queries.shared_resources.job_bulk_pins import (
+    insert_run_resource_pins,
+    scoped_job_id,
 )
 from server.app.jobs.run_freeze import candidate_input
 from server.app.jobs.storage_layout import job_storage_dir
@@ -58,11 +61,14 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         revision: dict[str, Any],
         needs_capacity_by_node: Mapping[str, bool] | None = None,
         frozen_config: Mapping[str, Any] | None = None,
+        resource_pins_hash: str = "",
     ) -> list[str]:
         """Insert one job per candidate of a run, in chunked transactions.
 
         Each job carries the run's frozen config + its own input doc
         (RUN-FREEZE-001); a same-run re-submitted job takes the new freeze.
+        Resource runs scope the job id by pins hash and write exact job pins
+        in the same chunk transaction; no current selection is read here.
 
         #467 A3 — chunked-commit protocol: ≤CREATE_CHUNK_ROWS-row chunks, one
         transaction each. Every chunk FOR KEY SHARE-locks exactly its own
@@ -99,7 +105,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
         job_refs: dict[str, tuple[str, str]] = {}
         for candidate in candidates:
             source_id = str(candidate["entity_id"])
-            job_id = encode_job_id(workspace_id, workflow_key, source_id)
+            job_id = scoped_job_id(workspace_id, workflow_key, source_id, resource_pins_hash)
             identity = (str(candidate["entity_type"]), source_id)
             if job_id in identities and identities[job_id] != identity:
                 raise ValueError(f"Job identity collision for {job_id}")
@@ -213,6 +219,7 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                         for node_key in node_keys
                     ],
                 )
+                insert_run_resource_pins(conn, run_id, sorted(owned_chunk))
                 # Checkpoint (3), #501: post-INSERT identity verification
                 # inside this chunk's transaction — the ON CONFLICT arm
                 # rebinds run/title/input (same-run rows only, #735) but never

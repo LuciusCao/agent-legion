@@ -22,6 +22,7 @@ Worker.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pickle
 import shutil
@@ -152,6 +153,22 @@ def prepare_code_execution(
     return PreparedCode(manifest=manifest, code_text=code_text, libs_root=extracted)
 
 
+def _has_shared_resources(manifest: Mapping[str, Any]) -> bool:
+    context = manifest.get("runtime_context")
+    if not isinstance(context, Mapping):
+        return bool(manifest.get("shared_resources"))
+    if manifest.get("shared_resources") or context.get("shared_resources"):
+        return True
+    job = context.get("job")
+    snapshot = job.get("workflow_definition_snapshot_json") if isinstance(job, Mapping) else None
+    if not snapshot:
+        return False
+    definition = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    nodes = definition.get("nodes") if isinstance(definition, Mapping) else None
+    node = nodes.get(str(manifest.get("node_key") or "")) if isinstance(nodes, Mapping) else None
+    return bool(node.get("shared_resources")) if isinstance(node, Mapping) else False
+
+
 def build_child_payload(
     manifest: dict[str, Any],
     code_text: str,
@@ -168,6 +185,8 @@ def build_child_payload(
     the payload rides stdin and is never written to disk. ``materials`` is
     the local materialization block for a material-input job (design §6.2),
     mirroring the Host-side ``runtime["materials"]``."""
+    if _has_shared_resources(manifest):
+        raise ValueError("shared resources require Host execution; Worker support arrives in M44")
     context = manifest.get("runtime_context")
     context = dict(context) if isinstance(context, Mapping) else {}
     node_config = manifest.get("config")

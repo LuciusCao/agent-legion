@@ -6,7 +6,7 @@ Design: docs/architecture/runs-async-mode.md.
 
 Accept does every CHEAP fail-fast check synchronously (workspace / active
 revision / item shape + entry contract / node config resolution + code freeze
-/ text-storage precondition), then persists the deterministic run row and the
+/ text-storage precondition / locked shared-resource selection freeze), then persists the deterministic run row and the
 ``run_batches`` state row and returns the 202 handle. Per-item resolution and
 dedup are deferred to the feeder — an all-duplicates async submission is a
 202 whose batch completes with ``jobs_created=0`` (the sync path's "No tasks
@@ -27,6 +27,7 @@ from server.app.services.run_item_client_token import drop_null_client_tokens
 from server.app.services.run_item_types import validate_run_item_types
 from server.app.services.run_text_items import is_text_item
 from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.shared_resource_run import accept_items_run
 
 if TYPE_CHECKING:
     from server.app.services.run_service import RunService
@@ -145,7 +146,7 @@ def accept_async_run(
             "(AGENT_LEGION_S3_BUCKET is unset); text items cannot be stored"
         )
     node_config, node_code_versions = service.pipeline.resolve_node_setup(
-        definition, workspace, workspace_id, workflow_key
+        definition, workspace, workspace_id, workflow_key, allow_shared_resources=True
     )
     digest_payload = {
         "workflow_key": workflow_key,
@@ -153,13 +154,15 @@ def accept_async_run(
         "items": items,
         "node_config": node_config,
     }
-    run = service.job_db.create_run(
-        workflow_key,
-        ITEMS_SOURCE_KIND,
-        digest_payload,
+    run, pins_hash = accept_items_run(
+        service.job_db,
+        definition=definition,
         workspace_id=workspace_id,
+        workflow_key=workflow_key,
+        source_kind=ITEMS_SOURCE_KIND,
+        digest_payload=digest_payload,
         status="created",
-        frozen_pins={"node_code_versions": node_code_versions},
+        node_code_versions=node_code_versions,
     )
     start_node = definition.start_node
     text_input = start_node.text_input if start_node is not None else None
@@ -169,6 +172,7 @@ def accept_async_run(
         "node_config": node_config,
         "node_code_versions": node_code_versions,
         "text_default_filename": text_input.filename if text_input is not None else "",
+        **({"resource_pins_hash": pins_hash} if pins_hash else {}),
     }
     service.job_db.create_run_batch(
         str(run["id"]), workspace_id, target_spec, len(items), created_by

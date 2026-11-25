@@ -84,6 +84,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["config_schema"] = node.config_schema
         if node.tools:
             raw_node["tools"] = list(node.tools)
+        if node.shared_resources:
+            raw_node["shared_resources"] = list(node.shared_resources)
         # #933: self-contained agent profile labels (runtime echoes with
         # the execution block above).
         if node.requires_labels:

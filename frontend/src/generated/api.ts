@@ -5272,6 +5272,8 @@ export interface components {
       nodes: components['schemas']['JobNodeResponse'][]
       /** Runs */
       runs: components['schemas']['NodeRunResponse'][]
+      /** Shared Resources */
+      shared_resources?: components['schemas']['RunSharedResourceRecord'][]
     }
     /** JobFacetsResponse */
     JobFacetsResponse: {
@@ -6977,6 +6979,8 @@ export interface components {
       }
       /** Id */
       id: string
+      /** Shared Resources */
+      shared_resources?: components['schemas']['RunSharedResourceRecord'][]
       /** Source Kind */
       source_kind: string
       /** Stats */
@@ -6989,6 +6993,20 @@ export interface components {
       updated_at: string | null
       /** Workspace Id */
       workspace_id: string
+    }
+    /** RunSharedResourceRecord */
+    RunSharedResourceRecord: {
+      /** Files */
+      files: components['schemas']['SharedResourceFileRecord'][]
+      /** Manifest Hash */
+      manifest_hash: string
+      /** Name */
+      name: string
+      /** Resource Id */
+      resource_id: string
+      source: components['schemas']['SharedResourceSourceRecord']
+      /** Version */
+      version: number
     }
     /** RunToRequest */
     RunToRequest: {

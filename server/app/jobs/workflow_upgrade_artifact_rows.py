@@ -11,6 +11,9 @@ from typing import Any
 
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs.artifact_row_retire import retire_artifact_rows_by_name
+from server.app.jobs.workflow_upgrade_shared_resources import (
+    assert_shared_resource_declarations_unchanged,
+)
 
 
 def delete_reset_artifact_rows(
@@ -73,8 +76,14 @@ def delete_all_artifact_rows(
     return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
 
-def existing_node_states(conn: DatabaseConnection, job_id: str) -> dict[str, Any]:
+def existing_node_states(
+    conn: DatabaseConnection, job_id: str, workflow_definition_snapshot_json: str | None = None
+) -> dict[str, Any]:
     """job_nodes 现有行 → {node_key: status}（升级事务内读取）。"""
+    if workflow_definition_snapshot_json is not None:
+        assert_shared_resource_declarations_unchanged(
+            conn, job_id, workflow_definition_snapshot_json
+        )
     rows = conn.execute(
         "select node_key, status from job_nodes where job_id=%s", (job_id,)
     ).fetchall()
