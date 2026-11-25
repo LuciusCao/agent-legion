@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -394,6 +395,102 @@ def test_replacement_or_truncation_rebaselines_without_replaying_stale_end(wire,
     watcher.step()
     assert runtime.compacting is False
     assert [event["event"] for event in _events(db, sid)] == ["compact_start", "compact_done"]
+
+
+@pytest.mark.parametrize("boundary", ["mirror", "append"])
+def test_legacy_begin_cannot_be_overtaken_by_wire_end(wire, monkeypatch, boundary):
+    service, db, sid, _workspace, runtime, watcher, path = wire
+    entered, release, wire_done = threading.Event(), threading.Event(), threading.Event()
+    mirrors: list[bool] = []
+    real_update = db.update_studio_chat_session
+    real_append = service.store.append_message
+
+    def ordered_update(session_id, **fields):
+        if "compacting" in fields:
+            mirrors.append(fields["compacting"])
+        if boundary == "mirror" and fields.get("compacting") is True and not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=30)
+        return real_update(session_id, **fields)
+
+    def ordered_append(session_id, kind, role, content):
+        if (
+            boundary == "append"
+            and content.get("event") == "compact_start"
+            and not entered.is_set()
+        ):
+            entered.set()
+            assert release.wait(timeout=30)
+        return real_append(session_id, kind, role, content)
+
+    monkeypatch.setattr(db, "update_studio_chat_session", ordered_update)
+    monkeypatch.setattr(service.store, "append_message", ordered_append)
+    _append(path, END)
+    legacy = threading.Thread(
+        target=service._on_update, args=(sid, _chunk("Compacting conversation context"))
+    )
+    legacy.start()
+    assert entered.wait(timeout=30)
+
+    def run_wire() -> None:
+        watcher.step()
+        wire_done.set()
+
+    wire_thread = threading.Thread(target=run_wire)
+    wire_thread.start()
+    overtook = wire_done.wait(timeout=0.2)
+    release.set()
+    legacy.join(timeout=30)
+    wire_thread.join(timeout=30)
+    assert not legacy.is_alive() and not wire_thread.is_alive()
+    assert not overtook
+    assert mirrors == [True, False]
+    assert runtime.compacting is False and runtime.compact_timer is None
+    assert db.get_studio_chat_session(sid)["compacting"] is False
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start", "compact_done"]
+
+
+def test_wire_publish_failure_legacy_done_retry_and_new_window(wire, monkeypatch):
+    service, db, sid, _workspace, runtime, watcher, path = wire
+    publish = service.store.publish_session
+    append = service.store.append_message
+    starts = 0
+    failing = True
+
+    def flaky_publish(session_id):
+        if failing:
+            raise RuntimeError("wire publish failed")
+        return publish(session_id)
+
+    def count_start(session_id, kind, role, content):
+        nonlocal starts
+        if content.get("event") == "compact_start":
+            starts += 1
+        return append(session_id, kind, role, content)
+
+    monkeypatch.setattr(service.store, "publish_session", flaky_publish)
+    monkeypatch.setattr(service.store, "append_message", count_start)
+    _append(path, BEGIN)
+    with pytest.raises(RuntimeError, match="wire publish failed"):
+        watcher.step()
+    assert starts == 1 and len(watcher.pending) == 1
+
+    failing = False
+    service._on_update(sid, _chunk("Compaction completed."))
+    watcher.step()
+    assert watcher.pending == [] and runtime.compacting is False
+    assert starts == 1
+    assert [event["event"] for event in _events(db, sid)] == ["compact_start", "compact_done"]
+
+    _append(path, BEGIN)
+    watcher.step()
+    assert runtime.compacting is True
+    assert starts == 2
+    assert [event["event"] for event in _events(db, sid)] == [
+        "compact_start",
+        "compact_done",
+        "compact_start",
+    ]
 
 
 def test_db_backlog_pauses_journal_and_retries_without_losing_or_duplicating(wire, monkeypatch):

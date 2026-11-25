@@ -48,8 +48,9 @@ def apply_marker_gated(
     has advanced or closed that window.
 
     #694 review R3-P1 (atomicity): every gate field (kimi_agent /
-    turn_open / turn_may_compact / compacting) is written under
-    runtime.lock, so they are RE-READ here under the same lock that
+    turn_open / turn_may_compact / compacting) and every timer/DB/timeline
+    side effect runs under runtime.lock (reentrant for the watcher), so they
+    are RE-READ here under the same lock that
     send_message's late gate (compaction.late_gate_blocked) and the
     turn-close hooks take. A marker thread and a send thread now serialize
     in a total order: the marker either applies before the send's critical
@@ -86,29 +87,29 @@ def apply_marker_gated(
             progress["generation"] = runtime.compaction_generation
             progress["notify"] = not already
             progress["since"] = runtime.compacting_since
-    if not progress.get("timer"):
-        if marker == "start":
-            compact_timer.arm_self_clear(
-                backend, session_id, runtime, progress["since"], timeout=timeout
-            )
-        else:
-            compact_timer.cancel_self_clear(runtime)
-        progress["timer"] = True
-    if not progress.get("mirrored"):
-        backend.db.update_studio_chat_session(session_id, compacting=marker == "start")
-        progress["mirrored"] = True
-    if progress["notify"] and not progress.get("appended"):
-        # Duplicate lifecycle signal: one timeline notice per transition.
-        if marker == "start":
-            content: dict[str, Any] = {
-                "event": "compact_start",
-                "detail": "正在压缩上下文，期间发送的消息可能被静默丢弃，请等压缩完成后再发送",
-            }
-        elif text.strip().startswith("Compaction cancelled."):
-            content = {"event": "compact_done", "detail": "上下文压缩已取消，可继续发送"}
-        else:
-            content = {"event": "compact_done", "detail": text.strip()}
-        backend.store.append_message(session_id, "status", "system", content)
-        progress["appended"] = True
-    backend.store.publish_session(session_id)
-    return True
+        if not progress.get("timer"):
+            if marker == "start":
+                compact_timer.arm_self_clear(
+                    backend, session_id, runtime, progress["since"], timeout=timeout
+                )
+            else:
+                compact_timer.cancel_self_clear(runtime)
+            progress["timer"] = True
+        if not progress.get("mirrored"):
+            backend.db.update_studio_chat_session(session_id, compacting=marker == "start")
+            progress["mirrored"] = True
+        if progress["notify"] and not progress.get("appended"):
+            # Duplicate lifecycle signal: one timeline notice per transition.
+            if marker == "start":
+                content: dict[str, Any] = {
+                    "event": "compact_start",
+                    "detail": "正在压缩上下文，期间发送的消息可能被静默丢弃，请等压缩完成后再发送",
+                }
+            elif text.strip().startswith("Compaction cancelled."):
+                content = {"event": "compact_done", "detail": "上下文压缩已取消，可继续发送"}
+            else:
+                content = {"event": "compact_done", "detail": text.strip()}
+            backend.store.append_message(session_id, "status", "system", content)
+            progress["appended"] = True
+        backend.store.publish_session(session_id)
+        return True
