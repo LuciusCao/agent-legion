@@ -21,6 +21,7 @@ from server.app.workflows.schema import (
     WorkflowShardSpec,
     WorkflowTerminal,
 )
+from server.app.workflows.shared_resources import load_shared_resources
 from server.app.workflows.start_node import ensure_start_node, load_start_fields
 from server.app.workflows.validator import _validate_acyclic
 from server.app.workflows.workflow_execution_defaults import (
@@ -232,6 +233,7 @@ def _load_nodes(
             config_schema=load_node_config_schema(raw_node, node_key),
             skill=load_node_skill(raw_node, node_key),
             tools=tuple(tools),
+            shared_resources=load_shared_resources(raw_node, node_key, node_type),
             requires_labels=load_node_requires_labels(raw_node, node_key),
             **load_failure_policy(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),

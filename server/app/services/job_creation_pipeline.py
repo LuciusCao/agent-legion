@@ -47,6 +47,7 @@ from server.app.services.run_partial_failure import (
 )
 from server.app.settings import Settings
 from server.app.workflows.capacity_metadata import node_capacity_requirements
+from server.app.workflows.shared_resource_run import require_run_api_for_shared_resources
 
 if TYPE_CHECKING:
     from server.app.events import JobEventManager
@@ -83,6 +84,7 @@ class JobCreationPipeline:
         workspace: dict[str, Any],
         workspace_id: str,
         workflow_key: str,
+        allow_shared_resources: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Node config resolution + code-version freeze.
 
@@ -93,6 +95,7 @@ class JobCreationPipeline:
         (EXEC-CODE-002); empty when every node is builtin or the feature
         gate is off.
         """
+        require_run_api_for_shared_resources(definition, allow_shared_resources)
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
@@ -114,6 +117,7 @@ class JobCreationPipeline:
         self,
         workspace_id: str,
         keys: Iterable[tuple[str, str]],
+        resource_pins_hash: str = "",
     ) -> set[tuple[str, str]]:
         """#467 A2: point lookups over the given keys (indexed IN probes)
         instead of loading the whole workspace's keys — same workspace-
@@ -123,23 +127,26 @@ class JobCreationPipeline:
         (create_jobs_bulk's ownership clause + RETURNING), not by locking
         here, so the loser simply drops the raced item from its response.
         """
-        return self.job_db.filter_existing_dedup_keys(workspace_id, keys)
+        return self.job_db.filter_existing_dedup_keys(workspace_id, keys, resource_pins_hash)
 
     def collect_fresh_candidates(
         self,
         workspace_id: str,
         candidates: list[dict[str, Any]],
+        resource_pins_hash: str = "",
     ) -> list[dict[str, Any]]:
-        """Point-probe + filter: candidates whose (source_type, source_id)
-        already has a job in this workflow are filtered out; accepted keys
-        grow the set so intra-request duplicates filter exactly like
-        pre-existing jobs."""
+        """Point-probe + filter over item keys, plus the optional resource pin hash.
+
+        Accepted keys grow the set so intra-request duplicates filter exactly
+        like pre-existing jobs; a new selection revision does not hit old pins.
+        """
         existing_keys = self.probe_existing_keys(
             workspace_id,
             (
                 (str(candidate["entity_type"]), str(candidate["entity_id"]))
                 for candidate in candidates
             ),
+            resource_pins_hash,
         )
         fresh: list[dict[str, Any]] = []
         for candidate in candidates:
@@ -161,6 +168,7 @@ class JobCreationPipeline:
         revision: dict[str, Any],
         node_config: dict[str, Any],
         notify: Callable[[], None] | None = None,
+        resource_pins_hash: str = "",
     ) -> list[str]:
         """create_jobs_bulk + notify, no compensation — the async intake
         queue's call shape (its chunk-level recovery is the queue cursor's
@@ -180,6 +188,7 @@ class JobCreationPipeline:
             revision=revision,
             needs_capacity_by_node=node_capacity_requirements(definition),
             frozen_config=node_config,
+            resource_pins_hash=resource_pins_hash,
         )
         if job_ids and notify is not None:
             notify()
@@ -199,6 +208,8 @@ class JobCreationPipeline:
         node_config: dict[str, Any],
         notify: Callable[[], None],
         intake_error_contract: bool = False,
+        precreated_run: dict[str, Any] | None = None,
+        resource_pins_hash: str = "",
     ) -> tuple[dict[str, Any], list[str]]:
         """create_run → create_jobs_bulk → #501 compensation → notify.
 
@@ -208,7 +219,7 @@ class JobCreationPipeline:
         presentation (the original exception type survives the empty-run
         branch — no ValueError → 400 conversion).
         """
-        run = self.job_db.create_run(
+        run = precreated_run or self.job_db.create_run(
             workflow_key,
             source_kind,
             source_payload,
@@ -226,6 +237,7 @@ class JobCreationPipeline:
                 workspace_id=workspace_id,
                 revision=revision,
                 node_config=node_config,
+                resource_pins_hash=resource_pins_hash,
             )
         except Exception as exc:
             # #204 broad-except audit: compensate-then-re-raise after the

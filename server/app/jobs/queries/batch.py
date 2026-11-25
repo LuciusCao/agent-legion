@@ -6,6 +6,7 @@ from typing import Any
 from server.app.jobs.queries.batch_queue import RunQueueQueriesMixin
 from server.app.jobs.queries.batch_queue_sql import RUN_UPSERT_CONFLICT
 from server.app.jobs.queries.run_healing import deterministic_run_id
+from server.app.jobs.queries.shared_resources.job_pins import SharedResourceJobPinQueriesMixin
 
 # Shared with the plan-shape pin test (tests/db/test_run_job_status_counts_migration.py):
 # a copy of the SQL there would silently drift if this one changes (#358 review).
@@ -18,7 +19,7 @@ RUN_STATUS_COUNTS_SQL = (
 )
 
 
-class RunQueriesMixin(RunQueueQueriesMixin):
+class RunQueriesMixin(SharedResourceJobPinQueriesMixin, RunQueueQueriesMixin):
     def create_run(
         self,
         workflow_key: str,
@@ -42,13 +43,18 @@ class RunQueriesMixin(RunQueueQueriesMixin):
         ``queue_payload`` is the async intake working state, empty for sync runs.
         """
         run_id = deterministic_run_id(workspace_id, workflow_key, source_kind, digest_payload)
-        pins_json = json.dumps(frozen_pins or {}, ensure_ascii=False, sort_keys=True)
         queue_json = (
             json.dumps(queue_payload, ensure_ascii=False, sort_keys=True)
             if queue_payload is not None
             else ""
         )
         with self.connect() as conn:
+            from server.app.jobs.queries.shared_resources.run_accept import (
+                inherit_replay_resource_freeze,
+            )
+
+            inherited = inherit_replay_resource_freeze(conn, workspace_id, frozen_pins or {})
+            pins_json = json.dumps(inherited, ensure_ascii=False, sort_keys=True)
             conn.execute(
                 f"""
                 insert into runs(

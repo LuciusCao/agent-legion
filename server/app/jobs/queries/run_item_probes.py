@@ -38,6 +38,11 @@ _DEDUP_SQL = (
     "select source_type, source_id from jobs"
     " where workspace_id=%s and (source_type, source_id) in ({pairs})"
 )
+_DEDUP_RESOURCE_SQL = (
+    "select j.source_type, j.source_id from jobs j join runs r on r.id=j.run_id"
+    " where j.workspace_id=%s and (j.source_type, j.source_id) in ({pairs})"
+    " and r.frozen_pins_json::jsonb #>> '{{shared_resources,pins_hash}}'=%s"
+)
 
 
 _T = TypeVar("_T")
@@ -94,7 +99,10 @@ class RunItemProbeQueriesMixin(ConnectionQueriesMixin):
         return result
 
     def filter_existing_dedup_keys(
-        self, workspace_id: str, keys: Iterable[tuple[str, str]]
+        self,
+        workspace_id: str,
+        keys: Iterable[tuple[str, str]],
+        resource_pins_hash: str = "",
     ) -> set[tuple[str, str]]:
         """Subset of ``keys`` present as this workspace's jobs (#467 A2).
 
@@ -111,6 +119,9 @@ class RunItemProbeQueriesMixin(ConnectionQueriesMixin):
                 params: list[str] = [workspace_id]
                 for pair in chunk:
                     params.extend(pair)
-                rows = conn.execute(_DEDUP_SQL.format(pairs=placeholders), params).fetchall()
+                sql = _DEDUP_RESOURCE_SQL if resource_pins_hash else _DEDUP_SQL
+                if resource_pins_hash:
+                    params.append(resource_pins_hash)
+                rows = conn.execute(sql.format(pairs=placeholders), params).fetchall()
                 existing.update((str(r["source_type"]), str(r["source_id"])) for r in rows)
         return existing

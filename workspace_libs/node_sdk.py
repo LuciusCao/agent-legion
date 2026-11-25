@@ -6,7 +6,7 @@ A code node exposes a module-level ``run`` entry; the SDK is the adaptation
 layer nodes use *inside* ``run`` so they never hand-roll the scaffolding:
 JSON artifact IO, config merging, cancellation checkpoints, prefetched
 inputs (including the materialized local file for material-type job
-inputs, ``ctx.material``), and the auth-failure back-channel. The preferred
+inputs, ``ctx.material``), exact shared-resource views, and the auth-failure back-channel. The preferred
 shape is a plain business function decorated with ``@entrypoint``::
 
     from workspace_libs.node_sdk import NodeContext, entrypoint
@@ -42,6 +42,7 @@ import json
 import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from workspace_libs._service_config import merge_service_config
@@ -188,6 +189,34 @@ class NodeContext:
         """
         block = self._runtime.get("materials")
         return dict(block) if isinstance(block, Mapping) else None
+
+    @property
+    def shared_resources(self) -> Mapping[str, Mapping[str, Any]]:
+        """Exact pinned, Host-materialized resources declared by this node.
+
+        Each value carries ``version`` / ``manifest_hash`` / directory ``path``
+        and a read-only ``files`` sequence with safe relative and local paths.
+        No storage key, grant, selection revision or current-version resolver
+        crosses into node code. The sandbox mounts the cache read-only.
+        """
+        block = self._runtime.get("shared_resources")
+        if not isinstance(block, Mapping):
+            return MappingProxyType({})
+        return MappingProxyType(
+            {
+                str(resource_id): self._readonly(value)
+                for resource_id, value in block.items()
+                if isinstance(value, Mapping)
+            }
+        )
+
+    @classmethod
+    def _readonly(cls, value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return MappingProxyType({key: cls._readonly(item) for key, item in value.items()})
+        if isinstance(value, list | tuple):
+            return tuple(cls._readonly(item) for item in value)
+        return value
 
     @property
     def root_dir(self) -> Path | None:

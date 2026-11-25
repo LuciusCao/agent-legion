@@ -184,6 +184,7 @@ class RunBatchFeeder:
         chunk: list[dict[str, Any]],
     ) -> None:
         workspace_id = str(batch["workspace_id"])
+        pins_hash = str(payload.get("resource_pins_hash") or "")
         # Text items materialize per chunk (content-hash idempotent), then the
         # whole chunk resolves through the run item families — the sync path's
         # two-phase probe order exists to fail the REQUEST fast; the feeder's
@@ -198,7 +199,7 @@ class RunBatchFeeder:
                 default_filename=str(payload.get("text_default_filename") or ""),
             )
         candidates = resolve_run_items(self.job_db, workspace_id, chunk)
-        fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates)
+        fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates, pins_hash)
         if not fresh:
             return
         job_ids = self.pipeline.insert_jobs(
@@ -210,6 +211,7 @@ class RunBatchFeeder:
             revision=revision,
             node_config=payload.get("node_config") or {},
             notify=notify_schedulable_work,
+            resource_pins_hash=pins_hash,
         )
         if job_ids:
             self.pipeline.record_jobs_created(workspace_id, [str(job_id) for job_id in job_ids])

@@ -8,6 +8,7 @@ from typing import Any
 
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 from server.app.workflows.revision_echo import definition_to_yaml as definition_to_yaml
+from server.app.workflows.shared_resources import validate_definition_shared_resources
 from server.app.workflows.start_text_input import text_input_payload
 from server.app.workflows.workflow_node_execution import node_execution_payload
 
@@ -15,8 +16,11 @@ logger = logging.getLogger(__name__)
 
 
 def serialize_definition(definition: WorkflowDefinition) -> str:
+    validate_definition_shared_resources(definition)
     payload = asdict(definition)
     for node in payload["nodes"].values():
+        if not node["shared_resources"]:
+            node.pop("shared_resources")
         if not node["on_failure"]:
             node.pop("on_failure")
         if not node["failure_default"]:
@@ -88,6 +92,11 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "skill": asdict(node.skill) if node.skill is not None else None,
                 # Omitted when undeclared (empty) so payload/yaml stay clean.
                 **({"tools": list(node.tools)} if node.tools else {}),
+                **(
+                    {"shared_resources": list(node.shared_resources)}
+                    if node.shared_resources
+                    else {}
+                ),
                 # #933: self-contained profile labels, omitted when undeclared.
                 **({"requires_labels": dict(node.requires_labels)} if node.requires_labels else {}),
                 "config": node.config,
