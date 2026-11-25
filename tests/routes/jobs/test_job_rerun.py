@@ -710,8 +710,18 @@ def test_batch_rerun_preview_node_mode_counts_eligible(tmp_path):
         after = c.get(f"/api/jobs/{job_a}").json()
 
     assert response.status_code == 200
-    assert response.json() == {"total_count": 2, "eligible_count": 2}
-    assert missing.json() == {"total_count": 2, "eligible_count": 0}
+    assert response.json()["total_count"] == 2
+    assert response.json()["eligible_count"] == 2
+    assert {plan["job_id"]: plan["planned_targets"] for plan in response.json()["plans"]} == {
+        job_a: ["intake_knowledge_points"],
+        job_b: ["intake_knowledge_points"],
+    }
+    assert missing.json()["total_count"] == 2
+    assert missing.json()["eligible_count"] == 0
+    assert {plan["job_id"]: plan["planned_targets"] for plan in missing.json()["plans"]} == {
+        job_a: [],
+        job_b: [],
+    }
     # 只读端点：job 状态不被改动。
     assert after["job"]["status"] == "failed"
     assert job_b != job_a
@@ -743,7 +753,14 @@ def test_batch_rerun_preview_from_failed_node_skips_non_failed(tmp_path):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"total_count": 2, "eligible_count": 1}
+    assert response.json() == {
+        "total_count": 2,
+        "eligible_count": 1,
+        "plans": [
+            {"job_id": failed_job, "planned_targets": ["write_script"]},
+            {"job_id": pending_job, "planned_targets": []},
+        ],
+    }
 
 
 def test_batch_rerun_preview_failure_category_counts_matching(tmp_path):
@@ -765,7 +782,12 @@ def test_batch_rerun_preview_failure_category_counts_matching(tmp_path):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"total_count": 2, "eligible_count": 1}
+    assert response.json()["total_count"] == 2
+    assert response.json()["eligible_count"] == 1
+    assert {plan["job_id"]: plan["planned_targets"] for plan in response.json()["plans"]} == {
+        technical_job: ["review_script"],
+        business_job: [],
+    }
 
 
 def test_batch_rerun_preview_validates_mode(tmp_path):
@@ -788,6 +810,11 @@ def test_batch_rerun_preview_validates_mode(tmp_path):
                 "failure_category": "technical",
             },
         )
+        misplaced_strategy = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={"job_ids": ["any"], "from_failed_node": True, "strategy": "rerun_self"},
+        )
 
     assert no_mode.status_code == 422
     assert combined.status_code == 422
+    assert misplaced_strategy.status_code == 422

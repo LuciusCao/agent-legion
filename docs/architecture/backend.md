@@ -467,7 +467,8 @@ server/app/
 | ContinueJobRequest | BaseModel | — | app/routes/job_operation_contracts.py |
 | JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/job_rerun_by_failure_contracts.py |
 | JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/job_rerun_by_failure_contracts.py |
-| BatchRerunPreviewResponse | BaseModel | total_count: int, eligible_count: int | app/routes/job_rerun_preview_contracts.py |
+| JobRerunPreviewPlanResponse | BaseModel | job_id: str, planned_targets: list[str] | app/routes/job_rerun_preview_contracts.py |
+| BatchRerunPreviewResponse | BaseModel | total_count: int, eligible_count: int, plans: list[JobRerunPreviewPlanResponse] | app/routes/job_rerun_preview_contracts.py |
 | StressEventRecord | BaseModel | job_id: str, kind: str | app/routes/job_stress_events.py |
 | StressEventBatchRequest | BaseModel | events: list[StressEventRecord] | app/routes/job_stress_events.py |
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |
@@ -817,6 +818,80 @@ server/app/
 `job_batch_operations` 句柄。filter 与无选择 rerun-by-failure 在操作行冻结筛选参数及
 keyset 上界，feeder 按 chunk 增量解析，不物化全量 id；在途执行负载由 workspace backlog
 水位约束，误操作通过任务中心控制面止损。见 [batch-ops-async.md](batch-ops-async.md)。
+
+## Workflow 节点失败声明与重跑规划（#9，EXEC-FAILURE-POLICY-001）
+
+可执行节点可声明以下可选字段；`start` 不执行，不产生失败策略：
+
+```yaml
+review:
+  type: agent
+  failure_default: business
+  on_failure:
+    business: rerun_upstream
+    technical: rerun_self
+    unknown: rerun_self
+```
+
+`failure_default` 接受 `technical | business | unknown`，空字符串或缺省表示不声明。
+`on_failure` 的键限上述三类，值限 `rerun_self | rerun_upstream`。loader 拒绝未知类别、
+策略及错误类型。两个字段随 revision 定义序列化，并在 intake 时冻结进
+`jobs.workflow_definition_snapshot_json`；不需要新增数据库列或迁移。YAML echo、snapshot
+round-trip 与 workflow response 保留声明。未声明字段在 `serialize_definition` 中省略，保持
+既有 snapshot JSON 与 definition hash；旧 snapshot 缺字段时得到 `failure_default=''`、
+`on_failure={}`，行为保持原样。
+
+### 持久化分类优先级
+
+lease finish 与 fail-without-lease 都在既有执行代次锁内读取**该 job 的冻结 snapshot**，
+不得回读 active revision。分类顺序为：
+
+1. 执行结果显式携带的系统 declared `failure_category/failure_detail`；
+2. 既有规则表（`review_rejected`、technical、`output_invalid`、`source_missing` 等）及其
+   detail；
+3. 仅当规则结果为 `unknown` 时，应用冻结节点的 `failure_default`，保留规则原 detail
+   （`unknown` 或 `execution_error`）；
+4. 未声明 default 时保持 `unknown`。
+
+`failure_default` 是独立的 `failure_default` 参数，不得塞进 `declared_category`，否则会
+短路已知规则。非失败结果仍写空分类。节点 default 可将未知失败归入 business，从而被
+`GET /workspaces/{id}/failed-node-runs?category=business` 查询；它不会伪造
+`review_rejected` detail。
+
+### auto 重跑与 preview
+
+`strategy=auto` 对每个 latest failed node 分别解析
+`node.on_failure[category]`，未声明时沿用旧映射：technical → self、business → upstream、
+unknown → self。显式 `strategy=rerun_self|rerun_upstream` 覆盖全部节点声明；显式
+`from_node_key` 仍只处理该节点或其下游的匹配失败，并覆盖策略目标。
+
+`rerun_upstream` 使用显式边与产物隐式消费边的全部**直接 parents**；合成 `start` 不是可执行
+重跑目标，因此没有可执行上游的根节点 rerun self。多失败节点分别求 targets 后按首次出现
+顺序去重。每个 job 的 targets 与 busy/running/failed-upstream eligibility 全部在写前规划，
+再沿用既有逐 target commit 与 stale 闭包，不引入半应用的解析状态。
+
+`services/job_rerun/failure_plan.py` 是同步 execute 与 preview 的共同规划器；异步 feeder 经
+同一个 `JobRerunService.rerun_by_failure_category` 进入该规划器。preview 请求在
+`failure_category` 模式下可加 `strategy` 和 `from_node_key`，响应加法式返回：
+
+```json
+{
+  "total_count": 1,
+  "eligible_count": 1,
+  "plans": [{"job_id": "job-1", "planned_targets": ["prepare"]}]
+}
+```
+
+`planned_targets` 只含通过只读 eligibility 的目标，因此空列表对应不可重跑或无匹配失败；
+它不代表已提交副作用。多上游 planned-target 的前端展示与确认在另行批准的 UI 原型阶段实现，
+本后端阶段不改 UI 组件。
+
+Quality Impact：分类持久化与多节点执行属高风险面。`EXEC-FAILURE-POLICY-001` 登记冻结
+snapshot、分类优先级及 preview/execute 同源约束；未新增执行写面或数据库迁移。回归矩阵覆盖
+loader 校验、旧 snapshot、lease/no-lease PostgreSQL、declared/已知规则/default 优先级、混合
+策略、多上游、根节点、显式覆盖、busy/stale、preview/execute/feeder 同源性。Mutation 自检必须
+证明：把 default 提前到已知规则之前会被测试捕获；让 preview 与 execute 使用不同 targets
+也会被测试捕获。
 
 ## Runtime Architecture
 

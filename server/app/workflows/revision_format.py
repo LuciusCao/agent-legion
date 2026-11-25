@@ -16,6 +16,11 @@ logger = logging.getLogger(__name__)
 
 def serialize_definition(definition: WorkflowDefinition) -> str:
     payload = asdict(definition)
+    for node in payload["nodes"].values():
+        if not node["on_failure"]:
+            node.pop("on_failure")
+        if not node["failure_default"]:
+            node.pop("failure_default")
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -78,6 +83,8 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": node_execution_payload(node.execution),
+                **({"on_failure": dict(node.on_failure)} if node.on_failure else {}),
+                **({"failure_default": node.failure_default} if node.failure_default else {}),
                 "skill": asdict(node.skill) if node.skill is not None else None,
                 # Omitted when undeclared (empty) so payload/yaml stay clean.
                 **({"tools": list(node.tools)} if node.tools else {}),

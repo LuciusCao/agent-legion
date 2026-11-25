@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 from server.app.jobs import JobQueries
+from server.app.services.workflow_revision_format import serialize_definition
+from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.workflows.definition import workflow_definition_from_mapping
 from tests.executors.leases.helpers import _claim_request, _setup_workspace
 
 
@@ -196,3 +200,139 @@ def test_transient_db_pool_failure_retries_then_fails(
     runs = [run for run in queries.list_node_runs(job_id) if run["status"] == "failed"]
     assert len(runs) == 3
     assert all(run["failure_detail"] == "db_pool_timeout" for run in runs)
+
+
+def _freeze_failure_default(queries: JobQueries, job_id: str, category: str):
+    definition = workflow_definition_from_mapping(
+        {
+            "key": "demo_workflow",
+            "label": "Demo",
+            "nodes": {
+                "review_keywords": {
+                    "type": "code",
+                    "capability": "review_keywords",
+                    "failure_default": category,
+                }
+            },
+        }
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "update jobs set workflow_definition_snapshot_json=%s where id=%s",
+            (serialize_definition(definition), job_id),
+        )
+        conn.execute("commit")
+    return definition
+
+
+def _publish_active_failure_default(queries: JobQueries, workspace_id: str, frozen, category: str):
+    nodes = dict(frozen.nodes)
+    nodes["review_keywords"] = replace(nodes["review_keywords"], failure_default=category)
+    return WorkflowRevisionService(queries).ensure_active_revision(
+        workspace_id, replace(frozen, nodes=nodes)
+    )
+
+
+def test_finish_uses_frozen_failure_default_only_for_unknown_and_exposes_business_query(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "fc-default-business", "exec-default", 1)
+    frozen = _freeze_failure_default(queries, job_id, "business")
+    _publish_active_failure_default(queries, workspace_id, frozen, "technical")
+    claim = repo_a.try_claim(_claim_request(workspace_id, job_id, executor_id="exec-default"))
+    assert claim is not None
+
+    assert repo_a.finish(
+        claim.lease_id,
+        ExecutionResult(status="failed", exit_code=1, error_message="unrecognized content"),
+    )
+
+    run = queries.list_node_runs(job_id)[-1]
+    assert (run["failure_category"], run["failure_detail"]) == ("business", "unknown")
+    assert [
+        row["job_id"] for row in queries.list_failed_node_runs(workspace_id, category="business")
+    ] == [job_id]
+
+
+def test_finish_known_rule_and_declared_fact_beat_frozen_failure_default(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "fc-default-priority", "exec-priority", 1)
+    _freeze_failure_default(queries, job_id, "business")
+    claim = repo_a.try_claim(_claim_request(workspace_id, job_id, executor_id="exec-priority"))
+    assert claim is not None
+    assert repo_a.finish(
+        claim.lease_id,
+        ExecutionResult(status="failed", exit_code=1, error_message="terminated"),
+    )
+    run = queries.list_node_runs(job_id)[-1]
+    assert (run["failure_category"], run["failure_detail"]) == ("technical", "provider_stream")
+
+    declared_workspace, declared_job = _setup_workspace(
+        queries, "fc-default-declared", "exec-declared", 1
+    )
+    _freeze_failure_default(queries, declared_job, "business")
+    rerun = repo_a.try_claim(
+        _claim_request(declared_workspace, declared_job, executor_id="exec-declared")
+    )
+    assert rerun is not None
+    assert repo_a.finish(
+        rerun.lease_id,
+        ExecutionResult(
+            status="failed",
+            exit_code=1,
+            error_message="unrecognized content",
+            failure_category="unknown",
+            failure_detail="system_observed_unknown",
+        ),
+    )
+    declared = queries.list_node_runs(declared_job)[-1]
+    assert (declared["failure_category"], declared["failure_detail"]) == (
+        "unknown",
+        "system_observed_unknown",
+    )
+
+
+def test_fail_without_lease_uses_frozen_failure_default_for_unknown(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "fc-config-default", "exec-config-default", 1)
+    frozen = _freeze_failure_default(queries, job_id, "business")
+    _publish_active_failure_default(queries, workspace_id, frozen, "technical")
+    request = ConfigurationFailureRequest(
+        workspace_id=workspace_id,
+        job_id=job_id,
+        workflow_key="demo_workflow",
+        node_key="review_keywords",
+        capability="review_keywords",
+        log_path="logs/config.log",
+    )
+
+    run_id = repo_a.fail_without_lease(request, "unrecognized configuration outcome")
+
+    assert run_id is not None
+    run = queries.get_node_run(job_id, run_id)
+    assert run is not None
+    assert (run["failure_category"], run["failure_detail"]) == ("business", "unknown")
+
+
+def test_fail_without_lease_known_rule_beats_frozen_failure_default(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "fc-config-known", "exec-config-known", 1)
+    _freeze_failure_default(queries, job_id, "business")
+    request = ConfigurationFailureRequest(
+        workspace_id=workspace_id,
+        job_id=job_id,
+        workflow_key="demo_workflow",
+        node_key="review_keywords",
+        capability="review_keywords",
+        log_path="logs/config.log",
+    )
+
+    run_id = repo_a.fail_without_lease(request, "CMS token expired")
+
+    assert run_id is not None
+    run = queries.get_node_run(job_id, run_id)
+    assert run is not None
+    assert (run["failure_category"], run["failure_detail"]) == ("technical", "cms_auth")

@@ -1,3 +1,6 @@
+import json
+from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -5,8 +8,12 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_batch_operations import JobBatchOpsFeeder, dispatch_rerun_by_failure
+from server.app.services.job_batch_operations.handlers import BatchOpsExecutors, run_chunk
 from server.app.services.job_rerun import JobRerunService
-from tests.helpers import publish_builtin_revision
+from server.app.services.job_rerun.preview import batch_rerun_preview
+from server.app.services.workflow_revisions import WorkflowRevisionService
+from tests.helpers import load_builtin_definition, publish_builtin_revision
 
 NODE_KEYS = [
     "intake_knowledge_points",
@@ -271,3 +278,214 @@ def test_rerun_clears_failure_fields_on_job_nodes(rerun_service, job_db, workspa
     assert node["status"] == "pending"
     assert node["failure_category"] == ""
     assert node["failure_detail"] == ""
+
+
+def _policy_workspace(job_db, policies: dict[str, dict[str, str]]):
+    workspace = job_db.create_workspace("failure-policy")
+    definition = load_builtin_definition("education_video_problems_generation")
+    nodes = dict(definition.nodes)
+    for node_key, on_failure in policies.items():
+        nodes[node_key] = replace(nodes[node_key], on_failure=on_failure)
+    WorkflowRevisionService(job_db).ensure_active_revision(
+        workspace["id"], replace(definition, nodes=nodes)
+    )
+    return workspace
+
+
+def _feeder_executors(rerun_service: JobRerunService) -> BatchOpsExecutors:
+    return BatchOpsExecutors(
+        rerun=rerun_service,
+        deletion=SimpleNamespace(),
+        execution=SimpleNamespace(),
+        pause=SimpleNamespace(),
+        upgrade=SimpleNamespace(),
+        packages=SimpleNamespace(),
+        approvals=SimpleNamespace(),
+    )
+
+
+def test_auto_resolves_each_failed_node_declaration_and_dedupes_targets(rerun_service, job_db):
+    workspace = _policy_workspace(
+        job_db,
+        {
+            "review_script": {"business": "rerun_upstream"},
+            "write_script": {"business": "rerun_self"},
+        },
+    )
+    job = _create_job(job_db, workspace, "Q-mixed-policy")
+    _fail_node(job_db, job, "review_script", "business", "review_rejected")
+    _fail_node(job_db, job, "write_script", "business", "output_invalid")
+
+    results = rerun_service.rerun_by_failure_category(workspace["id"], "business")
+
+    assert set(results[0]["rerun_nodes"]) == {
+        "intake_knowledge_points",
+        "write_script",
+    }
+    assert _node_statuses(job_db, job["id"])["review_script"] == "stale"
+
+
+def test_auto_root_upstream_falls_back_to_self(rerun_service, job_db):
+    workspace = _policy_workspace(
+        job_db, {"intake_knowledge_points": {"business": "rerun_upstream"}}
+    )
+    job = _create_job(job_db, workspace, "Q-root-policy")
+    _fail_node(job_db, job, "intake_knowledge_points", "business", "source_missing")
+
+    results = rerun_service.rerun_by_failure_category(workspace["id"], "business")
+
+    assert results[0]["rerun_nodes"] == ["intake_knowledge_points"]
+
+
+def test_explicit_strategy_and_from_node_override_declarations_in_preview_and_execute(
+    rerun_service, job_db
+):
+    workspace = _policy_workspace(job_db, {"review_script": {"business": "rerun_upstream"}})
+    strategy_job = _create_job(job_db, workspace, "Q-explicit-strategy")
+    _fail_node(job_db, strategy_job, "review_script", "business", "review_rejected")
+    preview = batch_rerun_preview(
+        rerun_service,
+        workspace["id"],
+        [strategy_job["id"]],
+        failure_category="business",
+        strategy="rerun_self",
+    )
+    assert preview["plans"] == [
+        {"job_id": strategy_job["id"], "planned_targets": ["review_script"]}
+    ]
+    executed = rerun_service.rerun_by_failure_category(
+        workspace["id"], "business", strategy="rerun_self", job_ids=[strategy_job["id"]]
+    )
+    assert executed[0]["rerun_nodes"] == preview["plans"][0]["planned_targets"]
+
+    from_node_job = _create_job(job_db, workspace, "Q-explicit-from-node")
+    _fail_node(job_db, from_node_job, "review_script", "business", "review_rejected")
+    preview = batch_rerun_preview(
+        rerun_service,
+        workspace["id"],
+        [from_node_job["id"]],
+        failure_category="business",
+        from_node_key="write_script",
+    )
+    assert preview["plans"] == [
+        {"job_id": from_node_job["id"], "planned_targets": ["write_script"]}
+    ]
+    executed = rerun_service.rerun_by_failure_category(
+        workspace["id"],
+        "business",
+        job_ids=[from_node_job["id"]],
+        from_node_key="write_script",
+    )
+    assert executed[0]["rerun_nodes"] == preview["plans"][0]["planned_targets"]
+
+
+def test_preview_and_async_feeder_share_auto_targets_with_execute(rerun_service, job_db):
+    workspace = _policy_workspace(job_db, {"review_script": {"business": "rerun_upstream"}})
+    job = _create_job(job_db, workspace, "Q-preview-identity")
+    _fail_node(job_db, job, "review_script", "business", "review_rejected")
+
+    preview = batch_rerun_preview(
+        rerun_service, workspace["id"], [job["id"]], failure_category="business"
+    )
+    fed = run_chunk(
+        _feeder_executors(rerun_service),
+        workspace["id"],
+        "rerun_by_failure",
+        [job["id"]],
+        {"category": "business", "strategy": "auto"},
+    )
+
+    expected = ["intake_knowledge_points", "write_script"]
+    assert preview == {
+        "total_count": 1,
+        "eligible_count": 1,
+        "plans": [{"job_id": job["id"], "planned_targets": expected}],
+    }
+    assert fed[0]["rerun_nodes"] == expected
+    assert _node_statuses(job_db, job["id"])["review_script"] == "stale"
+
+
+def test_busy_job_has_no_preview_targets_and_execute_does_not_mutate(rerun_service, job_db):
+    workspace = _policy_workspace(job_db, {"review_script": {"business": "rerun_upstream"}})
+    job = _create_job(job_db, workspace, "Q-preview-busy")
+    _fail_node(job_db, job, "review_script", "business", "review_rejected")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="running")
+
+    preview = batch_rerun_preview(
+        rerun_service, workspace["id"], [job["id"]], failure_category="business"
+    )
+    executed = rerun_service.rerun_by_failure_category(
+        workspace["id"], "business", job_ids=[job["id"]]
+    )
+
+    assert preview["eligible_count"] == 0
+    assert preview["plans"] == [{"job_id": job["id"], "planned_targets": []}]
+    assert executed[0]["status"] == "skipped"
+    assert executed[0]["reason_code"] == "busy"
+    assert _node_statuses(job_db, job["id"])["review_script"] == "failed"
+
+
+def test_from_node_without_matching_failure_result_contract(rerun_service, job_db, workspace):
+    job = _create_job(job_db, workspace, "Q-no-match-contract")
+    _fail_node(job_db, job, "review_script", "business", "review_rejected")
+
+    results = rerun_service.rerun_by_failure_category(
+        workspace["id"],
+        "business",
+        job_ids=[job["id"]],
+        from_node_key="publish_content",
+    )
+
+    assert results == [
+        {
+            "job_id": job["id"],
+            "operation": "rerun",
+            "status": "skipped",
+            "node_key": None,
+            "reason_code": "no_matching_failure",
+            "message": "No latest failed run at or downstream of node 'publish_content'",
+            "rerun_nodes": [],
+        }
+    ]
+
+
+def test_from_node_without_matching_failure_async_result_contract(
+    rerun_service, job_db, workspace, settings, monkeypatch
+):
+    jobs = [_create_job(job_db, workspace, f"Q-no-match-async-{index}") for index in range(2)]
+    for job in jobs:
+        _fail_node(job_db, job, "review_script", "business", "review_rejected")
+    monkeypatch.setattr(
+        "server.app.services.job_batch_operations.service.BATCH_OPS_ASYNC_THRESHOLD", 1
+    )
+
+    _, operation = dispatch_rerun_by_failure(
+        job_db,
+        workspace["id"],
+        category="business",
+        strategy="auto",
+        from_node_key="publish_content",
+        job_ids=[job["id"] for job in jobs],
+        job_filter=None,
+        exclude_ids=(),
+        created_by="user:tester",
+    )
+    assert operation is not None
+    feeder = JobBatchOpsFeeder(job_db, settings, _feeder_executors(rerun_service))
+    for _ in range(100):
+        if not feeder.consume_once():
+            break
+    else:
+        raise AssertionError("feeder did not quiesce")
+
+    rows = job_db.list_job_batch_operation_results_page(str(operation["id"]), limit=10)
+    assert len(rows) == 2
+    for row in rows:
+        assert row["status"] == "skipped"
+        assert row["reason_code"] == "no_matching_failure"
+        assert row["message"] == "No latest failed run at or downstream of node 'publish_content'"
+        payload = json.loads(str(row["payload_json"]))
+        assert payload["node_key"] is None
+        assert payload["reason_code"] == "no_matching_failure"
+        assert payload["message"] == row["message"]
+        assert payload["rerun_nodes"] == []

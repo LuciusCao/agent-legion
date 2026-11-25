@@ -21,11 +21,8 @@ from server.app.services.job_rerun.by_failure_results import (
     assemble_rerun_targets,
     job_failure_result,
 )
-from server.app.services.job_rerun.eligibility import (
-    AUTO_STRATEGIES,
-    failed_nodes_by_job,
-    resolve_failure_rerun_targets,
-)
+from server.app.services.job_rerun.eligibility import failed_nodes_by_job
+from server.app.services.job_rerun.failure_plan import plan_failure_rerun
 from server.app.services.job_rerun.preview_checks import (
     PreviewDefinitions,
     rerun_ineligible_from_nodes,
@@ -33,7 +30,6 @@ from server.app.services.job_rerun.preview_checks import (
 )
 from server.app.services.job_rerun.single import commit_rerun_result
 from server.app.services.job_selection_resolver import resolve_batch_selection
-from server.app.workflows.workflow_consumption import dependency_downstream
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -194,7 +190,6 @@ def rerun_by_failure_category(
     targets. ``entries`` keep target order so ``rerun_nodes`` matches the
     per-job path exactly.
     """
-    resolved = AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
     requested, scope = resolve_failure_rerun_scope(
         service.job_db, workspace_id, category, job_ids, job_filter, exclude_ids
     )
@@ -220,32 +215,22 @@ def rerun_by_failure_category(
             )
             continue
         definition = pre.definitions.for_job(job)
-        if from_node_key is not None:
-            # Explicit start node: only jobs whose matching failure is the node
-            # itself or downstream of it rerun, starting from from_node_key.
-            # #759: downstream includes implicit consumers (input names resolve
-            # to producers without a declared edge) — commit_rerun marks the
-            # same merged closure stale.
-            downstream = set(dependency_downstream(definition, from_node_key))
-            if not any(node == from_node_key or node in downstream for node in failed_nodes):
-                results[job_id] = job_failure_result(
-                    job_id,
-                    "skipped",
-                    "no_matching_failure",
-                    f"No latest failed run at or downstream of node {from_node_key!r}",
-                )
-                continue
-            targets = [from_node_key]
-        else:
-            targets = resolve_failure_rerun_targets(definition, failed_nodes, resolved)
-        nodes = pre.nodes_by_job.get(job_id, [])
-        entries: list[JobOperationResult | str] = []
-        for target in targets:
-            ineligible = rerun_ineligible_from_nodes(
-                definition, nodes, pre.busy_pairs, job_id, target
+        plan = plan_failure_rerun(
+            definition,
+            failed_nodes,
+            pre.nodes_by_job.get(job_id, []),
+            pre.busy_pairs,
+            job_id,
+            category,
+            strategy,
+            from_node_key,
+        )
+        if plan.error is not None:
+            results[job_id] = job_failure_result(
+                job_id, plan.error.status, plan.error.reason_code, plan.error.message
             )
-            entries.append(ineligible.to_result() if ineligible is not None else target)
-        plans.append((job_id, entries, definition))
+            continue
+        plans.append((job_id, list(plan.entries), definition))
 
     if plans:
         full_jobs = {
