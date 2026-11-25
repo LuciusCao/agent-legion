@@ -284,6 +284,64 @@ def test_workflow_upgrade_rejects_shared_resource_declaration_changes_without_mu
     assert job_db.get_job_shared_resource_pins(str(job["id"])) == before_pins
 
 
+@pytest.mark.parametrize(
+    ("with_pin", "target_declared", "expected"),
+    [
+        (True, False, "skipped"),
+        (True, True, "skipped"),
+        (False, False, "succeeded"),
+        (False, True, "skipped"),
+    ],
+)
+def test_workflow_upgrade_corrupt_snapshot_distinguishes_legacy_repair_from_pin_guard(
+    with_pin,
+    target_declared,
+    expected,
+    job_db,
+    settings,
+    shared_service,
+    shared_materials,
+    shared_storage,
+    tmp_path,
+) -> None:
+    resource_id = _resource(shared_service, shared_materials, shared_storage)
+    job = _create_upgrade_job(
+        job_db,
+        settings,
+        shared_materials,
+        shared_storage,
+        resource_id if with_pin else "",
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set workflow_definition_snapshot_json='not-json{' where id=%s",
+            (str(job["id"]),),
+        )
+    active = WorkflowRevisionService(job_db).publish_workspace_revision(
+        TARGET_WS,
+        _definition_with_resources([resource_id] if target_declared else []),
+    )
+    before_job = job_db.get_job(str(job["id"]))
+    before_run = job_db.get_run(str(job["run_id"]))
+    before_nodes = job_db.list_job_nodes(str(job["id"]))
+    before_pins = job_db.get_job_shared_resource_pins(str(job["id"]))
+
+    result = JobWorkflowUpgradeService(
+        job_db, ExecutorLeaseRepository(job_db, data_dir=tmp_path)
+    ).upgrade(TARGET_WS, str(job["id"]), mode="clean")
+
+    assert result["status"] == expected
+    if expected == "succeeded":
+        assert job_db.get_job(str(job["id"]))["workflow_revision_id"] == active["id"]
+        assert job_db.get_job_shared_resource_pins(str(job["id"])) == before_pins
+        return
+    assert result["reason_code"] == "shared_resource_declaration_changed"
+    assert job_db.get_job(str(job["id"])) == before_job
+    assert job_db.get_run(str(job["run_id"])) == before_run
+    assert job_db.list_job_nodes(str(job["id"])) == before_nodes
+    assert job_db.get_job_shared_resource_pins(str(job["id"])) == before_pins
+
+
 @pytest.mark.parametrize("declared", [False, True])
 def test_workflow_upgrade_allows_identical_resource_declarations(
     declared,
