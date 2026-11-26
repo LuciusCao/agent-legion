@@ -16,6 +16,11 @@ from typing import Any
 
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.run_item_client_token import item_client_token, scoped_entity_id
+from server.app.services.run_item_params import (
+    input_with_params,
+    reject_token_param_conflicts,
+    validate_run_item_params,
+)
 
 
 def create_run_response(
@@ -44,9 +49,12 @@ def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]
     400; unknown/disabled connection key → 400). Shape errors (non-object
     items, missing ids, unsupported types, invalid ``client_token``) raise
     before any probe runs. #813: a ``client_token`` scopes the candidate's
-    ``entity_id`` (run_item_client_token) — dedup key and job id follow it;
-    the job ``input`` document stays the plain material/bundle shape.
+    ``entity_id`` (run_item_client_token) — dedup key and job id follow it.
+    Explicit generic params ride the material/bundle input document verbatim;
+    omitted params preserve the legacy two-key shape. Token identity itself
+    never enters the input.
     """
+    validate_run_item_params(items)
     material_specs: list[tuple[int, dict[str, Any]]] = []
     bundle_specs: list[tuple[int, dict[str, Any]]] = []
     ref_specs: list[tuple[int, dict[str, Any]]] = []
@@ -78,7 +86,9 @@ def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]
     _resolve_materials(job_db, workspace_id, material_specs, resolved)
     _resolve_bundles(job_db, workspace_id, bundle_specs, resolved)
     _resolve_refs(job_db, ref_specs, resolved)
-    return [resolved[index] for index in sorted(resolved)]
+    candidates = [resolved[index] for index in sorted(resolved)]
+    reject_token_param_conflicts(job_db, workspace_id, candidates)
+    return candidates
 
 
 def _resolve_materials(
@@ -99,7 +109,7 @@ def _resolve_materials(
             "entity_id": scoped_entity_id(material_id, item),
             "title": str(row["filename"]),
             "stem": "",
-            "input": {"type": "material", "material_id": material_id},
+            "input": input_with_params(item, "material", material_id),
         }
 
 
@@ -123,7 +133,7 @@ def _resolve_bundles(
             "entity_id": scoped_entity_id(bundle_id, item),
             "title": str(row["name"]),
             "stem": "",
-            "input": {"type": "bundle", "bundle_id": bundle_id},
+            "input": input_with_params(item, "bundle", bundle_id),
         }
 
 

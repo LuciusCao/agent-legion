@@ -6,12 +6,14 @@ optional ``client_token`` to material / bundle / text items.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
+from server.app.services.job_errors import InvalidOperationError
 from server.app.services.run_item_client_token import (
     CLIENT_TOKEN_MAX_CHARS,
     CLIENT_TOKEN_PATTERN,
 )
+from server.app.services.run_item_params import validate_item_params
 
 # #813: optional item-level idempotency key (material / bundle / text only;
 # ref items are namespaced by connection_key:external_id already).
@@ -31,12 +33,34 @@ _ClientToken = Annotated[
 ]
 
 
+def _checked_params(value: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return validate_item_params(value)
+    except InvalidOperationError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+_NonSecretParams = Annotated[
+    dict[str, Any],
+    Field(
+        default_factory=dict,
+        description=(
+            "可选的非敏感 JSON 参数，原样冻结进 job input，节点经 SDK batch payload 读取。"
+            "单条目 canonical JSON 不超过 16 KiB，深度/键值/数组有限制；"
+            "禁止凭据字段与 vault secret marker。secret 仍走节点 config_schema/vault。"
+        ),
+    ),
+    AfterValidator(_checked_params),
+]
+
+
 class RunItemMaterial(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["material"]
     material_id: str = Field(min_length=1)
     client_token: _ClientToken = None
+    params: _NonSecretParams
 
 
 class RunItemRef(BaseModel):
@@ -54,6 +78,7 @@ class RunItemBundle(BaseModel):
     type: Literal["bundle"]
     bundle_id: str = Field(min_length=1)
     client_token: _ClientToken = None
+    params: _NonSecretParams
 
 
 class RunItemText(BaseModel):

@@ -6893,6 +6893,13 @@ export interface components {
        */
       client_token?: string | null
       /**
+       * Params
+       * @description 可选的非敏感 JSON 参数，原样冻结进 job input，节点经 SDK batch payload 读取。单条目 canonical JSON 不超过 16 KiB，深度/键值/数组有限制；禁止凭据字段与 vault secret marker。secret 仍走节点 config_schema/vault。
+       */
+      params?: {
+        [key: string]: unknown
+      }
+      /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}
        */
@@ -6907,6 +6914,13 @@ export interface components {
       client_token?: string | null
       /** Material Id */
       material_id: string
+      /**
+       * Params
+       * @description 可选的非敏感 JSON 参数，原样冻结进 job input，节点经 SDK batch payload 读取。单条目 canonical JSON 不超过 16 KiB，深度/键值/数组有限制；禁止凭据字段与 vault secret marker。secret 仍走节点 config_schema/vault。
+       */
+      params?: {
+        [key: string]: unknown
+      }
       /**
        * @description discriminator enum property added by openapi-typescript
        * @enum {string}

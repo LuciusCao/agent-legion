@@ -1,4 +1,4 @@
-"""Item-level ``client_token`` idempotency key (#813).
+"""Run-item identity, generic params and idempotency helpers (#813/#1565).
 
 A run item's identity is content-addressed: the candidate ``entity_id``
 (material id, bundle id, ``connection_key:external_id``) derives the dedup
@@ -15,7 +15,9 @@ identity as ``{entity_id}~{token}``, so
 
 The run digest needs no extra handling: it hashes the submitted items
 verbatim (the route dumps ``exclude_unset``), so a token is in the digest
-exactly when it was submitted.
+exactly when it was submitted. Generic material/bundle ``params`` stay out of
+job identity; a token retry is idempotent only while its canonical params
+match the originally frozen input. Token-less dedup remains unchanged.
 
 Only ``material`` / ``bundle`` / ``text`` items accept a token. A ``ref``
 item already carries a caller-controlled namespace (``external_id``), and
@@ -109,13 +111,18 @@ def split_scoped_source_id(source_type: str, source_id: str) -> tuple[str, str |
 
 
 def drop_null_client_tokens(items: list[Any]) -> list[Any]:
-    """Items with an explicit ``"client_token": null`` stripped to the omitted form.
+    """Validate generic params and strip explicit null tokens before the run digest.
 
     The route dumps ``exclude_unset``, so a generated client sending ``null``
     would otherwise keep the key in the verbatim-hashed run digest: same job
     identity as the omitted field but a different run id, which breaks the
     #501 duplicate-heal path across null/omitted retries (PR #902 review).
+    This existing sync/async preamble seam also fails invalid params before
+    the first run write; the historical function name is kept for callers.
     """
+    from server.app.services.run_item_params import validate_run_item_params
+
+    validate_run_item_params(items)
     return [
         {key: value for key, value in item.items() if key != "client_token"}
         if isinstance(item, dict) and "client_token" in item and item["client_token"] is None
