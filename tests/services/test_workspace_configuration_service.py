@@ -228,3 +228,30 @@ def test_list_visible_workspaces_narrows_by_membership_and_binding(workspace_ser
     visible = workspace_service.visible_workspace_ids
     assert visible(member_user_id=None, bound_workspace_id=None) is None
     assert visible(member_user_id=str(user["id"]), bound_workspace_id=None) == {joined}
+
+
+def test_list_visible_workspaces_adds_only_current_user_roles(workspace_service, job_db):
+    joined = workspace_service.create({"id": "role_joined", "name": "Joined"})["id"]
+    workspace_service.create({"id": "role_other", "name": "Other"})
+    user = job_db.create_user("role-member", password_hash="x", role="member")
+    job_db.upsert_workspace_member(joined, user["id"], "viewer")
+
+    listed = workspace_service.list_visible_workspaces(
+        member_user_id=str(user["id"]),
+        bound_workspace_id=None,
+        current_user={"id": str(user["id"]), "role": "member"},
+    )
+
+    assert [(item["id"], item["current_user_role"]) for item in listed] == [(joined, "viewer")]
+    admin_listed = workspace_service.list_visible_workspaces(
+        member_user_id=None,
+        bound_workspace_id=joined,
+        current_user={"id": "admin-id", "role": "admin"},
+    )
+    assert admin_listed[0]["current_user_role"] == "admin"
+    api_listed = workspace_service.list_visible_workspaces(
+        member_user_id=None,
+        bound_workspace_id=joined,
+        current_user={"id": "api-token", "role": "member", "actor_scope": "api"},
+    )
+    assert api_listed[0]["current_user_role"] == "editor"

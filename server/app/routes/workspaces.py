@@ -52,7 +52,9 @@ def create_workspaces_router(
         # mapping is shared with the dashboard SSE stream (#881).
         member_user_id, bound_workspace_id = workspace_visibility_scope(user)
         visible = service.list_visible_workspaces(
-            member_user_id=member_user_id, bound_workspace_id=bound_workspace_id
+            member_user_id=member_user_id,
+            bound_workspace_id=bound_workspace_id,
+            current_user=user,
         )
         return WorkspacesResponse(workspaces=[WorkspaceRecord.model_validate(w) for w in visible])
 

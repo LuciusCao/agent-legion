@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -16,3 +16,4 @@ class WorkspaceRecord(BaseModel):
     updated_at: str
     resource_config: dict[str, Any]
     node_config: dict[str, Any]
+    current_user_role: Literal["admin", "editor", "viewer"] | None = None

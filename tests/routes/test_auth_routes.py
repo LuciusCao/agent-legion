@@ -151,6 +151,37 @@ def test_workspace_member_management(anon_client, job_db) -> None:
     assert deleted.json()["members"] == []
 
 
+def test_workspace_list_returns_only_current_user_role(anon_client, job_db) -> None:
+    _bootstrap_admin(anon_client)
+    member_resp = anon_client.post(
+        "/api/users",
+        json={"username": "role-viewer", "password": "pw1"},
+        headers=CSRF,
+    )
+    member_id = member_resp.json()["id"]
+    workspace = job_db.create_workspace(name="Role Visible WS")
+    job_db.upsert_workspace_member(workspace["id"], member_id, "viewer")
+
+    member_client = anon_client.__class__(anon_client.app)
+    login = member_client.post(
+        "/api/auth/login", json={"username": "role-viewer", "password": "pw1"}
+    )
+    assert login.status_code == 200
+    response = member_client.get("/api/workspaces")
+    assert response.status_code == 200
+    listed = response.json()["workspaces"]
+    assert [(item["id"], item["current_user_role"]) for item in listed] == [
+        (workspace["id"], "viewer")
+    ]
+    assert "members" not in listed[0]
+
+    admin_response = anon_client.get("/api/workspaces")
+    admin_workspace = next(
+        item for item in admin_response.json()["workspaces"] if item["id"] == workspace["id"]
+    )
+    assert admin_workspace["current_user_role"] == "admin"
+
+
 def test_bootstrap_admin_env_seed(client_factory, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD", "seeded-pw")
     # fresh=True: the env seed runs in build_auth_service at app creation, so

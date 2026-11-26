@@ -25,6 +25,12 @@ export const TokenUsagePage = lazy(() =>
 export const MonitoringPage = lazy(() => import('../pages/MonitoringPage'))
 export const TaskCenterPage = lazy(() => import('../pages/TaskCenterPage'))
 export const QualityPage = lazy(() => import('../pages/QualityPage'))
+export const ResourceLibraryPage = lazy(
+  () => import('../features/sharedResources/ResourceLibraryPage')
+)
+export const ResourceManagePage = lazy(
+  () => import('../features/sharedResources/ResourceManagePage')
+)
 export const GlobalSettingsPage = lazy(
   () => import('../pages/GlobalSettingsPage')
 )

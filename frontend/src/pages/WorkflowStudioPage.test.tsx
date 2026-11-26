@@ -18,6 +18,7 @@ configure({ asyncUtilTimeout: 10_000 })
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
   useNavigate: () => vi.fn(),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
   Navigate: ({ to }: { to: string }) => (
     <div data-testid="route-navigate" data-to={to} />

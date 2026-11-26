@@ -26,6 +26,8 @@ import { AddItemsUploadPanel } from './AddItemsUploadPanel'
 import { AddItemsDialogBulkHint } from './AddItemsDialogSubmitText'
 import { useAddItemsSubmit } from './useAddItemsSubmit'
 import { useBundleUploads } from './useBundleUploads'
+import { useRunSharedResources } from '../features/sharedResources/useRunSharedResources'
+import { SharedResourceRunConfirmation } from '../features/sharedResources/SharedResourceRunConfirmation'
 import { useMaterialUploads } from './useMaterialUploads'
 import styles from './AddItemsDialog.module.css'
 
@@ -75,6 +77,7 @@ export function AddItemsDialog({
   } = useBundleUploads(workspaceId)
 
   const enabled = open && Boolean(workspaceId)
+  const sharedResources = useRunSharedResources(workspaceId, enabled)
   const workspaceQuery = useQuery({
     queryKey: extraQueryKeys.workspace(workspaceId ?? ''),
     queryFn: () =>
@@ -179,6 +182,9 @@ export function AddItemsDialog({
     isSubmitting ||
     hasActiveUploads ||
     hasActiveBundles ||
+    sharedResources.isFetching ||
+    sharedResources.isError ||
+    sharedResources.hasUnavailable ||
     !workflowKey
 
   return (
@@ -206,6 +212,7 @@ export function AddItemsDialog({
             <Tab label="输入需求" value="text" disabled={!textAccepted} />
           </Tabs>
           <AddItemsContractHint accepted={acceptedTypes} />
+          <SharedResourceRunConfirmation state={sharedResources} />
           {activeTab === 'upload' && (
             <AddItemsUploadPanel
               entries={entries}

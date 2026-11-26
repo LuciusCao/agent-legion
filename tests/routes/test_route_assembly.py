@@ -34,6 +34,7 @@ _FACTORY_NAMES = [
     "create_workspace_api_tokens_router",
     "create_materials_router",
     "create_shared_resources_router",
+    "create_run_shared_resources_router",
     "create_shared_resource_share_router",
     "create_workflow_revisions_router",
     "create_workflow_node_codes_router",
@@ -137,6 +138,7 @@ def test_route_assembly_preserves_mount_order_and_auth_scope(monkeypatch) -> Non
         "create_preview_panels_router",
         "create_studio_agent_job_tools_router",
         "create_shared_resources_router",
+        "create_run_shared_resources_router",
     ):
         assert _dependencies(router, f"/api/{name}") == [require_workspace_access]
     for name in (

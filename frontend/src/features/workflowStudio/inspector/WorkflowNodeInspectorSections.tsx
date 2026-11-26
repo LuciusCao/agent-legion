@@ -1,6 +1,7 @@
 import type { SelectedWorkflowNodeDetails } from '../shared/workflowStudioModel'
 import { NODE_TYPE_SECTIONS } from './nodeTypeSections'
 import { WorkflowNodeStartSection } from './WorkflowNodeStartSection'
+import { WorkflowNodeSharedResourceSection } from './WorkflowNodeSharedResourceSection'
 
 export type InspectorSectionProps = {
   details: SelectedWorkflowNodeDetails
@@ -13,6 +14,7 @@ export type InspectorSectionProps = {
 // Phase 2）：非 start 类型查表渲染该类型声明的 section 序列；start 节点
 // 携带入口契约、永不执行，只渲染契约段（后端会 404 其节点代码
 // 端点）。遗留 `type: node` / 缺省在 record/ghost 解析层已归一化 code。
+// code 节点另追加共享资源声明段；其他类型不读取资源库。
 export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
   const { node } = props.details
   if (node.node_type === 'start') {
@@ -27,6 +29,15 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
       {spec.sections.map((Section) => (
         <Section key={Section.name} {...props} />
       ))}
+      {(node.node_type ?? 'code') === 'code' && (
+        <WorkflowNodeSharedResourceSection
+          key={`shared-resources-${node.key}`}
+          node={node}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
+      )}
     </>
   )
 }

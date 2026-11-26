@@ -16,6 +16,7 @@ export {
   patchWorkflowNodeLabel,
   patchWorkflowNodeOutputs,
   patchWorkflowNodeRequiresLabels,
+  patchWorkflowNodeSharedResources,
   patchWorkflowNodeTerminalOutcome,
   patchWorkflowNodeTools,
 } from './workflowStudioYamlDraft.node'
