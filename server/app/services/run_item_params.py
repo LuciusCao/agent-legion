@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from server.app.db.rowmap import parse_object
-from server.app.jobs.job_id_encoding import encode_job_id
+from server.app.jobs.job_id_encoding import encode_resource_job_id
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.run_item_client_token import (
     item_client_token,
@@ -34,13 +34,18 @@ _SECRET_PARAM_KEYS = frozenset(
         "secret",
         "secretref",
         "secretset",
+        "secretkey",
+        "apisecret",
         "password",
         "passwd",
+        "pwd",
         "token",
         "authtoken",
         "accesstoken",
         "refreshtoken",
+        "sessiontoken",
         "apikey",
+        "accesskey",
         "clientsecret",
         "credential",
         "credentials",
@@ -165,10 +170,12 @@ def validate_run_item_params(items: list[Any]) -> None:
         fingerprints[identity] = fingerprint
 
 
-def reject_token_param_conflicts(
+def check_token_params(
     job_db: Any,
     workspace_id: str,
     candidates: list[dict[str, Any]],
+    resource_pins_hash: str = "",
+    existing_keys: set[tuple[str, str]] | None = None,
 ) -> None:
     """Reject a token retry whose frozen params differ, without logging param values."""
     tokenized = []
@@ -180,25 +187,31 @@ def reject_token_param_conflicts(
             tokenized.append((candidate, source_type, source_id, entity_id, token))
     if not tokenized:
         return
-    existing = job_db.filter_existing_dedup_keys(
-        workspace_id,
-        ((source_type, source_id) for _, source_type, source_id, _, _ in tokenized),
-    )
-    tokenized = [entry for entry in tokenized if (entry[1], entry[2]) in existing]
+    if existing_keys is None:
+        existing_keys = job_db.filter_existing_dedup_keys(
+            workspace_id,
+            ((source_type, source_id) for _, source_type, source_id, _, _ in tokenized),
+            resource_pins_hash,
+        )
+    tokenized = [entry for entry in tokenized if (entry[1], entry[2]) in existing_keys]
     if not tokenized:
         return
 
     ids_to_fetch: list[str] = []
     for _, _, source_id, _, _ in tokenized:
-        ids_to_fetch.append(encode_job_id(workspace_id, workspace_id, source_id))
-        ids_to_fetch.append(f"{workspace_id}_{workspace_id}_{source_id.replace('/', '_')}")
+        ids_to_fetch.append(
+            encode_resource_job_id(workspace_id, workspace_id, source_id, resource_pins_hash)
+        )
+        if not resource_pins_hash:
+            ids_to_fetch.append(f"{workspace_id}_{workspace_id}_{source_id.replace('/', '_')}")
     rows = job_db.fetch_jobs_by_ids(list(dict.fromkeys(ids_to_fetch)))
     by_id = {str(row["id"]): row for row in rows}
     for candidate, source_type, source_id, entity_id, token in tokenized:
         job_ids = [
-            encode_job_id(workspace_id, workspace_id, source_id),
-            f"{workspace_id}_{workspace_id}_{source_id.replace('/', '_')}",
+            encode_resource_job_id(workspace_id, workspace_id, source_id, resource_pins_hash)
         ]
+        if not resource_pins_hash:
+            job_ids.append(f"{workspace_id}_{workspace_id}_{source_id.replace('/', '_')}")
         for job_id in job_ids:
             row = by_id.get(job_id)
             if row is None or str(row.get("workspace_id")) != workspace_id:

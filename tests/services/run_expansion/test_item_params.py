@@ -164,6 +164,71 @@ def test_same_token_same_params_dedups_but_different_params_reject(service, job_
     assert json.loads(job["input_json"])["params"] == {"variant": "a", "count": 1}
 
 
+def test_write_side_race_with_different_params_rejects_and_cleans_new_run(
+    service, job_db, monkeypatch
+) -> None:
+    material_id = _insert_material(job_db)
+    first = _item("material", material_id, client_token="same", params={"variant": "a"})
+    service.create_run(WORKSPACE_ID, workflow_key=WORKSPACE_ID, items=[first])
+
+    monkeypatch.setattr(
+        service.job_db,
+        "filter_existing_dedup_keys",
+        lambda *args, **kwargs: set(),
+    )
+    conflicting = _item("material", material_id, client_token="same", params={"variant": "b"})
+    with pytest.raises(InvalidOperationError, match="different params"):
+        service.create_run(WORKSPACE_ID, workflow_key=WORKSPACE_ID, items=[conflicting])
+
+    assert len(service.list_runs(WORKSPACE_ID)) == 1
+    (job,) = _jobs(job_db)
+    assert json.loads(job["input_json"])["params"] == {"variant": "a"}
+
+
+@pytest.mark.no_db
+def test_shared_resource_dedup_uses_the_actual_pins_job_namespace() -> None:
+    from server.app.jobs.job_id_encoding import encode_resource_job_id
+    from server.app.services.job_creation_pipeline import JobCreationPipeline
+
+    workspace_id = "ws-shared-params"
+    source_id = "mat-shared~same"
+    pins_hash = "pins-hash"
+    job_id = encode_resource_job_id(workspace_id, workspace_id, source_id, pins_hash)
+
+    class SharedDedupDb:
+        def filter_existing_dedup_keys(self, workspace, keys, pins):
+            assert (workspace, pins) == (workspace_id, pins_hash)
+            return set(keys)
+
+        def fetch_jobs_by_ids(self, ids):
+            assert ids == [job_id]
+            return [
+                {
+                    "id": job_id,
+                    "workspace_id": workspace_id,
+                    "source_type": "material",
+                    "source_id": source_id,
+                    "input_json": json.dumps(
+                        {"type": "material", "material_id": "mat-shared", "params": {"v": "old"}}
+                    ),
+                }
+            ]
+
+    pipeline = JobCreationPipeline(SharedDedupDb(), settings=object())
+    candidate = {
+        "entity_type": "material",
+        "entity_id": source_id,
+        "title": "doc",
+        "stem": "",
+        "input": {"type": "material", "material_id": "mat-shared", "params": {"v": "new"}},
+    }
+    with pytest.raises(InvalidOperationError, match="different params"):
+        pipeline.collect_fresh_candidates(workspace_id, [candidate], pins_hash)
+
+    candidate["input"]["params"] = {"v": "old"}
+    assert pipeline.collect_fresh_candidates(workspace_id, [candidate], pins_hash) == []
+
+
 @pytest.mark.parametrize("mode", ["sync", "async"])
 def test_same_submission_token_param_drift_fails_before_run_write(service, mode) -> None:
     material_id = _insert_material(service.job_db)
@@ -237,8 +302,12 @@ def test_async_cross_request_token_param_drift_becomes_chunk_error(service, job_
     [
         {"secret_ref": "node:wf:node:field"},
         {"nested": {"secret_set": True}},
+        {"secret_key": "plaintext"},
         {"api-key": "plaintext"},
+        {"accessKey": "plaintext"},
+        {"sessionToken": "plaintext"},
         {"password": "plaintext"},
+        {"pwd": "plaintext"},
         {"authToken": "plaintext"},
         {"clientSecret": "plaintext"},
         {"credentials": {"value": "plaintext"}},

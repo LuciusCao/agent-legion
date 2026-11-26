@@ -25,7 +25,9 @@ Host 与 Worker 都复用该既有通道。省略 `params` 时 input 仍是 lega
 ref 的自由-form params 与 text 契约不变。平台不解释 params 的业务键，也不把它并入 job
 identity：需要同内容多个变体的调用方使用不同 `client_token`。同一 token 同 params 的
 重试保持幂等，同批或既有 job 上同 token 不同 params 拒绝（同步为 400；异步跨请求冲突按
-feeder chunk error 记录）。
+feeder chunk error 记录）。dedup 命中按实际 shared-resource pins 命名空间读取冻结 params；
+若两个请求都漏读 dedup，`create_jobs_bulk` 在既有 job-mutation 锁内、INSERT 前复验，竞态
+落败也不能把参数漂移静默当成普通重复。
 
 params 只接受标准 JSON null/boolean/string/finite number/array/object，根必须是 object。
 单条目按 canonical JSON 计算至多 16 KiB UTF-8；根深度为 1、总深度至多 4，总键数至多 64，

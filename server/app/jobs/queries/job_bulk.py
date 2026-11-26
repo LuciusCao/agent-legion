@@ -21,6 +21,7 @@ from server.app.jobs.queries.job_bulk_sql import (
     lock_job_mutations_sorted,
     lock_rows_for_key_share,
 )
+from server.app.jobs.queries.job_item_params import verify_chunk_item_params
 from server.app.jobs.queries.shared_resources.job_bulk_pins import (
     insert_run_resource_pins,
     scoped_job_id,
@@ -194,8 +195,11 @@ class JobBulkQueriesMixin(ConnectionQueriesMixin):
                 # storage dirs only for ids with no row yet (stray shard dirs
                 # would block the flat→sharded migration; resubmits keep the
                 # stored dir). Read under the job-mutation locks, existence
-                # is settled against deletion and concurrent creation.
+                # is settled against deletion and concurrent creation. Tokenized
+                # material/bundle rows also compare frozen params here, so a
+                # concurrent same-token params change cannot become a dedup hit.
                 existing = verify_chunk_identities(conn, chunk)
+                verify_chunk_item_params(conn, chunk)
                 for job_id in chunk_ids:
                     if job_id not in existing:
                         job_storage_dir(self.jobs_dir, workspace_id, job_id).mkdir(
