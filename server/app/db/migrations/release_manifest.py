@@ -4,6 +4,9 @@ The v108 backfill freezes the packaging scope that existed at migration time:
 the three legacy generic files plus every output declared by the workspace's
 active revision. Workspaces created afterwards have no rows and therefore use
 the implicit, empty revision 0. Nothing here follows later active revisions.
+Names use the same canonical downloadable-name normalization as the API. A
+stored non-downloadable output aborts the upgrade with its workspace and name;
+valid aliases collapse before the canonical document and hash are persisted.
 
 The migration owns the DDL so fresh and upgraded databases take the same path.
 Stored revisions reject updates and deletes; the delete arm only permits the
@@ -17,6 +20,7 @@ import json
 import uuid
 from typing import Any
 
+from server.app.services.job_artifact_names import canonical_downloadable_artifact_names
 from server.app.workflows.loader import workflow_definition_from_dict
 
 _LEGACY_PACKAGE_FILES = frozenset({"result.json", "metadata.json", "report.md"})
@@ -54,13 +58,19 @@ create trigger workspace_release_manifests_immutable
 """
 
 
-def _backfill_names(definition_json: str | None) -> list[str]:
+def _backfill_names(definition_json: str | None, workspace_id: str) -> list[str]:
     names = set(_LEGACY_PACKAGE_FILES)
     if definition_json is not None:
         definition = workflow_definition_from_dict(json.loads(definition_json))
         for node in definition.nodes.values():
             names.update(node.outputs)
-    return sorted(names)
+    try:
+        return canonical_downloadable_artifact_names(names)
+    except ValueError as exc:
+        raise ValueError(
+            f"v108 release manifest backfill refused workspace {workspace_id}: {exc};"
+            " correct the active revision declaration and retry the upgrade"
+        ) from exc
 
 
 def _document(names: list[str]) -> str:
@@ -83,7 +93,9 @@ def migrate_release_manifest(conn: Any) -> None:
             " order by version desc limit 1",
             (workspace_id,),
         ).fetchone()
-        names = _backfill_names(str(revision["definition_json"]) if revision is not None else None)
+        names = _backfill_names(
+            str(revision["definition_json"]) if revision is not None else None, workspace_id
+        )
         document = _document(names)
         conn.execute(
             "insert into workspace_release_manifests("

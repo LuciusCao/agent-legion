@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import psycopg
@@ -9,6 +10,19 @@ from server.app.db.migrations.release_manifest import migrate_release_manifest
 from server.app.db.schema import SCHEMA_VERSION, init_db
 
 _BASE_NAMES = ["metadata.json", "report.md", "result.json"]
+_ALIAS_OUTPUTS = [
+    "reports/final.json",
+    "reports//final.json",
+    "./result.json",
+    "result.json",
+    "reports/./audit.json",
+    "reports//audit.json",
+    "z.json",
+    "z.json",
+]
+_EXPECTED_CANONICAL_NAMES = sorted(
+    _BASE_NAMES + ["reports/audit.json", "reports/final.json", "z.json"]
+)
 
 
 def _definition(outputs: list[str]) -> str:
@@ -53,6 +67,12 @@ def _rows(conn) -> list[dict]:
     ]
 
 
+def _rewind_v108(conn) -> None:
+    conn.execute("drop table workspace_release_manifests")
+    conn.execute("drop function workspace_release_manifest_immutable()")
+    conn.execute("delete from schema_migrations where version >= 108")
+
+
 def test_fresh_schema_registers_release_manifest(job_db) -> None:
     assert SCHEMA_VERSION == 108
     with job_db.read() as conn:
@@ -85,14 +105,12 @@ def test_fresh_schema_registers_release_manifest(job_db) -> None:
 @pytest.mark.fresh_schema
 def test_v107_upgrade_backfills_the_frozen_active_scope_once(job_db) -> None:
     with job_db.write() as conn:
-        conn.execute("drop table workspace_release_manifests")
-        conn.execute("drop function workspace_release_manifest_immutable()")
-        conn.execute("delete from schema_migrations where version >= 108")
+        _rewind_v108(conn)
         conn.execute(
             "insert into workspaces(id, name) values ('legacy-ws', 'Legacy'),"
             " ('no-active-ws', 'No active')"
         )
-        _insert_revision(conn, "legacy-ws", "legacy-active", "active", _definition(["z.json"]))
+        _insert_revision(conn, "legacy-ws", "legacy-active", "active", _definition(_ALIAS_OUTPUTS))
         _insert_revision(
             conn,
             "legacy-ws",
@@ -104,10 +122,14 @@ def test_v107_upgrade_backfills_the_frozen_active_scope_once(job_db) -> None:
 
     init_db(job_db.dsn_identity)
 
+    expected_document = json.dumps(_EXPECTED_CANONICAL_NAMES, separators=(",", ":"))
+    expected_hash = hashlib.sha256(expected_document.encode("utf-8")).hexdigest()
     with job_db.read() as conn:
         rows = _rows(conn)
         assert [row["workspace_id"] for row in rows] == ["legacy-ws", "no-active-ws"]
-        assert json.loads(rows[0]["artifact_names_json"]) == sorted(_BASE_NAMES + ["z.json"])
+        assert json.loads(rows[0]["artifact_names_json"]) == _EXPECTED_CANONICAL_NAMES
+        assert rows[0]["artifact_names_json"] == expected_document
+        assert rows[0]["manifest_hash"] == expected_hash
         assert json.loads(rows[1]["artifact_names_json"]) == _BASE_NAMES
         assert all(row["revision"] == 1 for row in rows)
         assert all(row["created_by"] == "schema-v108-backfill" for row in rows)
@@ -126,7 +148,45 @@ def test_v107_upgrade_backfills_the_frozen_active_scope_once(job_db) -> None:
         rows = _rows(conn)
         assert len(rows) == 2
         assert rows[0] == before
-        assert json.loads(rows[0]["artifact_names_json"]) == sorted(_BASE_NAMES + ["z.json"])
+        assert rows[0]["artifact_names_json"] == expected_document
+        assert rows[0]["manifest_hash"] == expected_hash
+
+
+@pytest.mark.fresh_schema
+@pytest.mark.parametrize(
+    "bad_name",
+    [
+        "../escape.json",
+        "/absolute.json",
+        "runs/result.json",
+        ".hidden/result.json",
+        "reports/.staging/result.json",
+        "bad\nname.json",
+        "reports\\result.json",
+    ],
+)
+def test_v107_upgrade_fails_closed_for_non_downloadable_outputs(job_db, bad_name: str) -> None:
+    with job_db.write() as conn:
+        _rewind_v108(conn)
+        conn.execute("insert into workspaces(id, name) values ('legacy-ws', 'Legacy')")
+        original = _definition([bad_name])
+        _insert_revision(conn, "legacy-ws", "legacy-active", "active", original)
+
+    with pytest.raises(ValueError) as caught:
+        init_db(job_db.dsn_identity)
+
+    assert "legacy-ws" in str(caught.value)
+    assert repr(bad_name) in str(caught.value)
+    assert "correct the active revision declaration" in str(caught.value)
+    with job_db.read() as conn:
+        table = conn.execute("select to_regclass('workspace_release_manifests') as name").fetchone()
+        migration = conn.execute("select name from schema_migrations where version=108").fetchone()
+        active = conn.execute(
+            "select definition_json from workflow_revisions where id='legacy-active'"
+        ).fetchone()
+    assert table["name"] is None
+    assert migration is None
+    assert active["definition_json"] == original
 
 
 def test_history_rejects_mutation_but_allows_workspace_cascade(job_db) -> None:

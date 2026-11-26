@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 _WORKSPACE_ID = "release-api"
 _URL = f"/api/workspaces/{_WORKSPACE_ID}/release-manifest"
 
@@ -95,6 +98,46 @@ def test_release_manifest_api_roundtrip_conflict_and_openapi(client) -> None:
     assert "get" in schema["paths"]["/api/workspaces/{workspace_id}/release-manifest/revisions"]
     record = schema["components"]["schemas"]["WorkspaceReleaseManifestRecord"]["properties"]
     assert {"revision", "artifact_names", "manifest_hash", "created_by"} <= set(record)
+
+
+def test_release_manifest_api_aliases_match_migration_document_and_hash(client) -> None:
+    _create_workspace(client)
+    response = client.put(
+        _URL,
+        json={
+            "artifact_names": [
+                "reports/final.json",
+                "reports//final.json",
+                "./result.json",
+                "result.json",
+                "reports/./audit.json",
+                "reports//audit.json",
+                "z.json",
+                "z.json",
+                "metadata.json",
+                "report.md",
+            ],
+            "expected_revision": 0,
+        },
+    )
+    assert response.status_code == 200, response.text
+    manifest = response.json()
+    expected_names = [
+        "metadata.json",
+        "report.md",
+        "reports/audit.json",
+        "reports/final.json",
+        "result.json",
+        "z.json",
+    ]
+    expected_document = json.dumps(expected_names, separators=(",", ":"))
+    assert manifest["artifact_names"] == expected_names
+    assert json.dumps(manifest["artifact_names"], separators=(",", ":")) == expected_document
+    assert (
+        manifest["manifest_hash"] == hashlib.sha256(expected_document.encode("utf-8")).hexdigest()
+    )
+    history = client.get(f"{_URL}/revisions").json()["revisions"]
+    assert history == [manifest]
 
 
 def test_release_manifest_requires_authentication(anon_client) -> None:

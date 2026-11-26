@@ -1050,10 +1050,10 @@ Studio 分离改造把 workflow 编辑分成两条通道。**结构通道**（�
 
 ### Workspace 发布清单（#120）
 
-发布清单是 workspace 级、仅由通用 artifact 名称组成的发布范围声明，与节点 outputs 和 active workflow revision 分离；平台模型不包含业务参数。当前清单是最大 revision 的不可变行，未落行时表示隐式 revision 0 空清单。每次有效更新在 workspace 写锁内校验 `expected_revision` 后追加 revision，冲突返回当前清单；相同内容的保存不追加空历史。名称经共享下载白名单与 canonical POSIX 路径校验，落库前去重排序，并以 canonical JSON 的 SHA-256 作为 `manifest_hash`，供后续发布操作精确固定 revision/hash。
+发布清单是 workspace 级、仅由通用 artifact 名称组成的发布范围声明，与节点 outputs 和 active workflow revision 分离；平台模型不包含业务参数。当前清单是最大 revision 的不可变行，未落行时表示隐式 revision 0 空清单。每次有效更新在 workspace 写锁内校验 `expected_revision` 后追加 revision，冲突返回当前清单；相同内容的保存不追加空历史。名称先过共享下载白名单，再归一为 canonical POSIX 形式（合法 `//`、`./` aliases 合并）并二次校验，最后去重排序，以 canonical JSON 的 SHA-256 作为 `manifest_hash`，供后续发布操作精确固定 revision/hash。
 
 - API：`GET /workspaces/{id}/release-manifest` 读取当前清单，`PUT` 全量替换名称（新增与删除都通过下一次 PUT 表达），`GET .../release-manifest/revisions` 按 revision 倒序读取完整历史。读取允许 viewer/editor/admin，写入要求 editor/admin，并拒绝 Studio scoped token 直接产生副作用。
-- schema v108 只为迁移时已经存在的 workspace 写入 revision 1：范围固定为旧打包的三项通用文件（`result.json`、`metadata.json`、`report.md`）加当时 active revision 的全部节点 outputs；无 active revision 时仅保留三项通用文件。迁移后创建或修改 active revision 不会重算该行，之后创建的 workspace 从空清单开始。
+- schema v108 只为迁移时已经存在的 workspace 写入 revision 1：范围固定为旧打包的三项通用文件（`result.json`、`metadata.json`、`report.md`）加当时 active revision 的全部节点 outputs；无 active revision 时仅保留三项通用文件。迁移后创建或修改 active revision 不会重算该行，之后创建的 workspace 从空清单开始。存量输出若含 `../`、绝对路径、`runs/`、点前缀段或其他不可下载名称，v108 带 workspace/name 报错并整体回滚；须先人工修正 active revision 声明再升级，不静默排除或写入历史。
 - 数据库触发器拒绝历史行 UPDATE/DELETE；workspace 自身删除仍可级联清理其清单历史。service 只经 `WorkspaceReleaseManifestQueries` adjunct 使用 JobQueries 的 `read()` / `write()`，不接触 DSN 或事务原语。本片只提供清单基座，不把既有打包执行自动切换到新清单。
 
 ## Database

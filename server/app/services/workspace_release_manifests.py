@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
-from pathlib import PurePosixPath
 from typing import Any
 
 from server.app.db.rowmap import iso_optional
 from server.app.jobs.queries.workspace_release_manifests import (
     WorkspaceReleaseManifestQueries,
-    normalize_release_artifact_names,
     release_manifest_hash,
 )
-from server.app.services.job_artifact_names import is_downloadable_artifact_name
+from server.app.services.job_artifact_names import canonical_downloadable_artifact_names
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 
 
@@ -48,10 +46,10 @@ def _record(workspace_id: str, row: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _validated_names(names: list[str]) -> list[str]:
-    for name in names:
-        if not is_downloadable_artifact_name(name) or PurePosixPath(name).as_posix() != name:
-            raise InvalidOperationError(f"Invalid release artifact name: {name!r}")
-    return normalize_release_artifact_names(names)
+    try:
+        return canonical_downloadable_artifact_names(names)
+    except ValueError as exc:
+        raise InvalidOperationError(str(exc)) from exc
 
 
 class WorkspaceReleaseManifestsService:

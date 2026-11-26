@@ -136,9 +136,6 @@ def test_concurrent_expected_revision_admits_exactly_one_append(service) -> None
         "",
         "/absolute.json",
         "../escape.json",
-        "reports//result.json",
-        "./result.json",
-        "result.json/",
         "runs/result.json",
         ".hidden/result.json",
         "reports\\result.json",
@@ -147,7 +144,7 @@ def test_concurrent_expected_revision_admits_exactly_one_append(service) -> None
     ],
 )
 def test_invalid_artifact_names_do_not_append(service, name: str) -> None:
-    with pytest.raises(InvalidOperationError, match="Invalid release artifact name"):
+    with pytest.raises(InvalidOperationError, match="Invalid artifact name"):
         service.update(
             "release-service",
             artifact_names=[name],

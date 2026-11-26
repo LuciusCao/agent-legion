@@ -13,16 +13,14 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
+from server.app.services.job_artifact_names import canonical_downloadable_artifact_names
+
 _COLUMNS = "id, workspace_id, revision, artifact_names_json, manifest_hash, created_by, created_at"
-
-
-def normalize_release_artifact_names(names: Iterable[str]) -> list[str]:
-    return sorted(set(names))
 
 
 def release_manifest_document(names: Iterable[str]) -> str:
     return json.dumps(
-        normalize_release_artifact_names(names), ensure_ascii=False, separators=(",", ":")
+        canonical_downloadable_artifact_names(names), ensure_ascii=False, separators=(",", ":")
     )
 
 
