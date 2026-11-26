@@ -137,6 +137,11 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("DELETE", "/api/workspaces/{workspace_id}/packages/{package_id:int}", None),
     ("PATCH", "/api/workspaces/{workspace_id}/packages/{package_id:int}", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/package", None),
+    (
+        "PUT",
+        "/api/workspaces/{workspace_id}/release-manifest",
+        {"artifact_names": [], "expected_revision": 0},
+    ),
     ("POST", "/api/workspaces/{workspace_id}/jobs/clear-packed", None),
     ("DELETE", "/api/workspaces/{workspace_id}/members/{user_id}", None),
     ("PATCH", "/api/workspaces/{workspace_id}/settings/{section}", None),

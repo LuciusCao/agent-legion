@@ -9,6 +9,7 @@ rules of the download side keep ONE source of truth.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import PurePosixPath
 
 # job_dir 里不是产物的子树：runs/ 是每节点的执行 run 目录（events.jsonl
@@ -51,6 +52,19 @@ def is_downloadable_artifact_name(artifact_name: str) -> bool:
         and len(part.encode("utf-8")) <= MAX_ARTIFACT_NAME_SEGMENT_BYTES
         for part in relative.parts
     )
+
+
+def canonical_downloadable_artifact_name(artifact_name: str) -> str:
+    if not is_downloadable_artifact_name(artifact_name):
+        raise ValueError(f"Invalid artifact name: {artifact_name!r}")
+    canonical = PurePosixPath(artifact_name).as_posix()
+    if not is_downloadable_artifact_name(canonical):
+        raise ValueError(f"Invalid artifact name: {artifact_name!r}")
+    return canonical
+
+
+def canonical_downloadable_artifact_names(artifact_names: Iterable[str]) -> list[str]:
+    return sorted({canonical_downloadable_artifact_name(name) for name in artifact_names})
 
 
 def is_plausible_job_id(job_id: str) -> bool:

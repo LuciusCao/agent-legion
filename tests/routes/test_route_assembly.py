@@ -22,6 +22,7 @@ _FACTORY_NAMES = [
     "create_connections_router",
     "create_infra_connections_router",
     "create_packages_router",
+    "create_workspace_release_manifests_router",
     "create_worker_router",
     "create_agent_workers_router",
     "create_artifacts_router",
@@ -132,6 +133,7 @@ def test_route_assembly_preserves_mount_order_and_auth_scope(monkeypatch) -> Non
         assert require_studio_authoring not in _dependencies(router, f"/api/{name}")
     for name in (
         "create_packages_router",
+        "create_workspace_release_manifests_router",
         "create_metrics_router",
         "create_skills_router",
         "create_preview_panels_router",
