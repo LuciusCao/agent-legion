@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import unicodedata
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
@@ -93,7 +94,11 @@ def validate_item_params(params: Any) -> dict[str, Any]:
                     raise InvalidOperationError(
                         f"item params keys must be at most {RUN_ITEM_PARAMS_MAX_KEY_CHARS} characters"
                     )
-                normalized_key = "".join(char for char in key.casefold() if char.isalnum())
+                # NFKC applies only to this comparison key; the submitted
+                # params object is returned and frozen without normalization.
+                normalized_key = "".join(
+                    char for char in unicodedata.normalize("NFKC", key).casefold() if char.isalnum()
+                )
                 if normalized_key in _SECRET_PARAM_KEYS:
                     raise InvalidOperationError(
                         "item params must be non-secret; credential fields and vault markers "

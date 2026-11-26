@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
@@ -9,9 +10,13 @@ from pydantic import ValidationError
 
 from server.app.routes.run_item_contracts import RunItemRef, RunItemText
 from server.app.services.run_batch_feeder import RunBatchFeeder
+from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
+from server.app.workflows.definition import workflow_definition_from_dict
 from tests.helpers import publish_legacy_intake_revision
 
 WORKSPACE_ID = "run-item-params-api"
+UNICODE_SECRET_KEYS = ("ｐａｓｓｗｏｒｄ", "ｓｅｃｒｅｔ", "api＿key", "𝐬𝐞𝐜𝐫𝐞𝐭")
 
 
 def _workspace(client) -> str:
@@ -35,6 +40,30 @@ def _insert_material(client, material_id: str = "mat-params") -> str:
             ),
         )
     return material_id
+
+
+def _insert_bundle(client, bundle_id: str = "bundle-params") -> str:
+    material_id = _insert_material(client, f"{bundle_id}-member")
+    with client.app.state.job_db.connect() as conn:
+        conn.execute(
+            "insert into material_bundles(id, workspace_id, name, total_size_bytes,"
+            " file_count, created_by) values (%s, %s, 'folder', 10, 1, 'tester')",
+            (bundle_id, WORKSPACE_ID),
+        )
+        conn.execute(
+            "insert into material_bundle_members(bundle_id, material_id, path, ordinal)"
+            " values (%s, %s, 'doc.txt', 0)",
+            (bundle_id, material_id),
+        )
+    return bundle_id
+
+
+def _accept_bundle_items(client) -> None:
+    raw = copy.deepcopy(DEMO_WORKFLOW_DEFINITION)
+    raw["nodes"]["_start"]["accepted_item_types"] = ["material", "bundle"]
+    WorkflowRevisionService(client.app.state.job_db).publish_workspace_revision(
+        WORKSPACE_ID, workflow_definition_from_dict(raw)
+    )
 
 
 def _submit(client, items: list[dict], mode: str = "sync"):
@@ -97,6 +126,43 @@ def test_async_api_freezes_items_at_accept_and_feeds_the_same_params(client) -> 
     assert json.loads(job["input_json"])["params"] == params
     detail = client.get(f"/api/workspaces/{WORKSPACE_ID}/runs/{run_id}")
     assert detail.json()["batch"]["chunk_errors"] == []
+
+
+@pytest.mark.parametrize("kind", ["material", "bundle"])
+@pytest.mark.parametrize("secret_key", UNICODE_SECRET_KEYS)
+def test_api_rejects_nested_unicode_secret_keys_without_writes(client, kind, secret_key) -> None:
+    _workspace(client)
+    entity_id = _insert_material(client) if kind == "material" else "bundle-params"
+
+    response = _submit(
+        client,
+        [{"type": kind, f"{kind}_id": entity_id, "params": {"outer": {secret_key: "plaintext"}}}],
+    )
+
+    assert response.status_code == 422, response.text
+    assert client.get(f"/api/workspaces/{WORKSPACE_ID}/runs").json()["runs"] == []
+    assert _jobs(client) == []
+
+
+@pytest.mark.parametrize("kind", ["material", "bundle"])
+def test_api_freezes_unicode_business_keys_verbatim(client, kind) -> None:
+    _workspace(client)
+    _accept_bundle_items(client)
+    entity_id = _insert_material(client) if kind == "material" else _insert_bundle(client)
+    params = {"业务🌐": {"ｋｅｙ": "值", "clé": 1}, "variant": "blue"}
+
+    response = _submit(
+        client,
+        [{"type": kind, f"{kind}_id": entity_id, "params": params}],
+    )
+
+    assert response.status_code == 200, response.text
+    (job,) = _jobs(client)
+    assert json.loads(job["input_json"]) == {
+        "type": kind,
+        f"{kind}_id": entity_id,
+        "params": params,
+    }
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])

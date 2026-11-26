@@ -31,7 +31,9 @@ WORKSPACE_ID = "education_video_problems_generation"
 PARAMS = {
     "variant": "blue",
     "options": {"count": 2, "enabled": True, "labels": ["a", "b"], "empty": None},
+    "业务🌐": {"ｋｅｙ": "值", "clé": 1},
 }
+UNICODE_SECRET_KEYS = ("ｐａｓｓｗｏｒｄ", "ｓｅｃｒｅｔ", "api＿key", "𝐬𝐞𝐜𝐫𝐞𝐭")
 
 
 @pytest.fixture
@@ -394,6 +396,21 @@ def test_async_cross_request_token_param_drift_becomes_chunk_error(service, job_
 def test_secret_shapes_are_rejected_at_any_depth(params) -> None:
     with pytest.raises(InvalidOperationError, match="non-secret"):
         validate_item_params(params)
+
+
+@pytest.mark.parametrize("kind", ["material", "bundle"])
+@pytest.mark.parametrize("secret_key", UNICODE_SECRET_KEYS)
+def test_service_rejects_nested_unicode_secret_keys_without_writes(
+    service, job_db, kind, secret_key
+) -> None:
+    entity_id = _insert_material(job_db) if kind == "material" else _insert_bundle(job_db)
+    item = _item(kind, entity_id, params={"outer": {secret_key: "plaintext"}})
+
+    with pytest.raises(InvalidOperationError, match="non-secret"):
+        service.create_run(WORKSPACE_ID, workflow_key=WORKSPACE_ID, items=[item])
+
+    assert service.list_runs(WORKSPACE_ID) == []
+    assert _jobs(job_db) == []
 
 
 @pytest.mark.no_db
