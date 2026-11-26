@@ -25,6 +25,8 @@ from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION
 from server.app.workflows.definition import workflow_definition_from_dict
 from tests.helpers import publish_builtin_revision
 
+pytest_plugins = ("tests.services.shared_resources.conftest",)
+
 WORKSPACE_ID = "education_video_problems_generation"
 PARAMS = {
     "variant": "blue",
@@ -176,6 +178,11 @@ def test_write_side_race_with_different_params_rejects_and_cleans_new_run(
         "filter_existing_dedup_keys",
         lambda *args, **kwargs: set(),
     )
+    monkeypatch.setattr(
+        service.job_db,
+        "filter_existing_dedup_inputs",
+        lambda *args, **kwargs: [],
+    )
     conflicting = _item("material", material_id, client_token="same", params={"variant": "b"})
     with pytest.raises(InvalidOperationError, match="different params"):
         service.create_run(WORKSPACE_ID, workflow_key=WORKSPACE_ID, items=[conflicting])
@@ -187,25 +194,18 @@ def test_write_side_race_with_different_params_rejects_and_cleans_new_run(
 
 @pytest.mark.no_db
 def test_shared_resource_dedup_uses_the_actual_pins_job_namespace() -> None:
-    from server.app.jobs.job_id_encoding import encode_resource_job_id
     from server.app.services.job_creation_pipeline import JobCreationPipeline
 
     workspace_id = "ws-shared-params"
     source_id = "mat-shared~same"
     pins_hash = "pins-hash"
-    job_id = encode_resource_job_id(workspace_id, workspace_id, source_id, pins_hash)
 
     class SharedDedupDb:
-        def filter_existing_dedup_keys(self, workspace, keys, pins):
+        def filter_existing_dedup_inputs(self, workspace, keys, pins):
             assert (workspace, pins) == (workspace_id, pins_hash)
-            return set(keys)
-
-        def fetch_jobs_by_ids(self, ids):
-            assert ids == [job_id]
+            assert keys == [("material", source_id)]
             return [
                 {
-                    "id": job_id,
-                    "workspace_id": workspace_id,
                     "source_type": "material",
                     "source_id": source_id,
                     "input_json": json.dumps(
@@ -227,6 +227,84 @@ def test_shared_resource_dedup_uses_the_actual_pins_job_namespace() -> None:
 
     candidate["input"]["params"] = {"v": "old"}
     assert pipeline.collect_fresh_candidates(workspace_id, [candidate], pins_hash) == []
+
+
+def test_shared_pins_transition_and_conflict_cleanup(
+    job_db, settings, shared_service, shared_materials, shared_storage
+) -> None:
+    from server.app.workflows.definition import workflow_definition_from_mapping
+    from tests.services.shared_resources.conftest import SOURCE_WS, TARGET_WS
+    from tests.services.shared_resources.helpers import create_resource, ready_material
+
+    resource_material = ready_material(
+        shared_materials, shared_storage, SOURCE_WS, b"shared-params", "rules.txt"
+    )
+    resource = create_resource(shared_service, SOURCE_WS, "material", resource_material)
+    resource_id = str(resource["id"])
+    shared_service.share(SOURCE_WS, resource_id, target_workspace_id=TARGET_WS, actor_id="owner")
+    material_id = ready_material(shared_materials, shared_storage, TARGET_WS, b"item", "item.txt")
+    service = RunService(job_db, settings, materials_service=shared_materials)
+
+    def publish(resource_ids: list[str]) -> None:
+        definition = workflow_definition_from_mapping(
+            {
+                "key": TARGET_WS,
+                "label": "Target",
+                "nodes": {
+                    "draft": {
+                        "type": "code",
+                        "capability": "draft",
+                        "shared_resources": resource_ids,
+                    }
+                },
+            }
+        )
+        WorkflowRevisionService(job_db).publish_workspace_revision(TARGET_WS, definition)
+
+    item = _item("material", material_id, client_token="same", params={"v": "ordinary"})
+    publish([])
+    ordinary = service.create_run(TARGET_WS, workflow_key=TARGET_WS, items=[item])
+
+    publish([resource_id])
+    shared = service.create_run(
+        TARGET_WS,
+        workflow_key=TARGET_WS,
+        items=[{**item, "params": {"v": "shared"}}],
+    )
+    assert shared["created_count"] == 1
+    assert shared["job_ids"][0] != ordinary["job_ids"][0]
+
+    before_run_ids = {ordinary["run"]["id"], shared["run"]["id"]}
+    with pytest.raises(InvalidOperationError, match="different params"):
+        service.create_run(
+            TARGET_WS,
+            workflow_key=TARGET_WS,
+            items=[{**item, "params": {"v": "changed"}}],
+        )
+    assert {run["id"] for run in service.list_runs(TARGET_WS)} == before_run_ids
+    with job_db.read() as conn:
+        rows = conn.execute(
+            "select id, input_json from jobs where workspace_id=%s",
+            (TARGET_WS,),
+        ).fetchall()
+    assert len(rows) == 2
+    inputs = {str(row["id"]): json.loads(row["input_json"]) for row in rows}
+    assert inputs[ordinary["job_ids"][0]]["params"] == {"v": "ordinary"}
+    assert inputs[shared["job_ids"][0]]["params"] == {"v": "shared"}
+
+    publish([])
+    with pytest.raises(InvalidOperationError, match="different params"):
+        service.create_run(
+            TARGET_WS,
+            workflow_key=TARGET_WS,
+            items=[{**item, "params": {"v": "ordinary"}}],
+        )
+    assert {run["id"] for run in service.list_runs(TARGET_WS)} == before_run_ids
+    with job_db.read() as conn:
+        count = conn.execute(
+            "select count(*) as n from jobs where workspace_id=%s", (TARGET_WS,)
+        ).fetchone()
+    assert int(count["n"]) == 2
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])

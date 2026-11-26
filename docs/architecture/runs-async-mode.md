@@ -25,8 +25,9 @@ Host 与 Worker 都复用该既有通道。省略 `params` 时 input 仍是 lega
 ref 的自由-form params 与 text 契约不变。平台不解释 params 的业务键，也不把它并入 job
 identity：需要同内容多个变体的调用方使用不同 `client_token`。同一 token 同 params 的
 重试保持幂等，同批或既有 job 上同 token 不同 params 拒绝（同步为 400；异步跨请求冲突按
-feeder chunk error 记录）。dedup 命中按实际 shared-resource pins 命名空间读取冻结 params；
-若两个请求都漏读 dedup，`create_jobs_bulk` 在既有 job-mutation 锁内、INSERT 前复验，竞态
+feeder chunk error 记录）。dedup 按实际 shared-resource pins 命名空间返回命中行并比较冻结
+params（空 pins 也覆盖多个实际命中，不推算 job id）；若两个请求都漏读 dedup，
+`create_jobs_bulk` 在既有 job-mutation 锁内、INSERT 前复验，竞态
 落败也不能把参数漂移静默当成普通重复。
 
 params 只接受标准 JSON null/boolean/string/finite number/array/object，根必须是 object。
@@ -35,7 +36,7 @@ params 只接受标准 JSON null/boolean/string/finite number/array/object，根
 `secret` / `secret_ref` / `secret_set` 与常见 password/token/api_key/credential/private_key
 形态均拒绝；secret 只能继续走节点 `config_schema` + vault，params 不做 vault 解析。这些
 形状与同批 token 参数冲突属于廉价校验，同步/异步受理都在首个 run 写入前拒绝；跨请求
-冲突仍遵循上段的同步解析/异步 feeder 边界。
+冲突仍遵循同步 dedup/异步 feeder 边界，同步在 collect 失败时只补偿本次新建且仍为空的 run。
 
 响应：
 

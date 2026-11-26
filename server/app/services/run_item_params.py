@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from server.app.db.rowmap import parse_object
-from server.app.jobs.job_id_encoding import encode_resource_job_id
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.run_item_client_token import (
     item_client_token,
@@ -170,66 +170,57 @@ def validate_run_item_params(items: list[Any]) -> None:
         fingerprints[identity] = fingerprint
 
 
-def check_token_params(
+@contextmanager
+def empty_run_guard(job_db: Any, precreated: Any, created: bool) -> Iterator[None]:
+    """Compensate only this request's new, still-empty run on contract errors."""
+    try:
+        yield
+    except InvalidOperationError:
+        if precreated is not None and created:
+            job_db.delete_run_without_jobs(str(precreated["id"]))
+        raise
+
+
+def dedup_keys_with_valid_params(
     job_db: Any,
     workspace_id: str,
     candidates: list[dict[str, Any]],
-    resource_pins_hash: str = "",
-    existing_keys: set[tuple[str, str]] | None = None,
-) -> None:
-    """Reject a token retry whose frozen params differ, without logging param values."""
-    tokenized = []
+    resource_pins_hash: str,
+) -> set[tuple[str, str]]:
+    """Probe actual dedup rows, reject token params drift, and return existing keys."""
+    keys: list[tuple[str, str]] = []
+    tokenized: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
     for candidate in candidates:
         source_type = str(candidate.get("entity_type") or "")
         source_id = str(candidate.get("entity_id") or "")
+        identity = (source_type, source_id)
+        keys.append(identity)
         entity_id, token = split_scoped_source_id(source_type, source_id)
-        if token is not None:
-            tokenized.append((candidate, source_type, source_id, entity_id, token))
-    if not tokenized:
-        return
-    if existing_keys is None:
-        existing_keys = job_db.filter_existing_dedup_keys(
-            workspace_id,
-            ((source_type, source_id) for _, source_type, source_id, _, _ in tokenized),
-            resource_pins_hash,
+        if token is None:
+            continue
+        candidate_input = candidate.get("input")
+        submitted_params = (
+            candidate_input.get("params", {}) if isinstance(candidate_input, Mapping) else {}
         )
-    tokenized = [entry for entry in tokenized if (entry[1], entry[2]) in existing_keys]
+        tokenized.setdefault(identity, []).append(
+            (entity_id, token, canonical_item_params(submitted_params))
+        )
     if not tokenized:
-        return
+        existing: set[tuple[str, str]] = job_db.filter_existing_dedup_keys(
+            workspace_id, keys, resource_pins_hash
+        )
+        return existing
 
-    ids_to_fetch: list[str] = []
-    for _, _, source_id, _, _ in tokenized:
-        ids_to_fetch.append(
-            encode_resource_job_id(workspace_id, workspace_id, source_id, resource_pins_hash)
-        )
-        if not resource_pins_hash:
-            ids_to_fetch.append(f"{workspace_id}_{workspace_id}_{source_id.replace('/', '_')}")
-    rows = job_db.fetch_jobs_by_ids(list(dict.fromkeys(ids_to_fetch)))
-    by_id = {str(row["id"]): row for row in rows}
-    for candidate, source_type, source_id, entity_id, token in tokenized:
-        job_ids = [
-            encode_resource_job_id(workspace_id, workspace_id, source_id, resource_pins_hash)
-        ]
-        if not resource_pins_hash:
-            job_ids.append(f"{workspace_id}_{workspace_id}_{source_id.replace('/', '_')}")
-        for job_id in job_ids:
-            row = by_id.get(job_id)
-            if row is None or str(row.get("workspace_id")) != workspace_id:
-                continue
-            if (str(row.get("source_type")), str(row.get("source_id"))) != (
-                source_type,
-                source_id,
-            ):
-                continue
-            stored_input = parse_object(row.get("input_json"))
-            candidate_input = candidate.get("input")
-            submitted_params = (
-                candidate_input.get("params", {}) if isinstance(candidate_input, Mapping) else {}
-            )
-            if canonical_item_params(stored_input.get("params", {})) != canonical_item_params(
-                submitted_params
+    rows = job_db.filter_existing_dedup_inputs(workspace_id, keys, resource_pins_hash)
+    for row in rows:
+        identity = (str(row["source_type"]), str(row["source_id"]))
+        for entity_id, token, submitted in tokenized.get(identity, ()):
+            if (
+                canonical_item_params(parse_object(row.get("input_json")).get("params", {}))
+                != submitted
             ):
                 raise InvalidOperationError(
                     f"client_token {token!r} was already used with different params for "
-                    f"{source_type} {entity_id!r}"
+                    f"{identity[0]} {entity_id!r}"
                 )
+    return {(str(row["source_type"]), str(row["source_id"])) for row in rows}

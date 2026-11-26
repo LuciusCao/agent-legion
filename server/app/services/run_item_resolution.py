@@ -16,11 +16,7 @@ from typing import Any
 
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.run_item_client_token import item_client_token, scoped_entity_id
-from server.app.services.run_item_params import (
-    check_token_params,
-    input_with_params,
-    validate_run_item_params,
-)
+from server.app.services.run_item_params import input_with_params, validate_run_item_params
 
 
 def create_run_response(
@@ -86,9 +82,7 @@ def resolve_run_items(job_db: Any, workspace_id: str, items: list[dict[str, Any]
     _resolve_materials(job_db, workspace_id, material_specs, resolved)
     _resolve_bundles(job_db, workspace_id, bundle_specs, resolved)
     _resolve_refs(job_db, ref_specs, resolved)
-    candidates = [resolved[index] for index in sorted(resolved)]
-    check_token_params(job_db, workspace_id, candidates)
-    return candidates
+    return [resolved[index] for index in sorted(resolved)]
 
 
 def _resolve_materials(

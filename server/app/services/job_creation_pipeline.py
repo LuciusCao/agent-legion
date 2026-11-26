@@ -41,7 +41,7 @@ from server.app.services.agent_node_profile_catalog import legacy_agent_catalog
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
-from server.app.services.run_item_params import check_token_params
+from server.app.services.run_item_params import dedup_keys_with_valid_params
 from server.app.services.run_partial_failure import (
     compensate_partial_creation,
     raise_compensated_partial_creation,
@@ -144,12 +144,9 @@ class JobCreationPipeline:
         resource-pins job-id namespace, so a same-token retry cannot hide a
         params change behind ordinary duplicate filtering.
         """
-        existing_keys = self.probe_existing_keys(
-            workspace_id,
-            [(str(c["entity_type"]), str(c["entity_id"])) for c in candidates],
-            resource_pins_hash,
+        existing_keys = dedup_keys_with_valid_params(
+            self.job_db, workspace_id, candidates, resource_pins_hash
         )
-        check_token_params(self.job_db, workspace_id, candidates, resource_pins_hash, existing_keys)
         fresh: list[dict[str, Any]] = []
         for candidate in candidates:
             key = (str(candidate["entity_type"]), str(candidate["entity_id"]))

@@ -12,6 +12,7 @@ from collections.abc import Iterable, Iterator
 from typing import Any, TypeVar
 
 from server.app.jobs.queries.connection import ConnectionQueriesMixin
+from server.app.jobs.queries.job_dedup_inputs import fetch_dedup_inputs
 
 # One IN probe per ≤500 ids — the same bound as the intake resolver chunk
 # (job_intake_chunks.INTAKE_RESOLUTION_CHUNK_SIZE).
@@ -125,3 +126,13 @@ class RunItemProbeQueriesMixin(ConnectionQueriesMixin):
                 rows = conn.execute(sql.format(pairs=placeholders), params).fetchall()
                 existing.update((str(r["source_type"]), str(r["source_id"])) for r in rows)
         return existing
+
+    def filter_existing_dedup_inputs(
+        self,
+        workspace_id: str,
+        keys: Iterable[tuple[str, str]],
+        resource_pins_hash: str = "",
+    ) -> list[dict[str, Any]]:
+        """Actual dedup-hit rows with frozen input, in the same pins namespace."""
+        with self._connect_read() as conn:
+            return fetch_dedup_inputs(conn, workspace_id, keys, resource_pins_hash)
