@@ -267,6 +267,12 @@ def test_upgrade_workflow_async(workspace, job_db, settings) -> None:
 
 
 def test_package_async_marks_eligibility_and_packages_once(workspace, job_db, settings) -> None:
+    preserved = {
+        "source.mp4": b"\x00source-video\xff",
+        "source_input.json": b'{"keep":"input"}',
+        "intermediate.tmp": b"keep intermediate",
+    }
+
     def _complete(source_id: str) -> dict[str, Any]:
         job = _create_job(job_db, WORKSPACE, source_id, status="completed")
         job_dir = resolve_job_dir(job, settings.jobs_dir)
@@ -274,6 +280,8 @@ def test_package_async_marks_eligibility_and_packages_once(workspace, job_db, se
         (job_dir / "question_context.json").write_text(
             f'{{"question_id":"{source_id}"}}', encoding="utf-8"
         )
+        for name, content in preserved.items():
+            (job_dir / name).write_bytes(content)
         return job
 
     done_a = _complete("PK-a")
@@ -300,6 +308,9 @@ def test_package_async_marks_eligibility_and_packages_once(workspace, job_db, se
             ([str(done_a["id"]), str(done_b["id"])],),
         ).fetchall()
     assert [row["packed"] for row in packed] == [1, 1]
+    for job in (done_a, done_b):
+        job_dir = resolve_job_dir(job, settings.jobs_dir)
+        assert {name: (job_dir / name).read_bytes() for name in preserved} == preserved
 
 
 def test_clear_packed_async(workspace, job_db, settings) -> None:

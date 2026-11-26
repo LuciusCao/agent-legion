@@ -170,6 +170,26 @@ def test_package_creates_workspace_package_record_and_marks_jobs_packed(
     assert job_db.get_job(completed_b["id"])["packed"] == 1
 
 
+def test_package_preserves_source_and_unlisted_files(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path, str(job_db.dsn_identity))
+    service = JobPackageService(job_db, settings)
+    completed = _create_job(job_db, "pkg-ws-preserve", "Q325", status="completed")
+    job_dir = resolve_job_dir(completed, settings.jobs_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    preserved = {
+        "source.mp4": b"\x00source-video\xff",
+        "source_input.json": b'{"keep":"input"}',
+        "intermediate.tmp": b"keep intermediate",
+    }
+    for name, content in preserved.items():
+        (job_dir / name).write_bytes(content)
+
+    response = service.package("pkg-ws-preserve", [completed["id"]])
+
+    assert response["succeeded_count"] == 1
+    assert {name: (job_dir / name).read_bytes() for name in preserved} == preserved
+
+
 def test_clear_packed_status_keeps_package_history(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path, str(job_db.dsn_identity))
     service = JobPackageService(job_db, settings)

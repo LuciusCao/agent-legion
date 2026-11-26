@@ -49,7 +49,7 @@ def _write_test_workflow(tmp_path: Path) -> Path:
         "    label: Branch A\n"
         "    capability: branch_a\n"
         "    after: [prepare]\n"
-        "    inputs: [prepare.json]\n"
+        "    inputs: [prepare.json, source.mp4]\n"
         "    outputs: [branch_a.json]\n"
         "  branch_b:\n"
         "    label: Branch B\n"
@@ -93,6 +93,8 @@ class _RecordingExecutor:
         return True
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
+        if context.node_key == "branch_a":
+            (context.job_dir / "source.mp4").read_bytes()
         self.runs.append(
             {
                 "job_id": context.job_id,
@@ -214,6 +216,11 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         )
         assert batch_response.status_code == 200
         job_id = batch_response.json()["jobs"][0]["id"]
+        job = app.state.job_db.get_job(job_id)
+        storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        source_path = storage_dir / "source.mp4"
+        source_path.write_bytes(b"source-video")
 
         # 1. List summary shows persisted Nodes.
         list_response = client.get(f"/api/workspaces/{workspace_id}/jobs")
@@ -269,22 +276,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert statuses["merge"] == "completed"
         assert detail["job"]["status"] == "completed"
 
-        # 5. rerun invalidates only selected Node and descendants.
-        rerun_response = client.post(f"/api/jobs/{job_id}/nodes/branch_a/rerun")
-        assert rerun_response.status_code == 200
-        assert rerun_response.json()["status"] == "succeeded"
-
-        _drain(worker)
-
-        detail_response = client.get(f"/api/jobs/{job_id}")
-        detail = detail_response.json()
-        statuses = _node_statuses(detail)
-        assert statuses["prepare"] == "completed"
-        assert statuses["branch_a"] == "completed"
-        assert statuses["branch_b"] == "completed"
-        assert statuses["merge"] == "completed"
-
-        # 6. logs are readable through the safe endpoint.
+        # 5. logs are readable through the safe endpoint.
         runs = detail["runs"]
         assert runs
         run_id = runs[-1]["id"]
@@ -292,7 +284,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert log_response.status_code == 200
         assert "completed" in log_response.json()["log"]
 
-        # 7. package includes completed Job artifacts.
+        # 6. package includes completed Job artifacts.
         package_response = client.post(
             f"/api/workspaces/{workspace_id}/jobs/package",
             json={"job_ids": [job_id]},
@@ -314,6 +306,23 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         # workspace_artifact_names).
         assert any("prepare.json" in name for name in names)
         assert any("merge.json" in name for name in names)
+
+        # 7. rerun a source-dependent Node after packaging.
+        rerun_response = client.post(f"/api/jobs/{job_id}/nodes/branch_a/rerun")
+        assert rerun_response.status_code == 200
+        assert rerun_response.json()["status"] == "succeeded"
+
+        _drain(worker)
+
+        detail_response = client.get(f"/api/jobs/{job_id}")
+        detail = detail_response.json()
+        statuses = _node_statuses(detail)
+        assert statuses["prepare"] == "completed"
+        assert statuses["branch_a"] == "completed"
+        assert statuses["branch_b"] == "completed"
+        assert statuses["merge"] == "completed"
+        assert detail["job"]["status"] == "completed"
+        assert source_path.read_bytes() == b"source-video"
 
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)
