@@ -43,24 +43,16 @@ from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
-# Effects the newest migration (v107, shared_resources) must leave behind so
-# the undo step rewinds a current-shape database to exactly v106.
-_NEWEST_MIGRATION_TABLES: tuple[str, ...] = (
-    "shared_resource_job_pins",
-    "shared_resource_selections",
-    "shared_resource_files",
-    "shared_resource_grants",
-    "shared_resource_versions",
-    "shared_resources",
-)
+# Effects the newest migration (v108, release_manifest) must leave behind so
+# the undo step rewinds a current-shape database to exactly v107.
+_NEWEST_MIGRATION_TABLES: tuple[str, ...] = ("workspace_release_manifests",)
 _NEWEST_MIGRATION_COLUMNS: tuple[tuple[str, str, str], ...] = ()
 _NEWEST_MIGRATION_INDEXES: tuple[str, ...] = ()
-_NEWEST_MIGRATION_NAME = "shared_resources"
+_NEWEST_MIGRATION_NAME = "release_manifest"
 # (table, column DDL) pairs re-created by the undo step.
 _NEWEST_MIGRATION_COLUMNS_RESTORE: tuple[tuple[str, str], ...] = ()
 _NEWEST_MIGRATION_UNDO_DDL: tuple[str, ...] = (
-    "drop function if exists shared_resource_ready_files_immutable()",
-    "drop function if exists shared_resource_ready_version_immutable()",
+    "drop function if exists workspace_release_manifest_immutable()",
 )
 
 # (table, column, data_type) and (table, index, indexdef) triples.

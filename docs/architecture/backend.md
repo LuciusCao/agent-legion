@@ -330,6 +330,9 @@ server/app/
 | GET | `/workspaces/{workspace_id}/api-tokens` | `list_api_tokens` | routes/workspace_api_tokens.py |
 | DELETE | `/workspaces/{workspace_id}/api-tokens/{token_id}` | `revoke_api_token` | routes/workspace_api_tokens.py |
 | PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/workspace_configuration.py |
+| GET | `/workspaces/{workspace_id}/release-manifest` | `get_workspace_release_manifest` | routes/workspace_release_manifests.py |
+| PUT | `/workspaces/{workspace_id}/release-manifest` | `update_workspace_release_manifest` | routes/workspace_release_manifests.py |
+| GET | `/workspaces/{workspace_id}/release-manifest/revisions` | `list_workspace_release_manifest_revisions` | routes/workspace_release_manifests.py |
 | GET | `/workspaces/{workspace_id}/node-runs` | `list_workspace_runs` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/runtime-models` | `get_workspace_runtime_models` | routes/workspace_runtime_models.py |
@@ -741,6 +744,11 @@ server/app/
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, previewHidden: list[str] | None | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/workspace_execution_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, execution_con... | app/routes/workspace_execution_contracts.py |
+| WorkspaceReleaseManifestUpdateRequest | BaseModel | artifact_names: list[str], expected_revision: int | app/routes/workspace_release_manifest_contracts.py |
+| WorkspaceReleaseManifestRecord | BaseModel | workspace_id: str, revision: int, artifact_names: list[str], manifest_hash: s... | app/routes/workspace_release_manifest_contracts.py |
+| WorkspaceReleaseManifestHistoryResponse | BaseModel | revisions: list[WorkspaceReleaseManifestRecord] | app/routes/workspace_release_manifest_contracts.py |
+| WorkspaceReleaseManifestConflictDetail | BaseModel | message: str, expected_revision: int, current_manifest: WorkspaceReleaseManif... | app/routes/workspace_release_manifest_contracts.py |
+| WorkspaceReleaseManifestConflictResponse | BaseModel | detail: WorkspaceReleaseManifestConflictDetail | app/routes/workspace_release_manifest_contracts.py |
 | WorkspaceRuntimeModelsResponse | BaseModel | runtimes: dict[str, dict[str, list[str]]] | app/routes/workspace_runtime_models.py |
 | WorkspaceSecretSetRequest | BaseModel | value: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretMetadata | BaseModel | name: str, created_at: str, updated_at: str | app/routes/workspace_secrets.py |
@@ -1040,6 +1048,14 @@ Studio 分离改造把 workflow 编辑分成两条通道。**结构通道**（�
 - 解析链（EXEC-RUNTIME-DISPATCH-001）：新 dispatch 严格从 active revision 的节点 `execution.*` 解析，必填缺失即报错，版本表不是解析输入；claim 重解析仅对已入队请求保留 current revision 节点值 → manifest `execution_defaults` → enqueue-frozen execution 的只读兼容链，该 fallback 不是新 dispatch 的全局来源；在途 job 持 intake 冻结快照，快照语义不受 runtime 保存影响。
 - 与「升级 workflow」的关系：already_current 判定按 revision id + definition_json 实际内容比对——runtime 保存不改 revision id 但改 definition_json，因此钉在同一 revision 上的既有 job 在 runtime 保存后**不**判 already_current，走既有升级路径把快照 re-pin 到新内容；正在执行的节点不受回追影响（其 manifest/快照在 dispatch/claim 时已冻结）。回滚同理等价于一次 runtime 保存。
 
+### Workspace 发布清单（#120）
+
+发布清单是 workspace 级、仅由通用 artifact 名称组成的发布范围声明，与节点 outputs 和 active workflow revision 分离；平台模型不包含业务参数。当前清单是最大 revision 的不可变行，未落行时表示隐式 revision 0 空清单。每次有效更新在 workspace 写锁内校验 `expected_revision` 后追加 revision，冲突返回当前清单；相同内容的保存不追加空历史。名称经共享下载白名单与 canonical POSIX 路径校验，落库前去重排序，并以 canonical JSON 的 SHA-256 作为 `manifest_hash`，供后续发布操作精确固定 revision/hash。
+
+- API：`GET /workspaces/{id}/release-manifest` 读取当前清单，`PUT` 全量替换名称（新增与删除都通过下一次 PUT 表达），`GET .../release-manifest/revisions` 按 revision 倒序读取完整历史。读取允许 viewer/editor/admin，写入要求 editor/admin，并拒绝 Studio scoped token 直接产生副作用。
+- schema v108 只为迁移时已经存在的 workspace 写入 revision 1：范围固定为旧打包的三项通用文件（`result.json`、`metadata.json`、`report.md`）加当时 active revision 的全部节点 outputs；无 active revision 时仅保留三项通用文件。迁移后创建或修改 active revision 不会重算该行，之后创建的 workspace 从空清单开始。
+- 数据库触发器拒绝历史行 UPDATE/DELETE；workspace 自身删除仍可级联清理其清单历史。service 只经 `WorkspaceReleaseManifestQueries` adjunct 使用 JobQueries 的 `read()` / `write()`，不接触 DSN 或事务原语。本片只提供清单基座，不把既有打包执行自动切换到新清单。
+
 ## Database
 
 - PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
@@ -1052,6 +1068,7 @@ Studio 分离改造把 workflow 编辑分成两条通道。**结构通道**（�
   - `job_artifacts` — Job 产物清单（权威副本在实例对象存储，schema v54）
   - `workflow_revisions` — workflow 版本修订历史
   - `workflow_runtime_config_versions` — runtime 通道配置版本（schema v102，M47）：每次 runtime 保存追加一条不可变行（runtime 切片 + 变更键清单 + 操作者），审计与回滚来源；不参与 dispatch 解析链
+  - `workspace_release_manifests` — workspace 发布清单的 append-only revision 历史（schema v108，#120）：canonical artifact 名称数组、内容 hash、操作者与时间戳；最大 revision 为当前值，无行时为隐式空 revision 0
   - `studio_publish_requests` — agent 发起的 workflow 发布握手（schema v76，#416：pending → superseded/confirmed/rejected/expired 状态机，agent 经 MCP 挂起、用户在 Studio 确认）
   - `ops_runtime_profile_samples` — 运行画像 L1 指标（schema v72，#359：ops-metrics 采样循环每分钟一行六段管线指标 + 瓶颈分类，retention 共用 `monitoring.retention_days`）
   - `run_job_status_counts` — run 级 job 状态计数快照（schema v73，#358：触发器维护，run 详情读取从 group-by 变 PK 点查）

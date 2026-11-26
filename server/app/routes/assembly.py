@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from ..auth.studio_authoring import require_studio_authoring
 from ..auth.workspace_access import require_job_workspace_access, require_workspace_access
 from ..services.shared_resources.service import SharedResourcesService
+from ..services.workspace_release_manifests import WorkspaceReleaseManifestsService
 from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
@@ -41,6 +42,7 @@ from .workspace_agent_catalog import create_workspace_agent_catalog_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_api_tokens import create_workspace_api_tokens_router
 from .workspace_configuration import create_workspace_configuration_router
+from .workspace_release_manifests import create_workspace_release_manifests_router
 from .workspace_settings import create_workspace_settings_router
 from .workspace_shared_materials import create_workspace_shared_materials_router
 from .workspace_shared_materials_propagate import (
@@ -72,6 +74,9 @@ def assemble_router(deps: RouterDeps) -> APIRouter:
     router.include_router(create_connections_router(deps.job_db, deps.settings))
     router.include_router(create_infra_connections_router(deps.job_db))
     secured(create_packages_router(deps.job_db, deps.settings, deps.job_packages))
+    secured(
+        create_workspace_release_manifests_router(WorkspaceReleaseManifestsService(deps.job_db))
+    )
     secured(create_worker_router(deps.workspace_worker_control))
     worker_plane = _require_all_or_none(
         (deps.agent_broker, deps.agent_worker_registry, deps.agent_completion),

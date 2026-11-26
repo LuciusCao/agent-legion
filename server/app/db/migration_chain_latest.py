@@ -11,6 +11,7 @@ from server.app.db.migrations.job_batch_operations import (
     migrate_job_batch_operations_archive,
 )
 from server.app.db.migrations.job_node_needs_capacity import migrate_job_node_needs_capacity
+from server.app.db.migrations.release_manifest import migrate_release_manifest
 from server.app.db.migrations.shared_resources import migrate_shared_resources
 from server.app.db.migrations.workflow_execution_defaults_retirement import (
     migrate_workflow_execution_defaults_retirement,
@@ -53,4 +54,6 @@ LATEST_MIGRATIONS: list[SchemaMigration] = [
     SchemaMigration(106, "job_node_needs_capacity", migrate_job_node_needs_capacity),
     # v107 (#1553): immutable shared resources, grants, explicit selections and pins.
     SchemaMigration(107, "shared_resources", migrate_shared_resources),
+    # v108 (#120): append-only release manifests with a one-time legacy-scope backfill.
+    SchemaMigration(108, "release_manifest", migrate_release_manifest),
 ]

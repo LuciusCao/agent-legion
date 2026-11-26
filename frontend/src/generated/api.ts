@@ -2876,6 +2876,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/release-manifest': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace Release Manifest */
+    get: operations['get_workspace_release_manifest_api_workspaces__workspace_id__release_manifest_get']
+    /** Update Workspace Release Manifest */
+    put: operations['update_workspace_release_manifest_api_workspaces__workspace_id__release_manifest_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/release-manifest/revisions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workspace Release Manifest Revisions */
+    get: operations['list_workspace_release_manifest_revisions_api_workspaces__workspace_id__release_manifest_revisions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/run-batches': {
     parameters: {
       query?: never
@@ -9530,6 +9565,45 @@ export interface components {
       /** Updated At */
       updated_at: string
     }
+    /** WorkspaceReleaseManifestConflictDetail */
+    WorkspaceReleaseManifestConflictDetail: {
+      current_manifest: components['schemas']['WorkspaceReleaseManifestRecord']
+      /** Expected Revision */
+      expected_revision: number
+      /** Message */
+      message: string
+    }
+    /** WorkspaceReleaseManifestConflictResponse */
+    WorkspaceReleaseManifestConflictResponse: {
+      detail: components['schemas']['WorkspaceReleaseManifestConflictDetail']
+    }
+    /** WorkspaceReleaseManifestHistoryResponse */
+    WorkspaceReleaseManifestHistoryResponse: {
+      /** Revisions */
+      revisions: components['schemas']['WorkspaceReleaseManifestRecord'][]
+    }
+    /** WorkspaceReleaseManifestRecord */
+    WorkspaceReleaseManifestRecord: {
+      /** Artifact Names */
+      artifact_names: string[]
+      /** Created At */
+      created_at: string | null
+      /** Created By */
+      created_by: string
+      /** Manifest Hash */
+      manifest_hash: string
+      /** Revision */
+      revision: number
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** WorkspaceReleaseManifestUpdateRequest */
+    WorkspaceReleaseManifestUpdateRequest: {
+      /** Artifact Names */
+      artifact_names: string[]
+      /** Expected Revision */
+      expected_revision: number
+    }
     /** WorkspaceResponse */
     WorkspaceResponse: {
       workspace: components['schemas']['WorkspaceRecord']
@@ -15802,6 +15876,112 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['QualityReplayResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workspace_release_manifest_api_workspaces__workspace_id__release_manifest_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceReleaseManifestRecord']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_workspace_release_manifest_api_workspaces__workspace_id__release_manifest_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkspaceReleaseManifestUpdateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceReleaseManifestRecord']
+        }
+      }
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceReleaseManifestConflictResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workspace_release_manifest_revisions_api_workspaces__workspace_id__release_manifest_revisions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceReleaseManifestHistoryResponse']
         }
       }
       /** @description Validation Error */
