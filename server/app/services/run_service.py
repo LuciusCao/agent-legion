@@ -44,7 +44,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
-from server.app.services import run_batch
+from server.app.services import run_batch, run_item_params
 from server.app.services.job_creation_pipeline import JobCreationPipeline
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.run_batches.feeding_gate import batch_with_feeding_gate
@@ -173,7 +173,8 @@ class RunService:
         )
         precreated, created, freeze = accepted or (None, False, {})
         pins_hash = resource_pins_hash(freeze)
-        fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates, pins_hash)
+        with run_item_params.empty_run_guard(self.job_db, precreated, created):
+            fresh = self.pipeline.collect_fresh_candidates(workspace_id, candidates, pins_hash)
         if not fresh and accepted is not None:
             assert precreated is not None
             if not created:

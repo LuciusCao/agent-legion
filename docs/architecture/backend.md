@@ -553,9 +553,9 @@ server/app/
 | RunAcceptedResponse | BaseModel | run: RunRecord, batch: RunBatchRecord | app/routes/run_contracts.py |
 | RunJobStats | BaseModel | total: int, by_status: dict[str, int] | app/routes/run_contracts.py |
 | RunDetailResponse | BaseModel | run: RunRecord, job_stats: RunJobStats, batch: RunBatchRecord | None | app/routes/run_contracts.py |
-| RunItemMaterial | BaseModel | type: Literal['material'], material_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
+| RunItemMaterial | BaseModel | type: Literal['material'], material_id: str, client_token: _ClientToken, para... | app/routes/run_item_contracts.py |
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_item_contracts.py |
-| RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
+| RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str, client_token: _ClientToken, params: ... | app/routes/run_item_contracts.py |
 | RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None, client_token: _Cli... | app/routes/run_item_contracts.py |
 | ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_bucket.py |
 | ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
