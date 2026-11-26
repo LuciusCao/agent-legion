@@ -9,6 +9,7 @@ import {
   createRunAsync,
   fetchActiveWorkflowRevision,
 } from '../api'
+import { fetchSharedResourceRunConfirmation } from '../api/sharedResources'
 import { useUiStore } from '../stores/uiStore'
 import { useTaskCenterStore } from '../stores/taskCenterStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -18,6 +19,9 @@ vi.mock('../api', () => ({
   createRun: vi.fn(),
   createRunAsync: vi.fn(),
   fetchActiveWorkflowRevision: vi.fn(),
+}))
+vi.mock('../api/sharedResources', () => ({
+  fetchSharedResourceRunConfirmation: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
@@ -61,6 +65,10 @@ async function submitRefIdCount(count: number) {
 describe('AddItemsDialog 大批量异步受理（#1157 phase3）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue({
+      nodes: [],
+      resources: [],
+    })
     mockFetchRevision.mockRejectedValue(
       Object.assign(new Error('No active workflow revision'), { status: 404 })
     )

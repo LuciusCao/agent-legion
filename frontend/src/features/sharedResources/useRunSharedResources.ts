@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { fetchActiveWorkflowRevision } from '../../api'
-import { listSharedResources } from '../../api/sharedResources'
+import { fetchSharedResourceRunConfirmation } from '../../api/sharedResources'
 import { sharedResourceKeys } from './sharedResourceQueryKeys'
 import { parseWorkflowYaml } from '../workflowStudio/shared/workflowStudioYamlDraft.parse'
 
@@ -27,11 +26,14 @@ export function useRunSharedResources(
   workspaceId: string | undefined,
   enabled: boolean
 ) {
-  const workflowQuery = useQuery({
-    queryKey: ['shared-resource-active-workflow', workspaceId],
-    queryFn: async () => {
+  const confirmationQuery = useQuery({
+    queryKey: [
+      ...sharedResourceKeys.list(workspaceId ?? ''),
+      'run-confirmation',
+    ],
+    queryFn: async ({ signal }) => {
       try {
-        return await fetchActiveWorkflowRevision(workspaceId!)
+        return await fetchSharedResourceRunConfirmation(workspaceId!, signal)
       } catch (error) {
         if ((error as { status?: number }).status === 404) return null
         throw error
@@ -42,27 +44,26 @@ export function useRunSharedResources(
     refetchOnMount: 'always',
   })
   const declaredIds = useMemo(
-    () => workflowSharedResourceIds(workflowQuery.data?.definition_yaml ?? ''),
-    [workflowQuery.data]
+    () =>
+      Array.from(
+        new Set(
+          confirmationQuery.data?.nodes.flatMap((node) => node.resource_ids) ??
+            []
+        )
+      ),
+    [confirmationQuery.data]
   )
-  const resourcesQuery = useQuery({
-    queryKey: sharedResourceKeys.list(workspaceId ?? ''),
-    queryFn: ({ signal }) => listSharedResources(workspaceId!, signal),
-    enabled: enabled && Boolean(workspaceId) && declaredIds.length > 0,
-    staleTime: 0,
-    refetchOnMount: 'always',
-  })
   const resources = declaredIds.map((id) => {
-    const resource = resourcesQuery.data?.resources.find(
-      (item) => item.id === id
+    const resource = confirmationQuery.data?.resources.find(
+      (item) => item.resource_id === id
     )
     return {
       id,
       name: resource?.name ?? '无法读取的资源',
-      version: resource?.current_selection?.version ?? null,
+      version: resource?.version ?? null,
       unavailable:
         !resource ||
-        !resource.current_selection ||
+        resource.version === null ||
         resource.access_status === 'revoked',
     }
   })
@@ -70,13 +71,11 @@ export function useRunSharedResources(
     resources,
     hasResources: declaredIds.length > 0,
     hasUnavailable: resources.some((resource) => resource.unavailable),
-    isLoading: enabled && (workflowQuery.isLoading || resourcesQuery.isLoading),
-    isFetching:
-      enabled && (workflowQuery.isFetching || resourcesQuery.isFetching),
-    isError: workflowQuery.isError || resourcesQuery.isError,
+    isLoading: enabled && confirmationQuery.isLoading,
+    isFetching: enabled && confirmationQuery.isFetching,
+    isError: confirmationQuery.isError,
     refetch: () => {
-      void workflowQuery.refetch()
-      void resourcesQuery.refetch()
+      void confirmationQuery.refetch()
     },
   }
 }

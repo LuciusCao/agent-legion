@@ -9,14 +9,14 @@ import type { ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../testing/testQueryClient'
-import { makeSharedResource } from '../../testing/sharedResourceFixtures'
-import { fetchActiveWorkflowRevision } from '../../api'
-import { listSharedResources } from '../../api/sharedResources'
+import { fetchSharedResourceRunConfirmation } from '../../api/sharedResources'
+import type { SharedResourceRunConfirmationResponse } from './sharedResourceTypes'
 import { useRunSharedResources } from './useRunSharedResources'
 import { SharedResourceRunConfirmation } from './SharedResourceRunConfirmation'
 
-vi.mock('../../api', () => ({ fetchActiveWorkflowRevision: vi.fn() }))
-vi.mock('../../api/sharedResources', () => ({ listSharedResources: vi.fn() }))
+vi.mock('../../api/sharedResources', () => ({
+  fetchSharedResourceRunConfirmation: vi.fn(),
+}))
 
 const wrapper = ({ children }: { children: ReactNode }) => (
   <TestQueryProvider>{children}</TestQueryProvider>
@@ -32,19 +32,29 @@ function RunConfirmationHarness({ enabled }: { enabled: boolean }) {
   )
 }
 
+function confirmation(
+  version = 1,
+  accessStatus = 'active'
+): SharedResourceRunConfirmationResponse {
+  return {
+    nodes: [{ node_key: 'review', resource_ids: ['resource-1'] }],
+    resources: [
+      {
+        resource_id: 'resource-1',
+        name: '通用审核规则',
+        version,
+        access_status: accessStatus,
+      },
+    ],
+  }
+}
+
 describe('useRunSharedResources', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(fetchActiveWorkflowRevision).mockResolvedValue({
-      definition_yaml:
-        'nodes:\n  review:\n    type: code\n    shared_resources: [resource-1]\n',
-    } as never)
-    vi.mocked(listSharedResources).mockResolvedValue({
-      resources: [makeSharedResource()],
-      total: 1,
-      limit: 200,
-      offset: 0,
-    })
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue(
+      confirmation()
+    )
   })
 
   it('创建运行确认读取资源库当前版本', async () => {
@@ -62,12 +72,9 @@ describe('useRunSharedResources', () => {
   })
 
   it('撤销授权或无法确认版本时阻止新运行', async () => {
-    vi.mocked(listSharedResources).mockResolvedValue({
-      resources: [makeSharedResource({ access_status: 'revoked' })],
-      total: 1,
-      limit: 200,
-      offset: 0,
-    })
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue(
+      confirmation(1, 'revoked')
+    )
     const { result } = renderHook(() => useRunSharedResources('ws1', true), {
       wrapper,
     })
@@ -76,29 +83,10 @@ describe('useRunSharedResources', () => {
   })
 
   it('缓存 v1 后重开慢重取只显示确认中，落盘 v2 后才允许提交', async () => {
-    const v2 = makeSharedResource({
-      current_selection: {
-        version_id: 'version-2',
-        version: 2,
-        manifest_hash: 'b'.repeat(64),
-        revision: 4,
-        selected_by: 'admin',
-        updated_at: '2026-01-02T00:00:00Z',
-      },
-    })
-    let resolveV2!: (value: {
-      resources: ReturnType<typeof makeSharedResource>[]
-      total: number
-      limit: number
-      offset: number
-    }) => void
-    vi.mocked(listSharedResources)
-      .mockResolvedValueOnce({
-        resources: [makeSharedResource()],
-        total: 1,
-        limit: 200,
-        offset: 0,
-      })
+    const v2 = confirmation(2)
+    let resolveV2!: (value: SharedResourceRunConfirmationResponse) => void
+    vi.mocked(fetchSharedResourceRunConfirmation)
+      .mockResolvedValueOnce(confirmation())
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
@@ -121,27 +109,30 @@ describe('useRunSharedResources', () => {
 
     rerender(view(false))
     rerender(view(true))
-    await waitFor(() => expect(listSharedResources).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(fetchSharedResourceRunConfirmation).toHaveBeenCalledTimes(2)
+    )
     expect(screen.getByRole('button', { name: '创建运行' })).toBeDisabled()
     expect(screen.getByText('正在重新确认共享资源…')).toBeInTheDocument()
     expect(screen.queryByText('通用审核规则 v1')).not.toBeInTheDocument()
 
     await act(async () => {
-      resolveV2({ resources: [v2], total: 1, limit: 200, offset: 0 })
+      resolveV2(v2)
     })
     expect(await screen.findByText('通用审核规则 v2')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建运行' })).toBeEnabled()
   })
 
-  it('未声明资源时不请求资源库', async () => {
-    vi.mocked(fetchActiveWorkflowRevision).mockResolvedValue({
-      definition_yaml: 'nodes:\n  review:\n    type: code\n',
-    } as never)
+  it('未声明资源时返回空确认', async () => {
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue({
+      nodes: [],
+      resources: [],
+    })
     const { result } = renderHook(() => useRunSharedResources('ws1', true), {
       wrapper,
     })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.hasResources).toBe(false)
-    expect(listSharedResources).not.toHaveBeenCalled()
+    expect(result.current.isError).toBe(false)
   })
 })

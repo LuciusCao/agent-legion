@@ -5,6 +5,7 @@ import type { ReactElement } from 'react'
 import { AddItemsDialog } from './AddItemsDialog'
 import { api, createRun, fetchActiveWorkflowRevision } from '../api'
 import { createMaterialBundle } from '../api/materialsApi'
+import { fetchSharedResourceRunConfirmation } from '../api/sharedResources'
 import { uploadMaterialFile } from '../lib/addItems'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -14,6 +15,9 @@ vi.mock('../api', () => ({
   api: vi.fn(),
   createRun: vi.fn(),
   fetchActiveWorkflowRevision: vi.fn(),
+}))
+vi.mock('../api/sharedResources', () => ({
+  fetchSharedResourceRunConfirmation: vi.fn(),
 }))
 
 vi.mock('../api/materialsApi', async (importOriginal) => {
@@ -85,6 +89,11 @@ describe('AddItemsDialog', () => {
     mockCreateBundle.mockReset()
     mockUpload.mockReset()
     mockFetchRevision.mockReset()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockReset()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue({
+      nodes: [],
+      resources: [],
+    })
     // 默认：workspace 未发布 revision（404）→ 入口契约按 DEFAULT
     // ['material','ref'] 处理（刻意不含 bundle，存量 fail-closed）。
     mockFetchRevision.mockRejectedValue(

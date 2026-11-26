@@ -43,7 +43,7 @@ async function createRunFromFirstMaterial(
   const delay = options?.delayResourcesMs ?? 0
   if (delay > 0) {
     await page.route(
-      `**/${SOURCE_WORKSPACE}/shared-resources?*`,
+      `**/${SOURCE_WORKSPACE}/shared-resource-run-confirmation`,
       async (route) => {
         await new Promise((resolve) => setTimeout(resolve, delay))
         await route.continue()
@@ -69,7 +69,9 @@ async function createRunFromFirstMaterial(
   ).toBeVisible()
   await expect(createButton).toBeEnabled()
   if (delay > 0) {
-    await page.unroute(`**/${SOURCE_WORKSPACE}/shared-resources?*`)
+    await page.unroute(
+      `**/${SOURCE_WORKSPACE}/shared-resource-run-confirmation`
+    )
   }
   await capture(page, `05-run-confirmation-v${version}-desktop`)
   const [response] = await Promise.all([
@@ -373,4 +375,124 @@ test('共享资源三任务接入真实平台，并覆盖版本历史、run 读�
   ).toBe(true)
   await capture(viewerPage, '10-viewer-manage-mobile')
   await viewerContext.close()
+})
+
+test('非全局 editor 在无共享资源的工作区可以创建运行', async ({
+  page,
+  browser,
+}, testInfo) => {
+  const suffix = `${testInfo.project.name}-${testInfo.retry}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+  const workspaceId = `e2e_editor_without_resources_${suffix}`
+  const username = `e2e-editor-${suffix}`
+  const password = 'e2e-editor-password-1'
+  await ensureAdminSession(page)
+  const workspaceResponse = await page.request.post('/api/workspaces', {
+    headers: CSRF_HEADERS,
+    data: { id: workspaceId, name: 'E2E 无资源编辑工作区' },
+  })
+  expect(workspaceResponse.ok()).toBeTruthy()
+  const draftCode = await page.request.put(
+    `/api/workspaces/${workspaceId}/nodes/do_thing/code`,
+    {
+      headers: CSRF_HEADERS,
+      data: {
+        code: "from workspace_libs.node_sdk import entrypoint\n\n@entrypoint\ndef run(ctx):\n    return {'ok': True}\n",
+        change_note: 'E2E resource-free editor run',
+      },
+    }
+  )
+  expect(draftCode.ok()).toBeTruthy()
+  const code = (await draftCode.json()) as { code_hash: string }
+  const publishedCode = await page.request.post(
+    `/api/workspaces/${workspaceId}/nodes/do_thing/code/publish`,
+    { headers: CSRF_HEADERS, data: { expected_hash: code.code_hash } }
+  )
+  expect(publishedCode.ok()).toBeTruthy()
+  const publishedWorkflow = await page.request.post(
+    `/api/workspaces/${workspaceId}/workflow-drafts/publish`,
+    {
+      headers: CSRF_HEADERS,
+      data: {
+        definition_yaml: `key: ${workspaceId}\nlabel: E2E resource-free\nnodes:\n  do_thing:\n    type: code\n    capability: do_thing\n`,
+      },
+    }
+  )
+  expect(publishedWorkflow.ok()).toBeTruthy()
+  expect(((await publishedWorkflow.json()) as { valid: boolean }).valid).toBe(
+    true
+  )
+  const userResponse = await page.request.post('/api/users', {
+    headers: CSRF_HEADERS,
+    data: { username, password, display_name: 'E2E Editor', role: 'member' },
+  })
+  expect(userResponse.ok()).toBeTruthy()
+  const user = (await userResponse.json()) as { id: string }
+  const memberResponse = await page.request.put(
+    `/api/workspaces/${workspaceId}/members`,
+    { headers: CSRF_HEADERS, data: { user_id: user.id, role: 'editor' } }
+  )
+  expect(memberResponse.ok()).toBeTruthy()
+
+  const editorContext = await browser.newContext({
+    baseURL: testInfo.project.use.baseURL,
+    viewport: { width: 1440, height: 900 },
+    deviceScaleFactor: 2,
+    locale: 'zh-CN',
+  })
+  const editorPage = await editorContext.newPage()
+  const login = await editorPage.request.post('/api/auth/login', {
+    headers: CSRF_HEADERS,
+    data: { username, password },
+  })
+  expect(login.ok()).toBeTruthy()
+  const studioRead = await editorPage.request.get(
+    `/api/workspaces/${workspaceId}/workflow-revisions/active`
+  )
+  expect(studioRead.status()).toBe(403)
+  await editorPage.goto(`/workspaces/${workspaceId}`)
+  const confirmationPending = editorPage.waitForResponse(
+    (item) =>
+      item
+        .url()
+        .includes(
+          `/api/workspaces/${workspaceId}/shared-resource-run-confirmation`
+        ) && item.request().method() === 'GET'
+  )
+  await editorPage.getByRole('button', { name: '添加', exact: true }).click()
+  const dialog = editorPage.getByRole('dialog', { name: '添加条目' })
+  const confirmation = await confirmationPending
+  expect(confirmation.ok()).toBeTruthy()
+  expect(await confirmation.json()).toEqual({ nodes: [], resources: [] })
+  await dialog.getByTestId('add-items-file-input').setInputFiles({
+    name: 'editor-run.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('普通编辑创建无共享资源运行\n', 'utf8'),
+  })
+  await expect(dialog.getByText('editor-run.txt')).toBeVisible()
+  const createButton = dialog.getByRole('button', { name: '创建运行' })
+  await expect(createButton).toBeEnabled()
+  await expect(dialog.getByText('本次运行使用的共享资源')).toHaveCount(0)
+  await expect(
+    dialog.getByText('无法确认本次使用的共享资源，请重试后再创建运行。')
+  ).toHaveCount(0)
+  await capture(
+    editorPage,
+    '11-editor-resource-free-run-desktop',
+    '[role="dialog"]'
+  )
+  const [runResponse] = await Promise.all([
+    editorPage.waitForResponse(
+      (item) =>
+        item.url().includes(`/api/workspaces/${workspaceId}/runs`) &&
+        item.request().method() === 'POST'
+    ),
+    createButton.click(),
+  ])
+  expect(runResponse.ok()).toBeTruthy()
+  const run = (await runResponse.json()) as RunResponse
+  expect(run.created_count).toBe(1)
+  await expect(dialog).toBeHidden({ timeout: 15_000 })
+  await editorContext.close()
 })

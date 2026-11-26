@@ -5,6 +5,7 @@ import type { ReactElement } from 'react'
 import { AddItemsDialog } from './AddItemsDialog'
 import { api, createRun, fetchActiveWorkflowRevision } from '../api'
 import { timeoutError } from '../api/requestTimeout'
+import { fetchSharedResourceRunConfirmation } from '../api/sharedResources'
 import { uploadMaterialFile } from '../lib/addItems'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -14,6 +15,9 @@ vi.mock('../api', () => ({
   createRun: vi.fn(),
   createRunAsync: vi.fn(),
   fetchActiveWorkflowRevision: vi.fn(),
+}))
+vi.mock('../api/sharedResources', () => ({
+  fetchSharedResourceRunConfirmation: vi.fn(),
 }))
 
 vi.mock('../lib/addItems', async (importOriginal) => {
@@ -60,6 +64,11 @@ describe('AddItemsDialog 提交兜底（#1157 phase0）', () => {
     mockApi.mockReset()
     mockCreateRun.mockReset()
     mockFetchRevision.mockReset()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockReset()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue({
+      nodes: [],
+      resources: [],
+    })
     vi.mocked(uploadMaterialFile).mockReset()
     // 默认：workspace 未发布 revision（404）→ 入口契约按 DEFAULT 处理。
     mockFetchRevision.mockRejectedValue(

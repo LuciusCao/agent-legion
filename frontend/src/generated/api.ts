@@ -3091,6 +3091,23 @@ export interface paths {
     patch: operations['update_workspace_settings_section_api_workspaces__workspace_id__settings__section__patch']
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/shared-resource-run-confirmation': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Run Confirmation */
+    get: operations['get_run_confirmation_api_workspaces__workspace_id__shared_resource_run_confirmation_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/shared-resources': {
     parameters: {
       query?: never
@@ -7348,6 +7365,31 @@ export interface components {
     /** SharedResourceResponse */
     SharedResourceResponse: {
       resource: components['schemas']['SharedResourceRecord']
+    }
+    /** SharedResourceRunConfirmationNodeRecord */
+    SharedResourceRunConfirmationNodeRecord: {
+      /** Node Key */
+      node_key: string
+      /** Resource Ids */
+      resource_ids: string[]
+    }
+    /** SharedResourceRunConfirmationResourceRecord */
+    SharedResourceRunConfirmationResourceRecord: {
+      /** Access Status */
+      access_status: string
+      /** Name */
+      name: string
+      /** Resource Id */
+      resource_id: string
+      /** Version */
+      version: number | null
+    }
+    /** SharedResourceRunConfirmationResponse */
+    SharedResourceRunConfirmationResponse: {
+      /** Nodes */
+      nodes: components['schemas']['SharedResourceRunConfirmationNodeRecord'][]
+      /** Resources */
+      resources: components['schemas']['SharedResourceRunConfirmationResourceRecord'][]
     }
     /** SharedResourceSelectionRecord */
     SharedResourceSelectionRecord: {
@@ -16273,6 +16315,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceSettingsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_run_confirmation_api_workspaces__workspace_id__shared_resource_run_confirmation_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SharedResourceRunConfirmationResponse']
         }
       }
       /** @description Validation Error */

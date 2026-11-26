@@ -4,6 +4,7 @@ import type { ReactElement } from 'react'
 
 import { AddItemsDialog } from './AddItemsDialog'
 import { api, fetchActiveWorkflowRevision } from '../api'
+import { fetchSharedResourceRunConfirmation } from '../api/sharedResources'
 import { uploadMaterialFile } from '../lib/addItems'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
@@ -13,6 +14,9 @@ vi.mock('../api', () => ({
   api: vi.fn(),
   createRun: vi.fn(),
   fetchActiveWorkflowRevision: vi.fn(),
+}))
+vi.mock('../api/sharedResources', () => ({
+  fetchSharedResourceRunConfirmation: vi.fn(),
 }))
 
 vi.mock('../lib/addItems', async (importOriginal) => {
@@ -86,6 +90,11 @@ describe('AddItemsDialog text filename validation', () => {
     mockApi.mockReset()
     mockUpload.mockReset()
     mockFetchRevision.mockReset()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockReset()
+    vi.mocked(fetchSharedResourceRunConfirmation).mockResolvedValue({
+      nodes: [],
+      resources: [],
+    })
     useUiStore.setState({ toast: null })
     mockWorkspace()
   })

@@ -5,6 +5,7 @@ import type {
   SharedResourceGrantResponse,
   SharedResourceListResponse,
   SharedResourceResponse,
+  SharedResourceRunConfirmationResponse,
   SharedResourceSelectionResponse,
   SharedResourceShareResponse,
   SharedResourceSourceInput,
@@ -44,6 +45,15 @@ export function getSharedResource(
   signal?: AbortSignal
 ): Promise<SharedResourceResponse> {
   return api(resourcePath(workspaceId, resourceId), { signal })
+}
+
+export function fetchSharedResourceRunConfirmation(
+  workspaceId: string,
+  signal?: AbortSignal
+): Promise<SharedResourceRunConfirmationResponse> {
+  return api(`${workspacePath(workspaceId)}/shared-resource-run-confirmation`, {
+    signal,
+  })
 }
 
 export function createSharedResource(

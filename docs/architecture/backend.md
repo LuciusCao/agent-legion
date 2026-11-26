@@ -215,6 +215,7 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/run-batches` | `list_run_batches` | routes/run_batches.py |
 | POST | `/workspaces/{workspace_id}/run-batches/{run_id}/archive` | `archive_run_batch` | routes/run_batches.py |
+| GET | `/workspaces/{workspace_id}/shared-resource-run-confirmation` | `get_run_confirmation` | routes/run_shared_resources.py |
 | POST | `/workspaces/{workspace_id}/runs` | `create_run` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_runs` | routes/runs.py |
 | GET | `/workspaces/{workspace_id}/runs/{run_id}` | `get_run` | routes/runs.py |
@@ -557,6 +558,9 @@ server/app/
 | RunItemRef | BaseModel | type: Literal['ref'], connection_key: str, external_id: str, params: dict[str... | app/routes/run_item_contracts.py |
 | RunItemBundle | BaseModel | type: Literal['bundle'], bundle_id: str, client_token: _ClientToken | app/routes/run_item_contracts.py |
 | RunItemText | BaseModel | type: Literal['text'], content: str, filename: str | None, client_token: _Cli... | app/routes/run_item_contracts.py |
+| SharedResourceRunConfirmationNodeRecord | BaseModel | node_key: str, resource_ids: list[str] | app/routes/run_shared_resource_contracts.py |
+| SharedResourceRunConfirmationResourceRecord | BaseModel | resource_id: str, name: str, version: int | None, access_status: str | app/routes/run_shared_resource_contracts.py |
+| SharedResourceRunConfirmationResponse | BaseModel | nodes: list[SharedResourceRunConfirmationNodeRecord], resources: list[SharedR... | app/routes/run_shared_resource_contracts.py |
 | ProfileBucket | BaseModel | bucket_start: str, intake_runs: int, intake_items: int, pass_count: int, pass... | app/routes/runtime_profile_bucket.py |
 | ProfileVerdict | BaseModel | stage: str, conclusion: str, evidence: dict[str, object] | app/routes/runtime_profile_contracts.py |
 | RuntimeProfileResponse | BaseModel | buckets: list[ProfileBucket], verdict: ProfileVerdict | app/routes/runtime_profile_contracts.py |

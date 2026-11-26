@@ -6,6 +6,8 @@ export type SharedResource = ApiSchemas['SharedResourceRecord']
 export type SharedResourceListResponse =
   ApiSchemas['SharedResourceListResponse']
 export type SharedResourceResponse = ApiSchemas['SharedResourceResponse']
+export type SharedResourceRunConfirmationResponse =
+  ApiSchemas['SharedResourceRunConfirmationResponse']
 export type SharedResourceSourceInput = ApiSchemas['SharedResourceSourceInput']
 export type SharedResourceVersion = ApiSchemas['SharedResourceVersionRecord']
 export type SharedResourceVersionListResponse =
